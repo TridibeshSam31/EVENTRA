@@ -1,4 +1,13 @@
-"""Agent tools package exposing deterministic backend wrappers."""
+"""Agent tools package exposing deterministic backend wrappers and central tool registry."""
+from app.agent.tools.registry import (
+    ToolCategory,
+    ToolStatus,
+    ToolResult,
+    ToolDefinition,
+    ToolRegistry,
+    default_registry,
+    create_default_tool_registry,
+)
 from app.agent.tools.operations_tools import (
     get_event_state,
     get_incidents,
@@ -13,9 +22,26 @@ from app.agent.tools.operations_tools import (
     execute_action,
     verify_action,
     get_decision_trace,
+    start_autonomous_operations,
+    modify_event_plan,
+)
+from app.agent.tools.communication_tools import (
+    contact_provider,
+    negotiate_with_provider,
+    request_provider_approval,
+    confirm_provider_engagement,
+    simulate_provider_response,
+    get_provider_negotiation_history,
 )
 
 __all__ = [
+    "ToolCategory",
+    "ToolStatus",
+    "ToolResult",
+    "ToolDefinition",
+    "ToolRegistry",
+    "default_registry",
+    "create_default_tool_registry",
     "get_event_state",
     "get_incidents",
     "get_incident_details",
@@ -38,17 +64,3 @@ __all__ = [
     "simulate_provider_response",
     "get_provider_negotiation_history",
 ]
-
-from app.agent.tools.operations_tools import (
-    start_autonomous_operations,
-    modify_event_plan,
-)
-
-from app.agent.tools.communication_tools import (
-    contact_provider,
-    negotiate_with_provider,
-    request_provider_approval,
-    confirm_provider_engagement,
-    simulate_provider_response,
-    get_provider_negotiation_history,
-)
