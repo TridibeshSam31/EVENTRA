@@ -1,6 +1,6 @@
-"""Application Configuration Settings"""
+import os
 from typing import List, Union
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -83,10 +83,21 @@ class Settings(BaseSettings):
     OPENWA_WEBHOOK_SECRET: Union[str, None] = None  # HMAC webhook signing secret
     OPENWA_TIMEOUT_SECONDS: int = 10
 
-    LLM_PROVIDER: str = "mock"  # "mock", "gemini", "openai"
-    LLM_MODEL: str = "gemini-1.5-pro"
+    LLM_PROVIDER: str = "mock"  # "mock", "gemini"
+    LLM_MODEL: str = "gemini-3.6-flash"
     LLM_API_KEY: Union[str, None] = None
+    GEMINI_API_KEY: Union[str, None] = None
     LLM_TIMEOUT_SECONDS: int = 30
+
+    @model_validator(mode="after")
+    def sync_llm_credentials(self) -> "Settings":
+        """Ensures single authoritative LLM_API_KEY path, syncing from GEMINI_API_KEY if needed."""
+        if not self.LLM_API_KEY:
+            if self.GEMINI_API_KEY:
+                self.LLM_API_KEY = self.GEMINI_API_KEY
+            elif os.environ.get("GEMINI_API_KEY"):
+                self.LLM_API_KEY = os.environ.get("GEMINI_API_KEY")
+        return self
 
     # Phase 13: Google Maps Scraper Integration
     GOOGLE_MAPS_SCRAPER_URL: str = "http://localhost:8080"
@@ -95,7 +106,7 @@ class Settings(BaseSettings):
     GOOGLE_MAPS_SCRAPER_FALLBACK_TO_MOCK: bool = True
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../../.env", "../.env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",

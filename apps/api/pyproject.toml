@@ -16,3 +16,6 @@ minversion = "8.0"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 asyncio_mode = "auto"
+markers = [
+    "integration: marks tests requiring external service integration (select with '-m integration')",
+]

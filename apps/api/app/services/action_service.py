@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
