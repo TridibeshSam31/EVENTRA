@@ -4,8 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   Sparkles,
-  Mic,
-  MicOff,
   Send,
   ArrowRight,
   CheckCircle2,
@@ -16,16 +14,10 @@ import {
   Layers,
   AlertCircle,
   Play,
-  RotateCcw,
   Plus,
-  Trash2,
   Shield,
-  Camera,
-  Utensils,
-  Music,
-  Truck,
-  Building,
   Radio,
+  Edit3,
 } from "lucide-react";
 import {
   processEventIntake,
@@ -52,14 +44,14 @@ export function ConversationalIntake() {
     {
       id: "welcome",
       sender: "eventra",
-      text: "Tell me what you want to organize. I will build the operational plan, discover and contact providers, and autonomously execute the operations for you.",
+      text: "Tell me what you want to organize. Real Gemini LLM will understand your event requirements, extract facts and preferences, build the canonical specification, and guide operational planning.",
       timestamp: new Date(),
     },
   ]);
 
-  const [isListening, setIsListening] = useState(false);
   const [loading, setLoading] = useState(false);
   const [eventId, setEventId] = useState<string | null>(null);
+  const [intentData, setIntentData] = useState<any>(null);
   const [eventData, setEventData] = useState<any>(null);
   const [planData, setPlanData] = useState<any>(null);
   const [operationsData, setOperationsData] = useState<any>(null);
@@ -67,7 +59,6 @@ export function ConversationalIntake() {
   const [modInput, setModInput] = useState("");
   const [incidentData, setIncidentData] = useState<any>(null);
   const [recoveryLoading, setRecoveryLoading] = useState(false);
-  const [recoveryResult, setRecoveryResult] = useState<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll messages
@@ -91,48 +82,18 @@ export function ConversationalIntake() {
     return () => clearInterval(interval);
   }, [lifecycleState, eventId]);
 
-  // Speech Recognition integration
-  const toggleListening = () => {
-    if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-      alert("Speech recognition is not supported in this browser. Please type your request.");
-      return;
-    }
-
-    if (isListening) {
-      setIsListening(false);
-      return;
-    }
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = false;
-    recognition.lang = "en-IN";
-
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => setIsListening(false);
-    recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
-      setInputMessage(transcript);
-      setIsListening(false);
-    };
-
-    recognition.start();
-  };
-
-  const handleSendMessage = async (textToSend?: string) => {
+  const handleSendMessage = async (textToSend?: string, forcePlanOverride = false) => {
     const text = textToSend || inputMessage;
-    if (!text.trim() || loading) return;
+    if (!text.trim() && !forcePlanOverride) return;
 
+    const msgText = text.trim() || "Confirm and generate plan";
     const userMsgId = String(Date.now());
     const newMessages: Message[] = [
       ...messages,
       {
         id: userMsgId,
         sender: "organizer",
-        text: text.trim(),
+        text: msgText,
         timestamp: new Date(),
       },
     ];
@@ -141,7 +102,7 @@ export function ConversationalIntake() {
     setLoading(true);
 
     // If LIVE and user mentions caterer cancelled, trigger adaptive recovery
-    const textLower = text.toLowerCase();
+    const textLower = msgText.toLowerCase();
     if (
       lifecycleState === "LIVE" &&
       eventId &&
@@ -155,10 +116,14 @@ export function ConversationalIntake() {
 
     try {
       const res = await processEventIntake({
-        message: text.trim(),
+        message: msgText,
         event_id: eventId || undefined,
-        force_plan: false,
+        force_plan: forcePlanOverride,
       });
+
+      if (res.intent) {
+        setIntentData(res.intent);
+      }
 
       if (res.status === "MISSING_INFO") {
         if (res.event_id) setEventId(res.event_id);
@@ -224,11 +189,16 @@ export function ConversationalIntake() {
 
     try {
       const res = await modifyEventPlan(eventId, { modification: modText.trim() });
-      if (res.plan) {
-        setPlanData(res.plan);
-      }
-      if (res.event) {
-        setEventData(res.event);
+      if (res.plan) setPlanData(res.plan);
+      if (res.event) setEventData(res.event);
+      if (res.specification) {
+        setIntentData((prev: any) => ({
+          ...prev,
+          requirements: res.event?.requirements || prev?.requirements,
+          location: res.event?.location || prev?.location,
+          guest_count: res.event?.guest_count || prev?.guest_count,
+          total_budget: res.event?.total_budget || prev?.total_budget,
+        }));
       }
       setMessages([
         ...newMessages,
@@ -297,7 +267,6 @@ export function ConversationalIntake() {
           status: "INCIDENT",
         },
       ]);
-      // Refresh operations data
       const status = await getEventOperationsStatus(eventId);
       setOperationsData(status);
     } catch (err: any) {
@@ -313,7 +282,6 @@ export function ConversationalIntake() {
 
     try {
       const res = await approveRecoveryAction(eventId, incidentData.pending_approval.id);
-      setRecoveryResult(res);
       setMessages((prev) => [
         ...prev,
         {
@@ -325,7 +293,6 @@ export function ConversationalIntake() {
         },
       ]);
       setIncidentData(null);
-      // Refresh operations data
       const status = await getEventOperationsStatus(eventId);
       setOperationsData(status);
     } catch (err: any) {
@@ -336,9 +303,9 @@ export function ConversationalIntake() {
   };
 
   const samplePrompts = [
-    "I want to organize a 500-person corporate conference in Delhi on 15 November 2026. Budget around 8 lakh. I need a venue, catering, AV, photography and transportation.",
+    "Bro mujhe Dholakpur mein shaadi karni hai, around 500 log bulane hain. December mein karne ka soch raha hoon, budget around 12 lakh hai. Ek achha venue chahiye, catering vegetarian honi chahiye, photography aur decoration bhi chahiye.",
     "300-guest wedding in Jaipur on 20 December 2026 with 15 lakh budget for venue, catering, decor, photography and DJ.",
-    "400-student hackathon in Bangalore on 5 October 2026 with 4 lakh budget for venue, catering, AV tech, and security.",
+    "I want to organize a 500-person corporate conference in Delhi on 15 November 2026. Budget around 8 lakh. I need venue, catering, AV, photography and transportation.",
   ];
 
   return (
@@ -351,11 +318,11 @@ export function ConversationalIntake() {
           </div>
           <div>
             <h1 className="text-xl md:text-2xl font-bold tracking-tight text-white">
-              Autonomous Event Operations
+              Real Gemini Event Intake & Specification Engine
             </h1>
             <p className="text-sm text-zinc-400">
-              Describe what you want to organize. EVENTRA builds the plan and autonomously executes
-              discovery, outreach, negotiation, and operations.
+              Natural-language organizer intake powered by Google Gemini structured output,
+              deterministic validation, and canonical event specification compiling.
             </p>
           </div>
         </div>
@@ -417,7 +384,7 @@ export function ConversationalIntake() {
             ))}
             {loading && (
               <div className="flex items-center gap-2 text-xs text-blue-400 italic bg-blue-950/20 border border-blue-900/30 px-3 py-2 rounded-xl w-fit">
-                <Radio className="w-3.5 h-3.5 animate-pulse" /> EVENTRA reasoning & generating operational plan...
+                <Radio className="w-3.5 h-3.5 animate-pulse" /> Real Gemini analyzing natural language & extracting event intent...
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -432,9 +399,9 @@ export function ConversationalIntake() {
                   <button
                     key={idx}
                     onClick={() => handleSendMessage(p)}
-                    className="text-left text-xs bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white px-3 py-2 rounded-xl transition-all"
+                    className="text-left text-xs bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white px-3 py-2 rounded-xl transition-all cursor-pointer"
                   >
-                    "{p.slice(0, 80)}..."
+                    "{p.slice(0, 90)}..."
                   </button>
                 ))}
               </div>
@@ -450,29 +417,14 @@ export function ConversationalIntake() {
               }}
               className="flex items-center gap-2"
             >
-              <button
-                type="button"
-                onClick={toggleListening}
-                className={`p-2.5 rounded-xl border transition-all ${
-                  isListening
-                    ? "bg-red-500/20 border-red-500 text-red-400 animate-pulse"
-                    : "bg-zinc-800 border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-700"
-                }`}
-                title={isListening ? "Listening..." : "Speak requirement"}
-              >
-                {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-              </button>
-
               <input
                 type="text"
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 placeholder={
-                  isListening
-                    ? "Listening to voice input..."
-                    : lifecycleState === "LIVE"
+                  lifecycleState === "LIVE"
                     ? "Type command or 'Catering provider cancelled'..."
-                    : "Describe event details (e.g. 500 pax conference in Delhi, 8L budget)..."
+                    : "Describe event details naturally (e.g. Dholakpur shaadi, 500 log, 12L budget)..."
                 }
                 className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-4 py-2.5 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500 transition-all"
                 disabled={loading}
@@ -489,101 +441,179 @@ export function ConversationalIntake() {
           </div>
         </div>
 
-        {/* Right Column: Operational Plan & Execution Monitor */}
+        {/* Right Column: EVENTRA Structured Understanding & Plan Inspector */}
         <div className="lg:col-span-5 flex flex-col space-y-4">
-          {lifecycleState === "DRAFT" && (
-            <div className="h-[680px] bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-3">
-              <div className="p-4 bg-zinc-800/50 rounded-2xl text-zinc-500">
-                <Layers className="w-8 h-8" />
+          {/* Card 1: EVENTRA UNDERSTANDS (Real Structured Output) */}
+          {(intentData || eventData) ? (
+            <div className="bg-zinc-900/90 border border-blue-900/50 rounded-2xl p-5 space-y-4 shadow-2xl">
+              <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 bg-blue-500/20 text-blue-400 rounded-lg">
+                    <Sparkles className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-blue-400 font-bold">
+                      Real Gemini Structured Understanding
+                    </span>
+                    <h2 className="text-base font-bold text-white">EVENTRA UNDERSTANDS</h2>
+                  </div>
+                </div>
               </div>
-              <h3 className="text-base font-semibold text-zinc-200">Operational Plan Awaiting Intake</h3>
+
+              <div className="space-y-2.5 text-xs">
+                {/* Event Type & Title */}
+                <div className="flex justify-between items-center bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80">
+                  <span className="text-zinc-400 font-medium">Event:</span>
+                  <span className="font-bold text-white">
+                    {(intentData?.event_type || eventData?.event_type || "Wedding").toString().replace("_", " ").toUpperCase()}
+                  </span>
+                </div>
+
+                {/* Location */}
+                <div className="flex justify-between items-center bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80">
+                  <span className="text-zinc-400 font-medium flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-blue-400" /> Location:
+                  </span>
+                  <span className="font-semibold text-white">
+                    {intentData?.location || eventData?.location || "Not specified"}
+                  </span>
+                </div>
+
+                {/* Guests */}
+                <div className="flex justify-between items-center bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80">
+                  <span className="text-zinc-400 font-medium flex items-center gap-1">
+                    <Users className="w-3.5 h-3.5 text-blue-400" /> Guests:
+                  </span>
+                  <span className="font-semibold text-white">
+                    {intentData?.guest_count || eventData?.guest_count ? `${intentData?.guest_count || eventData?.guest_count} attendees` : "Not specified"}
+                  </span>
+                </div>
+
+                {/* Budget */}
+                <div className="flex justify-between items-center bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80">
+                  <span className="text-zinc-400 font-medium flex items-center gap-1">
+                    <DollarSign className="w-3.5 h-3.5 text-green-400" /> Budget:
+                  </span>
+                  <span className="font-semibold text-white">
+                    {intentData?.total_budget || eventData?.total_budget
+                      ? `₹${Number(intentData?.total_budget || eventData?.total_budget).toLocaleString()}`
+                      : "Not specified"}
+                  </span>
+                </div>
+
+                {/* Date */}
+                <div className="flex justify-between items-center bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80">
+                  <span className="text-zinc-400 font-medium flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-purple-400" /> Date:
+                  </span>
+                  <span className="font-semibold text-white">
+                    {intentData?.date_expression || (eventData?.start_time ? new Date(eventData.start_time).toLocaleDateString() : "Exact date missing")}
+                  </span>
+                </div>
+
+                {/* Services Needed */}
+                <div className="bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80 space-y-1.5">
+                  <span className="text-zinc-400 font-medium block">Services Needed:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {(intentData?.requirements || eventData?.requirements || ["VENUE", "CATERING", "PHOTOGRAPHY", "DECOR"]).map((req: string, idx: number) => (
+                      <span key={idx} className="px-2 py-0.5 bg-blue-950/60 border border-blue-800/50 text-blue-300 text-[11px] rounded-md font-medium">
+                        ✓ {req.toString().replace("_", " ").toUpperCase()}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Preferences */}
+                {intentData?.preferences && intentData.preferences.length > 0 && (
+                  <div className="bg-zinc-950/60 p-2.5 rounded-xl border border-zinc-800/80 space-y-1">
+                    <span className="text-zinc-400 font-medium block">Preferences:</span>
+                    <div className="text-zinc-300 text-[11px]">
+                      {intentData.preferences.join(", ")}
+                    </div>
+                  </div>
+                )}
+
+                {/* Still Needed / Missing Info */}
+                {intentData?.missing_information && intentData.missing_information.length > 0 && (
+                  <div className="bg-amber-950/30 border border-amber-900/40 p-2.5 rounded-xl space-y-1">
+                    <span className="text-amber-400 font-semibold flex items-center gap-1 text-[11px]">
+                      <AlertCircle className="w-3.5 h-3.5" /> Still Needed:
+                    </span>
+                    {intentData.missing_information.map((m: string, idx: number) => (
+                      <div key={idx} className="text-amber-200/90 text-[11px]">• {m}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Confirm / Edit Action Controls */}
+              <div className="flex gap-2 pt-2 border-t border-zinc-800">
+                <button
+                  onClick={() => handleSendMessage("Confirm requirements and build plan", true)}
+                  disabled={loading}
+                  className="flex-1 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-1 transition-all cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" /> Confirm Specification
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="h-[200px] bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-6 flex flex-col items-center justify-center text-center space-y-3">
+              <div className="p-3 bg-zinc-800/50 rounded-2xl text-zinc-500">
+                <Layers className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-semibold text-zinc-300">Structured Intent Awaiting Input</h3>
               <p className="text-xs text-zinc-400 max-w-xs">
-                Describe your event requirements in the chat or speak. EVENTRA will generate tasks, dependencies, resources, and budget allocations.
+                Describe your event requirements. Real Gemini will extract structured intent and detect missing information.
               </p>
             </div>
           )}
 
-          {/* Operational Plan Card */}
+          {/* Operational Plan Overview Card */}
           {lifecycleState === "PLANNED" && planData && eventData && (
-            <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 space-y-5 shadow-2xl">
+            <div className="bg-zinc-900/90 border border-zinc-800 rounded-2xl p-5 space-y-4 shadow-2xl">
               <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
                 <div>
                   <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-full font-semibold">
-                    Plan Ready for Review
+                    Plan Generated
                   </span>
-                  <h2 className="text-lg font-bold text-white mt-1.5">{eventData.name}</h2>
+                  <h2 className="text-base font-bold text-white mt-1">{eventData.name}</h2>
                 </div>
               </div>
 
-              {/* Event Attributes Grid */}
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div className="bg-zinc-950/60 border border-zinc-800/80 p-3 rounded-xl space-y-1">
-                  <div className="text-zinc-400 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-blue-400" /> Location
-                  </div>
-                  <div className="font-semibold text-white">{eventData.location}</div>
+              {/* Execution Tasks summary */}
+              <div className="bg-zinc-950/60 border border-zinc-800/80 p-3 rounded-xl space-y-1 text-xs">
+                <div className="text-zinc-400 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-purple-400" /> Executable Tasks & Milestones
                 </div>
-                <div className="bg-zinc-950/60 border border-zinc-800/80 p-3 rounded-xl space-y-1">
-                  <div className="text-zinc-400 flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-blue-400" /> Attendees
-                  </div>
-                  <div className="font-semibold text-white">{eventData.guest_count} guests</div>
-                </div>
-                <div className="bg-zinc-950/60 border border-zinc-800/80 p-3 rounded-xl space-y-1">
-                  <div className="text-zinc-400 flex items-center gap-1.5">
-                    <DollarSign className="w-3.5 h-3.5 text-green-400" /> Total Budget
-                  </div>
-                  <div className="font-semibold text-white">
-                    {eventData.currency === "INR" ? "₹" : "$"}
-                    {Number(eventData.total_budget).toLocaleString()}
-                  </div>
-                </div>
-                <div className="bg-zinc-950/60 border border-zinc-800/80 p-3 rounded-xl space-y-1">
-                  <div className="text-zinc-400 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-purple-400" /> Execution Tasks
-                  </div>
-                  <div className="font-semibold text-white">
-                    {planData.summary?.total_tasks || 0} tasks ({planData.summary?.critical_path_tasks || 0} critical)
-                  </div>
+                <div className="font-semibold text-white">
+                  {planData.summary?.total_tasks || 0} tasks ({planData.summary?.critical_path_tasks || 0} critical path)
                 </div>
               </div>
 
-              {/* Active Sourcing Requirements */}
-              <div className="space-y-2">
-                <div className="text-xs font-semibold text-zinc-300">Operational Sourcing Slices:</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {eventData.requirements?.map((req: string, idx: number) => (
-                    <span
-                      key={idx}
-                      className="px-2.5 py-1 bg-blue-950/40 border border-blue-800/50 text-blue-300 text-xs rounded-lg flex items-center gap-1"
-                    >
-                      <CheckCircle2 className="w-3 h-3 text-blue-400" /> {req.replace("_", " ").toUpperCase()}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Conversational Plan Editor Quick Actions */}
+              {/* Modification Form */}
               <div className="p-3.5 bg-zinc-950/60 border border-zinc-800/80 rounded-xl space-y-2.5">
-                <div className="text-xs font-medium text-zinc-400">Modify Plan:</div>
+                <div className="text-xs font-medium text-zinc-400 flex items-center gap-1">
+                  <Edit3 className="w-3.5 h-3.5 text-blue-400" /> Context-Aware Plan Editor:
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   <button
                     onClick={() => handleModifyPlan("Remove photography and add security")}
-                    className="text-[11px] bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded-md border border-zinc-700 flex items-center gap-1"
+                    className="text-[11px] bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded-md border border-zinc-700 flex items-center gap-1 cursor-pointer"
                   >
                     <Plus className="w-3 h-3 text-blue-400" /> -Photo +Security
                   </button>
                   <button
-                    onClick={() => handleModifyPlan("Increase budget to 10 lakh")}
-                    className="text-[11px] bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded-md border border-zinc-700 flex items-center gap-1"
+                    onClick={() => handleModifyPlan("Increase budget to 15 lakh")}
+                    className="text-[11px] bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded-md border border-zinc-700 flex items-center gap-1 cursor-pointer"
                   >
-                    <DollarSign className="w-3 h-3 text-green-400" /> Budget to 10L
+                    <DollarSign className="w-3 h-3 text-green-400" /> Budget 15L
                   </button>
                   <button
                     onClick={() => handleModifyPlan("Move the event to Gurgaon")}
-                    className="text-[11px] bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded-md border border-zinc-700 flex items-center gap-1"
+                    className="text-[11px] bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded-md border border-zinc-700 flex items-center gap-1 cursor-pointer"
                   >
-                    <MapPin className="w-3 h-3 text-purple-400" /> Move to Gurgaon
+                    <MapPin className="w-3 h-3 text-purple-400" /> Gurgaon
                   </button>
                 </div>
 
@@ -598,7 +628,7 @@ export function ConversationalIntake() {
                     type="text"
                     value={modInput}
                     onChange={(e) => setModInput(e.target.value)}
-                    placeholder="e.g. Remove photography and add security..."
+                    placeholder="e.g. Actually make it 600 guests..."
                     className="flex-1 bg-zinc-900 border border-zinc-700/80 rounded-lg px-3 py-1.5 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-blue-500"
                   />
                   <button
@@ -615,60 +645,30 @@ export function ConversationalIntake() {
               <button
                 onClick={handleStartOperations}
                 disabled={loading}
-                className="w-full py-3.5 bg-gradient-to-r from-green-600 hover:from-green-500 to-emerald-600 hover:to-emerald-500 text-white font-bold text-sm rounded-xl shadow-lg shadow-green-950/40 flex items-center justify-center gap-2 transition-all transform active:scale-95 cursor-pointer"
+                className="w-full py-3 bg-gradient-to-r from-green-600 hover:from-green-500 to-emerald-600 hover:to-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-green-950/40 flex items-center justify-center gap-2 transition-all transform active:scale-95 cursor-pointer"
               >
                 <Play className="w-4 h-4 fill-white" /> START OPERATIONS
               </button>
             </div>
           )}
 
-          {/* Autonomous Operations Execution Monitor */}
+          {/* Live Telemetry monitor when LIVE */}
           {lifecycleState === "LIVE" && operationsData && (
-            <div className="bg-zinc-900/90 border border-green-900/50 rounded-2xl p-5 space-y-4 shadow-2xl max-h-[680px] overflow-y-auto">
+            <div className="bg-zinc-900/90 border border-green-900/50 rounded-2xl p-5 space-y-4 shadow-2xl max-h-[480px] overflow-y-auto">
               <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
                 <div>
                   <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 bg-green-500/20 text-green-400 border border-green-500/30 rounded-full font-semibold flex items-center gap-1 w-fit">
                     <Radio className="w-3 h-3 animate-pulse" /> Operations Active
                   </span>
-                  <h2 className="text-lg font-bold text-white mt-1.5">Live Operations Telemetry</h2>
+                  <h2 className="text-base font-bold text-white mt-1">Live Operations Telemetry</h2>
                 </div>
               </div>
 
-              {/* Sourced Category Execution Rows */}
-              <div className="space-y-2">
-                <div className="text-xs font-semibold text-zinc-400">Autonomous Provider Sourcing:</div>
-                <div className="space-y-1.5">
-                  {(operationsData.assignments || []).map((asg: any, idx: number) => (
-                    <div
-                      key={idx}
-                      className="bg-zinc-950/60 border border-zinc-800 p-2.5 rounded-xl flex items-center justify-between text-xs"
-                    >
-                      <div>
-                        <div className="font-semibold text-white flex items-center gap-1.5">
-                          {asg.category.toUpperCase()}
-                        </div>
-                        <div className="text-zinc-400 text-[11px]">
-                          {asg.vendor_name} {asg.is_simulated ? " [Simulated]" : " [Verified]"}
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/10 text-blue-400 border border-blue-500/30">
-                          ✓ {asg.status}
-                        </span>
-                        <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
-                          ₹{Number(asg.agreed_cost || 0).toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Adaptive Recovery Scenario Card (Golden Path) */}
+              {/* Adaptive Recovery Scenario Card */}
               <div className="p-3.5 bg-zinc-950/80 border border-amber-900/40 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                    <Shield className="w-3.5 h-3.5" /> Adaptive Recovery Scenario
+                    <Shield className="w-3.5 h-3.5" /> Adaptive Recovery Test
                   </div>
                   {!incidentData && (
                     <button
@@ -676,58 +676,26 @@ export function ConversationalIntake() {
                       disabled={recoveryLoading}
                       className="text-[11px] bg-red-600/30 hover:bg-red-600/50 text-red-200 border border-red-500/40 px-2.5 py-1 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
                     >
-                      <AlertCircle className="w-3 h-3" /> Simulate Caterer Cancellation
+                      Simulate Caterer Cancellation
                     </button>
                   )}
                 </div>
 
-                {/* If Incident Triggered */}
                 {incidentData && (
                   <div className="space-y-2.5 pt-2 border-t border-zinc-800">
                     <div className="text-xs text-red-400 font-semibold flex items-center gap-1">
                       <AlertCircle className="w-3.5 h-3.5" /> Task '{incidentData.affected_task?.name}' is BLOCKED
-                    </div>
-                    <div className="text-[11px] text-zinc-300 bg-red-950/30 border border-red-900/40 p-2.5 rounded-lg space-y-1">
-                      <div>• <strong>Impact:</strong> Downstream dependencies at risk</div>
-                      <div>• <strong>Proposed Alternative:</strong> {incidentData.pending_approval?.proposed_vendor}</div>
-                      <div>• <strong>Cost Impact:</strong> ₹{Number(incidentData.pending_approval?.proposed_cost).toLocaleString()}</div>
                     </div>
                     <button
                       onClick={handleApproveRecovery}
                       disabled={recoveryLoading}
                       className="w-full py-2 bg-green-600 hover:bg-green-500 text-white font-bold text-xs rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
                     >
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Authorize & Execute Replacement
+                      Authorize & Execute Replacement
                     </button>
                   </div>
                 )}
               </div>
-
-              {/* Real-time Activity Feed from Audit Log */}
-              <div className="space-y-2">
-                <div className="text-xs font-semibold text-zinc-400 flex items-center gap-1.5">
-                  <Radio className="w-3 h-3 text-blue-400 animate-pulse" /> Live Activity Feed (Authoritative Audit):
-                </div>
-                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                  {(operationsData.activity_feed || []).slice(0, 7).map((item: any, idx: number) => (
-                    <div key={idx} className="text-[11px] bg-zinc-950/60 border border-zinc-800/80 p-2 rounded-lg flex gap-2">
-                      <span className="font-mono text-zinc-500 text-[10px] shrink-0">{item.time}</span>
-                      <div className="flex-1">
-                        <span className="font-semibold text-zinc-200">{item.action}: </span>
-                        <span className="text-zinc-400">{item.detail}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Navigation to Live Command Center */}
-              <button
-                onClick={() => router.push(`/events/${eventId}/live`)}
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-all cursor-pointer"
-              >
-                Open Full Live Command Center <ArrowRight className="w-4 h-4" />
-              </button>
             </div>
           )}
         </div>
@@ -735,4 +703,3 @@ export function ConversationalIntake() {
     </div>
   );
 }
-

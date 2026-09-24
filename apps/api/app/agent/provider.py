@@ -132,6 +132,13 @@ class MockLLMProvider(LLMProvider):
             if isinstance(custom_data, dict):
                 return output_schema.model_validate(custom_data)
 
+        # Smart mock handling for EventIntent and EventChangeProposal in test environments
+        schema_name = getattr(output_schema, "__name__", "")
+        if schema_name == "EventIntent":
+            return self._mock_generate_event_intent(user_prompt, output_schema)
+        elif schema_name == "EventChangeProposal":
+            return self._mock_generate_event_change_proposal(user_prompt, output_schema)
+
         # Build minimal valid mock instance by inspecting fields
         mock_fields: Dict[str, Any] = {}
         for field_name, field_info in output_schema.model_fields.items():
@@ -160,6 +167,251 @@ class MockLLMProvider(LLMProvider):
                     mock_fields[field_name] = f"mock_{field_name}"
 
         return output_schema.model_validate(mock_fields)
+
+    def _mock_generate_event_intent(self, user_prompt: str, output_schema: Type[T]) -> T:
+        """Deterministic mock builder for EventIntent strictly for tests."""
+        import re
+        from app.schemas.event_intent import (
+            EventIntent,
+            BudgetIntent,
+            DateIntent,
+            ServiceRequirementIntent,
+            EventPreferenceIntent,
+            EventConstraintIntent,
+        )
+        from app.services.normalization_utils import parse_indian_number_words, SERVICE_CATEGORY_MAP
+
+        text_lower = user_prompt.lower()
+
+        # 1. Event Type
+        event_type = "OTHER"
+        if any(k in text_lower for k in ["wedding", "shaadi", "marriage", "reception"]):
+            event_type = "WEDDING"
+        elif any(k in text_lower for k in ["conference", "summit", "corporate", "offsite"]):
+            event_type = "CONFERENCE"
+        elif "festival" in text_lower or "diwali" in text_lower:
+            event_type = "FESTIVAL"
+        elif any(k in text_lower for k in ["hackathon", "college fest", "campus fest"]):
+            event_type = "COLLEGE_FEST"
+        elif "birthday" in text_lower:
+            event_type = "BIRTHDAY"
+
+        # 2. Location / City
+        location = None
+        for c in ["dholakpur", "delhi", "gurgaon", "gurugram", "mumbai", "jaipur", "bangalore", "chandigarh", "noida", "pune", "hyderabad", "goa"]:
+            if re.search(rf"\b{re.escape(c)}\b", text_lower):
+                location = "Gurgaon" if c in ("gurgaon", "gurugram") else ("Delhi" if c in ("delhi", "new delhi") else c.title())
+                break
+
+        # 3. Guest Count
+        guest_count = None
+        pax_match = re.search(r"(\d+)\s*[-]?\s*(?:person|people|attendee|attendees|guest|guests|pax|members)", text_lower)
+        if pax_match:
+            guest_count = int(pax_match.group(1))
+        else:
+            words_num_map = {"five hundred": 500, "three hundred": 300, "four hundred": 400, "six hundred": 600}
+            for w, n in words_num_map.items():
+                if w in text_lower:
+                    guest_count = n
+                    break
+            if not guest_count:
+                num_match = re.search(r"\b(\d{2,4})\b", text_lower)
+                if num_match:
+                    val = int(num_match.group(1))
+                    if 20 <= val <= 5000 and not (2020 <= val <= 2035):
+                        guest_count = val
+
+        # 4. Budget
+        budget_obj = None
+        word_budget = parse_indian_number_words(text_lower)
+        if word_budget and word_budget > 0:
+            expr = "around " + text_lower[text_lower.find("lakh"):text_lower.find("lakh")+10] if "lakh" in text_lower else f"₹{word_budget}"
+            is_flex = "stretch" in text_lower or "around" in text_lower or "flexible" in text_lower
+            budget_obj = BudgetIntent(
+                amount=word_budget,
+                currency="INR",
+                expression=expr,
+                is_flexible=is_flex,
+            )
+        else:
+            k_match = re.search(r"(?:\$|usd)?\s*(\d+(?:\.\d+)?)\s*(?:k|thousand)\b", text_lower)
+            if k_match:
+                budget_obj = BudgetIntent(
+                    amount=float(k_match.group(1)) * 1000.0,
+                    currency="USD",
+                    expression=k_match.group(0),
+                    is_flexible="around" in text_lower,
+                )
+
+        # 5. Date & Timing
+        date_obj = None
+        exact_d = None
+        date_expr = None
+        precision = "unknown"
+        if "december" in text_lower:
+            date_expr = "December"
+            precision = "month"
+        elif "second week of october" in text_lower:
+            date_expr = "second week of October"
+            precision = "week"
+        elif "next friday" in text_lower:
+            date_expr = "next Friday"
+            precision = "day"
+        elif "3rd december" in text_lower:
+            date_expr = "3rd December"
+            precision = "day"
+            exact_d = "2026-12-03"
+
+        time_expr = None
+        if "6 pm to 10 pm" in text_lower or "6pm to 10pm" in text_lower:
+            time_expr = "6 PM to 10 PM"
+        elif "evening" in text_lower:
+            time_expr = "evening"
+        elif "morning" in text_lower:
+            time_expr = "morning"
+
+        if date_expr or time_expr or exact_d:
+            date_obj = DateIntent(
+                date_expression=date_expr,
+                date_precision=precision,
+                exact_date=exact_d,
+                time_expression=time_expr,
+                start_time_expression="6 PM" if time_expr and "6" in time_expr else None,
+                end_time_expression="10 PM" if time_expr and "10" in time_expr else None,
+            )
+
+        # 6. Services Needed
+        services: List[ServiceRequirementIntent] = []
+        for kw, cat in SERVICE_CATEGORY_MAP.items():
+            if re.search(rf"\b{re.escape(kw)}\b", text_lower):
+                srv_name = cat.lower()
+                if not any(s.service_type == srv_name for s in services):
+                    detail = f"vegetarian {srv_name}" if "vegetarian" in text_lower and srv_name == "catering" else None
+                    services.append(ServiceRequirementIntent(
+                        service_type=srv_name,
+                        details=detail,
+                        is_mandatory=True,
+                    ))
+
+        # 7. Preferences & Constraints
+        prefs: List[EventPreferenceIntent] = []
+        if "vegetarian" in text_lower:
+            prefs.append(EventPreferenceIntent(category="catering", preference_text="vegetarian catering"))
+        if "outdoor" in text_lower:
+            prefs.append(EventPreferenceIntent(category="venue", preference_text="outdoor venue"))
+
+        constraints: List[EventConstraintIntent] = []
+        if guest_count:
+            constraints.append(EventConstraintIntent(
+                constraint_type="capacity",
+                description=f"venue capacity >= {guest_count}",
+                is_hard=True,
+            ))
+
+        # 8. Missing Information
+        missing: List[str] = []
+        if not date_expr and not exact_d:
+            missing.append("event_date")
+        if not location:
+            missing.append("location")
+        if not guest_count:
+            missing.append("guest_count")
+        if not budget_obj or not budget_obj.amount:
+            missing.append("budget")
+
+        # 9. Ambiguities
+        ambiguities: List[str] = []
+        for amb in ["large venue", "good venue", "reasonable budget", "premium catering", "around october"]:
+            if amb in text_lower:
+                ambiguities.append(amb)
+
+        intent = EventIntent(
+            event_type=event_type,
+            event_title=f"{location or 'Metro'} {event_type.title()}" if location else f"{event_type.title()}",
+            event_description=f"Interpreted event intent from prompt: '{user_prompt[:100]}'",
+            location=location,
+            city=location,
+            guest_count=guest_count,
+            budget=budget_obj,
+            budget_amount=budget_obj.amount if budget_obj else None,
+            budget_currency=budget_obj.currency if budget_obj else "INR",
+            date=date_obj,
+            date_expression=date_expr,
+            date_precision=precision,
+            services_needed=services,
+            preferences=prefs,
+            constraints=constraints,
+            missing_information=missing,
+            ambiguities=ambiguities,
+            summary=f"Interpreted {event_type} event in {location or 'TBD'} for {guest_count or 'TBD'} guests.",
+        )
+        return intent
+
+    def _mock_generate_event_change_proposal(self, user_prompt: str, output_schema: Type[T]) -> T:
+        """Deterministic mock builder for EventChangeProposal strictly for tests."""
+        import re
+        from app.schemas.event_intent import EventChangeProposal, SingleChangeProposal
+        from app.services.normalization_utils import parse_indian_number_words
+
+        text_lower = user_prompt.lower()
+        changes: List[SingleChangeProposal] = []
+
+        # Check guest count update
+        guest_match = re.search(r"(\d+)\s*(?:people|guests|attendees|pax)", text_lower)
+        if not guest_match:
+            guest_match = re.search(r"(?:make it|change to|guests? to)\s*(\d+)", text_lower)
+        if guest_match:
+            new_g = int(guest_match.group(1))
+            changes.append(SingleChangeProposal(
+                operation="UPDATE",
+                field="guest_count",
+                new_value=new_g,
+                reason="Organizer updated guest count",
+            ))
+
+        # Check budget update
+        word_b = parse_indian_number_words(text_lower)
+        if word_b and word_b > 0 and any(k in text_lower for k in ["budget", "lakh", "crore", "increase", "make"]):
+            changes.append(SingleChangeProposal(
+                operation="UPDATE",
+                field="budget",
+                new_value=word_b,
+                reason="Organizer updated budget",
+            ))
+
+        # Check location update
+        if "gurgaon" in text_lower:
+            changes.append(SingleChangeProposal(
+                operation="UPDATE",
+                field="location",
+                new_value="Gurgaon",
+                reason="Organizer moved location to Gurgaon",
+            ))
+
+        # Check service removal
+        if any(k in text_lower for k in ["remove photography", "no photography", "delete photography", "hata do"]):
+            changes.append(SingleChangeProposal(
+                operation="REMOVE_SERVICE",
+                field="service",
+                target_service="photography",
+                reason="Organizer removed photography service",
+            ))
+
+        # Check service addition
+        if any(k in text_lower for k in ["add security", "include security", "need security"]):
+            changes.append(SingleChangeProposal(
+                operation="ADD_SERVICE",
+                field="service",
+                target_service="security",
+                reason="Organizer added security service",
+            ))
+
+        proposal = EventChangeProposal(
+            is_modification=True,
+            changes=changes,
+            summary=f"Proposed {len(changes)} modifications based on prompt.",
+        )
+        return proposal
 
     def interpret_incident(
         self,
