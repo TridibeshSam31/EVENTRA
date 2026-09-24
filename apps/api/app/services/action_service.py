@@ -185,12 +185,21 @@ class ActionService:
 
         try:
             # Apply vendor reassignment if present
-            if "vendor_id" in changes or "replacement_vendor_id" in changes or "vendor_reassignment" in changes:
-                new_vid = changes.get("vendor_id") or changes.get("replacement_vendor_id") or changes.get("vendor_reassignment", {}).get("vendor_id")
+            if "vendor_id" in changes or "provider_id" in changes or "replacement_vendor_id" in changes or "vendor_reassignment" in changes:
+                new_vid = (
+                    changes.get("vendor_id")
+                    or changes.get("provider_id")
+                    or changes.get("replacement_vendor_id")
+                    or changes.get("vendor_reassignment", {}).get("vendor_id")
+                )
                 task_id = changes.get("task_id") or changes.get("vendor_reassignment", {}).get("task_id")
                 if not task_id and recovery.affected_tasks:
                     task_id = recovery.affected_tasks[0]
-                cost = changes.get("agreed_cost") or changes.get("vendor_reassignment", {}).get("cost", 0.0)
+                cost = (
+                    changes.get("agreed_cost")
+                    or changes.get("provider_cost")
+                    or changes.get("vendor_reassignment", {}).get("cost", 0.0)
+                )
 
                 if new_vid and task_id:
                     sub_entities, sub_res = self._execute_reassign_vendor(

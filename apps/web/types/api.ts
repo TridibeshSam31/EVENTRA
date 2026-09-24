@@ -809,9 +809,21 @@ export interface AgentRunRequest {
   approval_id?: string | null;
 }
 
-export interface AgentRunResponse {
-  event_id: string;
+export interface ToolHistoryEntry {
+  step: number;
+  tool: string;
+  arguments?: Record<string, unknown>;
   status: string;
+  reason_code?: string;
+  result_summary?: string;
+}
+
+export interface AgentRunResponse {
+  run_id?: string;
+  event_id: string;
+  objective?: string;
+  status: string;
+  termination_status?: string;
   response?: string | null;
   active_incident_id?: string | null;
   incident?: Record<string, unknown> | null;
@@ -827,6 +839,7 @@ export interface AgentRunResponse {
   decision_trace?: Record<string, unknown> | null;
   operational_intent?: string | null;
   provider_operation?: Record<string, unknown> | null;
+  tool_history?: ToolHistoryEntry[];
   error?: string | null;
   step_count?: number | null;
 }

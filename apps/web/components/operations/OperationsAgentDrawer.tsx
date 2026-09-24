@@ -170,18 +170,32 @@ export function OperationsAgentDrawer({
                   <div className="flex items-center gap-2">
                     <span
                       className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        result.status === "COMPLETED"
+                        result.status === "COMPLETED" || result.status === "VERIFIED"
                           ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                          : "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                          : result.status === "PENDING_APPROVAL"
+                          ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                          : "bg-rose-500/20 text-rose-400 border border-rose-500/30"
                       }`}
                     >
-                      {result.status}
+                      {result.termination_status || result.status}
                     </span>
+                    {result.run_id && (
+                      <span className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-background/50 border border-border/40">
+                        {result.run_id}
+                      </span>
+                    )}
                     <span className="text-[11px] text-muted-foreground">
-                      Executed in {result.step_count || 1} step(s)
+                      {result.step_count || 1} step(s)
                     </span>
                   </div>
                 </div>
+
+                {result.objective && (
+                  <div className="text-[11px] text-foreground/90 bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-lg flex items-center gap-2">
+                    <span className="font-bold text-primary text-[10px] uppercase shrink-0">Objective:</span>
+                    <span className="truncate">{result.objective}</span>
+                  </div>
+                )}
 
                 {result.response && (
                   <div className="p-3 rounded-lg bg-background/60 border border-border/40 text-foreground text-xs leading-relaxed whitespace-pre-wrap">
@@ -189,6 +203,56 @@ export function OperationsAgentDrawer({
                   </div>
                 )}
               </div>
+
+              {/* Factual Operational Tool Trace Timeline */}
+              {result.tool_history && result.tool_history.length > 0 && (
+                <div className="space-y-2">
+                  <div className="font-semibold text-muted-foreground uppercase text-[10px] tracking-wider flex items-center justify-between">
+                    <span>Operational Execution Trace ({result.tool_history.length} tools):</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">Factual telemetry</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {result.tool_history.map((step) => (
+                      <div
+                        key={step.step}
+                        className="p-2.5 rounded-lg bg-card/80 border border-border/50 flex items-start justify-between gap-2 text-xs"
+                      >
+                        <div className="space-y-0.5 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="w-4 h-4 rounded-full bg-secondary text-secondary-foreground text-[9px] font-bold flex items-center justify-center shrink-0">
+                              {step.step}
+                            </span>
+                            <span className="font-mono font-semibold text-foreground text-[11px]">
+                              {step.tool}
+                            </span>
+                            {step.reason_code && (
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-secondary/80 text-muted-foreground">
+                                {step.reason_code}
+                              </span>
+                            )}
+                          </div>
+                          {step.result_summary && (
+                            <p className="text-[11px] text-muted-foreground pl-6 line-clamp-2">
+                              {step.result_summary}
+                            </p>
+                          )}
+                        </div>
+                        <span
+                          className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded shrink-0 ${
+                            step.status === "SUCCESS"
+                              ? "bg-emerald-500/20 text-emerald-400"
+                              : step.status === "REQUIRES_APPROVAL"
+                              ? "bg-amber-500/20 text-amber-400"
+                              : "bg-rose-500/20 text-rose-400"
+                          }`}
+                        >
+                          {step.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Step Pipeline Badges */}
               <div className="grid grid-cols-2 gap-2 text-xs">
@@ -237,6 +301,18 @@ export function OperationsAgentDrawer({
                     </div>
                     <div className="text-foreground font-medium truncate">
                       Approval #{result.approval_id.slice(0, 8)}
+                    </div>
+                  </div>
+                )}
+
+                {result.verification && (
+                  <div className="p-3 rounded-lg border border-emerald-500/30 bg-emerald-500/5 space-y-1">
+                    <div className="flex items-center gap-1.5 font-bold text-emerald-300 text-[11px]">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      Verification Status
+                    </div>
+                    <div className="text-foreground font-medium truncate">
+                      {(result.verification as any).status || "VERIFIED"}
                     </div>
                   </div>
                 )}
