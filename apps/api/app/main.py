@@ -97,8 +97,9 @@ app.include_router(actions_router, prefix=settings.API_V1_STR)
 app.include_router(verification_router, prefix=settings.API_V1_STR)
 app.include_router(observability_router, prefix=settings.API_V1_STR)
 
-# Phase 11: Single Event Operations Agent (LangGraph)
+# Phase 11: Single Event Operations Agent (LangGraph) & Agent Tool Layer
 app.include_router(agent_router, prefix=settings.API_V1_STR)
+app.include_router(agent_router)
 
 # Phase 12: Real-World Integrations Layer (Maps, Notifications, Provider Communication)
 app.include_router(integrations_router, prefix=settings.API_V1_STR)
