@@ -31,7 +31,16 @@ def list_event_agent_tools(event_id: str) -> List[Dict[str, Any]]:
     return [t.to_summary_dict() for t in tools]
 
 
-@router.post("/agent/events/{event_id}/run", response_model=AgentRunResponse, status_code=status.HTTP_200_OK)
+@router.post(
+    "/agent/events/{event_id}/run",
+    response_model=AgentRunResponse,
+    status_code=status.HTTP_200_OK,
+)
+@router.post(
+    "/events/{event_id}/agent/runs",
+    response_model=AgentRunResponse,
+    status_code=status.HTTP_200_OK,
+)
 def run_agent_endpoint(
     event_id: str,
     payload: AgentRunRequest,
@@ -42,8 +51,10 @@ def run_agent_endpoint(
     agent = EventOperationsAgent(db)
     result = agent.run(
         event_id=event_id,
-        message=payload.message,
+        message=payload.message or payload.input or "",
         user_id=current_user_id,
         approval_id=payload.approval_id,
+        objective=payload.objective,
+        max_steps=payload.max_steps or 12,
     )
     return result

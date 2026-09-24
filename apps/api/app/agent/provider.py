@@ -25,6 +25,7 @@ from app.agent.errors import (
     MalformedOutputError,
     StructuredValidationError,
 )
+from app.agent.decision import AgentDecision, DecisionType, ReasonCode
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,18 @@ class LLMProvider(ABC):
         context: Dict[str, Any],
     ) -> str:
         """Formats a clear, concise operational status message for the event operator."""
+        pass
+
+    @abstractmethod
+    def decide_next_action(
+        self,
+        operational_context: Dict[str, Any],
+        available_tools: List[Dict[str, Any]],
+        current_objective: str,
+        tool_history: List[Dict[str, Any]],
+        previous_result: Optional[Dict[str, Any]] = None,
+    ) -> AgentDecision:
+        """Reasons over live operational state and dynamically selects the next tool or action."""
         pass
 
 
@@ -505,6 +518,235 @@ class MockLLMProvider(LLMProvider):
 
         return f"Operational state updated: {status}."
 
+    def decide_next_action(
+        self,
+        operational_context: Dict[str, Any],
+        available_tools: List[Dict[str, Any]],
+        current_objective: str,
+        tool_history: List[Dict[str, Any]],
+        previous_result: Optional[Dict[str, Any]] = None,
+    ) -> AgentDecision:
+        """Deterministic operational decision maker for testing and offline execution."""
+        # 1. Check if a pre-scripted sequence of decisions exists
+        if "decision_sequence" in self._custom_responses and self._custom_responses["decision_sequence"]:
+            next_dec = self._custom_responses["decision_sequence"].pop(0)
+            if isinstance(next_dec, AgentDecision):
+                return next_dec
+            if isinstance(next_dec, dict):
+                return AgentDecision.model_validate(next_dec)
+
+        # 2. Check if a dynamic decision handler was provided
+        if "decision_handler" in self._custom_responses and callable(self._custom_responses["decision_handler"]):
+            return self._custom_responses["decision_handler"](
+                operational_context, available_tools, current_objective, tool_history, previous_result
+            )
+
+        # 3. Check for a single static decision override
+        if "decision" in self._custom_responses:
+            dec = self._custom_responses["decision"]
+            if isinstance(dec, AgentDecision):
+                return dec
+            if isinstance(dec, dict):
+                return AgentDecision.model_validate(dec)
+
+        # 4. Intelligent default deterministic operational loop
+        obj_lower = (current_objective or "").lower()
+        hist_tools = [h.get("tool") for h in tool_history if isinstance(h, dict)]
+        last_step = tool_history[-1] if tool_history else {}
+        last_tool = last_step.get("tool")
+        last_status = (previous_result or {}).get("status") or last_step.get("status")
+
+        # Scenario A: Disruption / vendor delay / no-show / incident / cancellation
+        is_incident = bool(operational_context.get("current_incidents")) or any(
+            kw in obj_lower for kw in [
+                "photographer", "delay", "no-show", "vendor", "caterer", "catering",
+                "cancel", "cancellation", "late", "arrive", "failure", "incident",
+                "recovery", "broken", "issue", "fix", "disruption", "emergency"
+            ]
+        )
+        if is_incident:
+            incidents = operational_context.get("current_incidents") or []
+            active_inc_id = operational_context.get("active_incident_id") or (incidents[0]["id"] if incidents else "inc-1")
+            
+            # Determine provider category
+            category = "photography"
+            if "cater" in obj_lower or "food" in obj_lower or "cater" in (operational_context.get("event_name") or "").lower():
+                category = "catering"
+            elif "dj" in obj_lower or "sound" in obj_lower or "music" in obj_lower:
+                category = "sound"
+            elif "decor" in obj_lower:
+                category = "decor"
+            
+            # Step 1: Inspect event state if not inspected
+            if "get_event_state" not in hist_tools:
+                return AgentDecision(
+                    decision_type=DecisionType.TOOL_CALL,
+                    tool_name="get_event_state",
+                    tool_arguments={"event_id": operational_context.get("event_id", "")},
+                    reason_code=ReasonCode.INITIAL_OBSERVATION.value,
+                    rationale="Observing authoritative event baseline state",
+                )
+            
+            # Step 2: Investigate provider status (missing information)
+            if "get_provider_status" not in hist_tools and category:
+                return AgentDecision(
+                    decision_type=DecisionType.TOOL_CALL,
+                    tool_name="get_provider_status",
+                    tool_arguments={"category": category},
+                    reason_code=ReasonCode.MISSING_PROVIDER_STATUS.value,
+                    rationale=f"Investigating current arrival status and responsiveness of {category} provider",
+                )
+            
+            # Step 3: Analyze impact on critical tasks
+            if "analyze_impact" not in hist_tools:
+                return AgentDecision(
+                    decision_type=DecisionType.TOOL_CALL,
+                    tool_name="analyze_impact",
+                    tool_arguments={"incident_id": active_inc_id},
+                    reason_code=ReasonCode.IMPACT_REQUIRES_ANALYSIS.value,
+                    rationale="Analyzing downstream impact on photography and dependent ceremony tasks",
+                )
+                
+            # Step 4: Calculate risk
+            if "assess_risk" not in hist_tools:
+                return AgentDecision(
+                    decision_type=DecisionType.TOOL_CALL,
+                    tool_name="assess_risk",
+                    tool_arguments={"incident_id": active_inc_id},
+                    reason_code=ReasonCode.RISK_ASSESSMENT_REQUIRED.value,
+                    rationale="Evaluating risk score and threat to primary event objectives",
+                )
+                
+            # Step 5: Generate recovery options
+            if "generate_recovery_options" not in hist_tools:
+                return AgentDecision(
+                    decision_type=DecisionType.TOOL_CALL,
+                    tool_name="generate_recovery_options",
+                    tool_arguments={"incident_id": active_inc_id},
+                    reason_code=ReasonCode.RECOVERY_OPTIONS_REQUIRED.value,
+                    rationale="Invoking deterministic RecoveryEngine to compute feasible candidate options",
+                )
+            
+            # Step 6: Propose action (Option B: Backup / Reassign)
+            recovery_options = operational_context.get("recovery_options") or []
+            feasible_options = [o for o in recovery_options if o.get("is_feasible")]
+            backup_opts = [o for o in feasible_options if str(o.get("strategy_type", "")).upper() in ("BACKUP", "REASSIGN", "REASSIGN_VENDOR")]
+            selected = backup_opts[0] if backup_opts else (feasible_options[0] if feasible_options else (recovery_options[0] if recovery_options else None))
+            selected_id = selected.get("id") if selected else "rec-1"
+            
+            # Check if action already executed
+            if "execute_action" not in hist_tools:
+                if operational_context.get("approval_granted") or operational_context.get("approval_id"):
+                    return AgentDecision(
+                        decision_type=DecisionType.TOOL_CALL,
+                        tool_name="execute_action",
+                        tool_arguments={"recovery_option_id": selected_id},
+                        reason_code=ReasonCode.APPROVAL_GRANTED.value,
+                        rationale="Executing approved recovery action through ActionService",
+                    )
+                return AgentDecision(
+                    decision_type=DecisionType.PROPOSE_ACTION,
+                    tool_name="execute_action",
+                    tool_arguments={"recovery_option_id": selected_id},
+                    reason_code=ReasonCode.RECOVERY_OPTION_FEASIBLE.value,
+                    action_intent="REASSIGN_VENDOR",
+                    rationale=f"Recommending feasible recovery strategy ({selected.get('strategy_type', 'REASSIGN_VENDOR') if selected else 'REASSIGN_VENDOR'}); requires operator approval",
+                    requires_approval=True,
+                )
+                
+            # Step 7: Post-mutation verification
+            if "verify_action" not in hist_tools:
+                exec_res = operational_context.get("execution_result") or {}
+                exec_id = exec_res.get("id") or exec_res.get("action_id") or "exec-1"
+                return AgentDecision(
+                    decision_type=DecisionType.TOOL_CALL,
+                    tool_name="verify_action",
+                    tool_arguments={"action_execution_id": exec_id},
+                    reason_code=ReasonCode.VERIFICATION_REQUIRED.value,
+                    rationale="Authoritatively verifying post-action state recovery",
+                )
+            
+            # Step 8: Verify result
+            ver_res = operational_context.get("verification_result") or {}
+            ver_status = ver_res.get("status")
+            if ver_status in ("VERIFIED", "PARTIALLY_VERIFIED", "SUCCESS") or last_status in ("SUCCESS", "VERIFIED"):
+                return AgentDecision(
+                    decision_type=DecisionType.COMPLETE,
+                    reason_code=ReasonCode.RECOVERY_CONFIRMED.value,
+                    rationale="Operational recovery confirmed and verified. Event returned to stable operating condition.",
+                    terminate=True,
+                    termination_status="COMPLETED",
+                )
+            else:
+                return AgentDecision(
+                    decision_type=DecisionType.FAIL,
+                    reason_code=ReasonCode.VERIFICATION_FAILED.value,
+                    rationale="Verification failed to confirm operational recovery.",
+                    terminate=True,
+                    termination_status="VERIFICATION_FAILED",
+                )
+
+        # Scenario B: Guest count change (e.g. 500 to 800)
+        if any(kw in obj_lower for kw in ["guest", "count", "500", "800", "pax", "capacity"]):
+            if "get_event_spec" not in hist_tools and "get_event_state" not in hist_tools:
+                return AgentDecision(
+                    decision_type=DecisionType.TOOL_CALL,
+                    tool_name="get_event_spec",
+                    tool_arguments={"event_id": operational_context.get("event_id", "")},
+                    reason_code=ReasonCode.MISSING_EVENT_SPECIFICATION.value,
+                    rationale="Inspecting canonical EventSpecification to evaluate guest capacity and resource baseline",
+                )
+            if "calculate_resource_requirements" not in hist_tools:
+                return AgentDecision(
+                    decision_type=DecisionType.TOOL_CALL,
+                    tool_name="calculate_resource_requirements",
+                    tool_arguments={"new_guest_count": 800, "original_guest_count": 500},
+                    reason_code=ReasonCode.RESOURCE_REQUIREMENT_CALCULATED.value,
+                    rationale="Calculating deterministic resource delta for guest count increase to 800",
+                )
+            if "modify_event_plan" not in hist_tools:
+                if operational_context.get("approval_granted") or operational_context.get("approval_id"):
+                    return AgentDecision(
+                        decision_type=DecisionType.TOOL_CALL,
+                        tool_name="modify_event_plan",
+                        tool_arguments={"modification": "Increase guest count to 800 and procure additional resources"},
+                        reason_code=ReasonCode.APPROVAL_GRANTED.value,
+                        rationale="Applying approved event plan modifications",
+                    )
+                return AgentDecision(
+                    decision_type=DecisionType.PROPOSE_ACTION,
+                    tool_name="modify_event_plan",
+                    tool_arguments={"modification": "Increase guest count to 800 with additional resources"},
+                    reason_code=ReasonCode.PROCUREMENT_REQUIRED.value,
+                    action_intent="PROCURE_RESOURCES",
+                    rationale="Proposing plan modification and procurement for 800 guests (+300 meals, chairs, tables); requires operator approval",
+                    requires_approval=True,
+                )
+            return AgentDecision(
+                decision_type=DecisionType.COMPLETE,
+                reason_code=ReasonCode.RECOVERY_CONFIRMED.value,
+                rationale="Guest count modification and resource scaling successfully updated in operational plan.",
+                terminate=True,
+                termination_status="COMPLETED",
+            )
+
+        # Default fallback
+        if not hist_tools:
+            return AgentDecision(
+                decision_type=DecisionType.TOOL_CALL,
+                tool_name="get_event_state",
+                tool_arguments={"event_id": operational_context.get("event_id", "")},
+                reason_code=ReasonCode.INITIAL_OBSERVATION.value,
+                rationale="Retrieving current event state",
+            )
+        return AgentDecision(
+            decision_type=DecisionType.COMPLETE,
+            reason_code=ReasonCode.NO_ACTION_REQUIRED.value,
+            rationale="Operational review complete. No further actions required.",
+            terminate=True,
+            termination_status="COMPLETED",
+        )
+
 
 class RealLLMProvider(LLMProvider):
     """Real LLM Provider invoking Google Gemini model API via the official google-genai SDK.
@@ -828,6 +1070,31 @@ class RealLLMProvider(LLMProvider):
             "Provide a clear, brief operational summary."
         )
         return self.generate_text(system_prompt=system_prompt, user_prompt=prompt)
+
+    def decide_next_action(
+        self,
+        operational_context: Dict[str, Any],
+        available_tools: List[Dict[str, Any]],
+        current_objective: str,
+        tool_history: List[Dict[str, Any]],
+        previous_result: Optional[Dict[str, Any]] = None,
+    ) -> AgentDecision:
+        """Reasons over live operational state via Gemini structured output."""
+        from app.agent.prompts.general import GENERAL_SYSTEM_PROMPT, format_operational_context_prompt
+
+        system_prompt = GENERAL_SYSTEM_PROMPT
+        user_prompt = format_operational_context_prompt(
+            operational_context=operational_context,
+            available_tools=available_tools,
+            current_objective=current_objective,
+            tool_history=tool_history,
+            previous_result=previous_result,
+        )
+        return self.generate_structured(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            output_schema=AgentDecision,
+        )
 
 
 def get_default_llm_provider() -> LLMProvider:

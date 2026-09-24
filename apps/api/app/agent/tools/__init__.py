@@ -1,19 +1,22 @@
-"""Agent Tools package exposing the real typed Agent Tool Layer for EVENTRA.
+"""Agent Tools package exposing the real typed Agent Tool Layer and central tool registry for EVENTRA."""
 
-Provides:
-- Central AgentToolRegistry and singleton getter
-- Base tool contracts, schemas, categories, and ToolResult
-- Typed exceptions
-- Domain tools across Event/State, Planning, Provider, Impact/Risk, Recovery, and Observability
-- Backward-compatible wrappers for legacy operations tools
-"""
+# Task 4 Functional Tool Registry & Loop Artifacts
+from app.agent.tools.registry import (
+    ToolCategory,
+    ToolStatus,
+    ToolResult,
+    ToolDefinition,
+    ToolRegistry,
+    default_registry,
+    create_default_functional_tool_registry,
+)
+
+# Task 3 Central Typed Tool Registry & Base Contracts
 from app.agent.tools.base import (
     AgentTool,
-    ToolCategory,
     ToolAccessMode,
     ToolAvailabilityStatus,
     ToolResultStatus,
-    ToolResult,
     ToolContext,
     ExecutionTraceRecord,
 )
@@ -33,6 +36,8 @@ from app.agent.tools.registry import (
     get_agent_tool_registry,
     create_default_tool_registry,
 )
+
+# Task 3 Domain Tools
 from app.agent.tools.event_tools import (
     GetEventStateTool,
     GetEventSpecTool,
@@ -66,7 +71,7 @@ from app.agent.tools.trace_tools import (
     GetDecisionTraceTool,
 )
 
-# Backward-compatible function exports for legacy Phase 11 agent graph & tests
+# Operations & Communication function exports (backward-compatible)
 from app.agent.tools.operations_tools import (
     get_event_state,
     get_incidents,
@@ -94,16 +99,22 @@ from app.agent.tools.communication_tools import (
 )
 
 __all__ = [
-    # Registry & Core
+    # Task 4 Functional Tool Registry & Loop Artifacts
+    "ToolCategory",
+    "ToolStatus",
+    "ToolResult",
+    "ToolDefinition",
+    "ToolRegistry",
+    "default_registry",
+    "create_default_functional_tool_registry",
+    # Task 3 Central Typed Tool Registry & Base Contracts
     "AgentToolRegistry",
     "get_agent_tool_registry",
     "create_default_tool_registry",
     "AgentTool",
-    "ToolCategory",
     "ToolAccessMode",
     "ToolAvailabilityStatus",
     "ToolResultStatus",
-    "ToolResult",
     "ToolContext",
     "ExecutionTraceRecord",
     # Typed Errors
@@ -144,7 +155,7 @@ __all__ = [
     # Observability Tools
     "RecordDecisionTool",
     "GetDecisionTraceTool",
-    # Legacy operations functions
+    # Legacy operations & communication functions
     "get_event_state",
     "get_incidents",
     "get_incident_details",

@@ -25,6 +25,10 @@ class ToolCategory(str, Enum):
     IMPACT_RISK = "IMPACT_RISK"
     RECOVERY = "RECOVERY"
     OBSERVABILITY = "OBSERVABILITY"
+    # Functional classification aliases (Task 4)
+    READ = "READ"
+    COMPUTATIONAL = "COMPUTATIONAL"
+    WRITE = "WRITE"
 
 
 class ToolAccessMode(str, Enum):
@@ -47,6 +51,10 @@ class ToolResultStatus(str, Enum):
     UNKNOWN = "UNKNOWN"
     REQUIRES_APPROVAL = "REQUIRES_APPROVAL"
     UNSUPPORTED = "UNSUPPORTED"
+    VERIFICATION_FAILED = "VERIFICATION_FAILED"
+
+
+ToolStatus = ToolResultStatus
 
 
 class ToolResult(BaseModel):
@@ -57,16 +65,33 @@ class ToolResult(BaseModel):
     """
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    success: bool = Field(..., description="True if operation succeeded without unrecoverable error")
-    tool_name: str = Field(..., description="Identifier of the executed tool")
-    status: ToolResultStatus = Field(..., description="Classification of the result state")
+    success: bool = Field(True, description="True if operation succeeded without unrecoverable error")
+    tool_name: str = Field("", description="Identifier of the executed tool")
+    status: ToolResultStatus = Field(ToolResultStatus.SUCCESS, description="Classification of the result state")
     data: Optional[Any] = Field(None, description="Structured output payload conforming to tool's output_schema")
     error: Optional[str] = Field(None, description="Human-readable error description when status is FAILURE or UNKNOWN")
     error_code: Optional[str] = Field(None, description="Machine-readable error code")
+    message: Optional[str] = Field(None, description="Factual summary of execution outcome")
+    reason_code: Optional[str] = Field(None, description="Operational reason code")
     requires_approval: bool = Field(False, description="Whether the action is held pending human approval")
     approval_id: Optional[str] = Field(None, description="ID of the generated ApprovalRequest if approval is required")
     verification_status: Optional[str] = Field(None, description="Verification outcome if post-action verification was performed")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Operational metadata (e.g. latency, source, flags)")
+
+    def summary(self) -> str:
+        """Concise operational summary for decision tracing (NOT chain-of-thought)."""
+        if self.message:
+            return self.message[:120]
+        if self.error:
+            return self.error[:120]
+        if self.status == ToolResultStatus.SUCCESS:
+            if isinstance(self.data, dict):
+                keys = list(self.data.keys())[:3]
+                return f"Success ({', '.join(keys)})"
+            if isinstance(self.data, list):
+                return f"Success ({len(self.data)} items)"
+            return "Execution completed successfully"
+        return f"{self.status.value}: {self.error_code or 'Unknown reason'}"
 
     @classmethod
     def success_result(
