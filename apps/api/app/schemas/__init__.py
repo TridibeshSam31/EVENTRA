@@ -55,6 +55,16 @@ from app.schemas.observability import (
     StateTransitionEntryResponse,
     StateHistoryResponse,
 )
+from app.schemas.event_intent import (
+    BudgetIntent,
+    DateIntent,
+    ServiceRequirementIntent,
+    EventPreferenceIntent,
+    EventConstraintIntent,
+    EventIntent,
+    SingleChangeProposal,
+    EventChangeProposal,
+)
 
 __all__ = [
     "UserCreate",
@@ -114,4 +124,12 @@ __all__ = [
     "DecisionTraceResponse",
     "StateTransitionEntryResponse",
     "StateHistoryResponse",
+    "BudgetIntent",
+    "DateIntent",
+    "ServiceRequirementIntent",
+    "EventPreferenceIntent",
+    "EventConstraintIntent",
+    "EventIntent",
+    "SingleChangeProposal",
+    "EventChangeProposal",
 ]
