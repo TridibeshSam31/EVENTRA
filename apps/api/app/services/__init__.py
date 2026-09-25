@@ -6,6 +6,8 @@ from app.services.specification_service import (
 )
 from app.services.event_understanding_service import EventUnderstandingService
 from app.services.intake_service import IntakeService
+from app.services.vendor_service import VendorService
+from app.services.vendor_outcome_service import VendorOutcomeService
 
 __all__ = [
     "EventService",
@@ -13,4 +15,7 @@ __all__ = [
     "SpecificationValidationError",
     "EventUnderstandingService",
     "IntakeService",
+    "VendorService",
+    "VendorOutcomeService",
 ]
+

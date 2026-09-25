@@ -31,8 +31,10 @@ import {
   Radio,
   ShieldCheck,
   AlertTriangle,
+  FileText,
 } from "lucide-react";
 import { ProviderNegotiationModal } from "@/features/provider-communication";
+import { VendorOutcomeSection } from "@/features/provider-network/VendorOutcomeSection";
 
 export default function EventVendorsPage() {
   const params = useParams();
@@ -40,7 +42,7 @@ export default function EventVendorsPage() {
 
   const { event } = useEvent(eventId);
 
-  const [activeTab, setActiveTab] = useState<"discovery" | "assignments">("discovery");
+  const [activeTab, setActiveTab] = useState<"discovery" | "assignments" | "outcomes">("discovery");
   const [initialProviders, setInitialProviders] = useState<any[]>([]);
   const [assignments, setAssignments] = useState<VendorAssignmentResponse[]>([]);
   const [assignedVendorIds, setAssignedVendorIds] = useState<string[]>([]);
@@ -201,6 +203,17 @@ export default function EventVendorsPage() {
           >
             <Users className="w-3.5 h-3.5" />
             <span>Event Assignments & Messaging ({assignments.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab("outcomes")}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center space-x-2 transition ${
+              activeTab === "outcomes"
+                ? "bg-blue-600 text-white shadow-md shadow-blue-900/30"
+                : "bg-slate-900 text-slate-400 hover:text-slate-200 border border-slate-800"
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Vendor Outcomes (External)</span>
           </button>
         </div>
 
@@ -459,7 +472,15 @@ export default function EventVendorsPage() {
           </div>
         )}
 
-        {/* Provider Negotiation & Communication Cockpit Modal */}
+        {/* Tab 3: Vendor Outcomes (External Interaction Logging) */}
+        {activeTab === "outcomes" && (
+          <VendorOutcomeSection
+            eventId={eventId}
+            providers={initialProviders}
+            tasks={(event as any)?.tasks || []}
+            currency={event?.currency || "INR"}
+          />
+        )}
         <ProviderNegotiationModal
           isOpen={!!selectedAssignmentForNegotiation}
           onClose={() => setSelectedAssignmentForNegotiation(null)}

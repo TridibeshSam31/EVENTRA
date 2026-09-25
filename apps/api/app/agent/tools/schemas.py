@@ -351,6 +351,60 @@ class ShortlistVendorsOutput(BaseModel):
 
 
 # ==============================================================================
+# 3b. VENDOR OUTCOME SCHEMAS (TASK 6)
+# ==============================================================================
+
+class SubmitVendorOutcomeInput(BaseModel):
+    event_id: str = Field(..., description="Unique event identifier")
+    provider_id: str = Field(..., description="Target vendor / provider UUID")
+    task_id: Optional[str] = Field(None, description="Optional associated event task UUID")
+    outcome_status: str = Field(
+        "CONTACTED",
+        description="Outcome status: PENDING, CONTACTED, INTERESTED, AVAILABLE, UNAVAILABLE, QUOTE_RECEIVED, ACCEPTED, DECLINED, NO_RESPONSE, UNKNOWN",
+    )
+    quoted_price: Optional[float] = Field(
+        None,
+        description="Quoted price in specified currency. None if not quoted or unknown.",
+    )
+    currency: str = Field("INR", description="Currency code (e.g. INR, USD)")
+    reported_availability: str = Field(
+        "UNKNOWN",
+        description="Availability stated during contact (AVAILABLE, UNAVAILABLE, CONDITIONAL, UNKNOWN)",
+    )
+    communication_channel: str = Field(
+        "OTHER",
+        description="External communication channel used (PHONE, EMAIL, WHATSAPP_EXTERNAL, IN_PERSON, OTHER)",
+    )
+    organizer_notes: Optional[str] = Field(
+        None,
+        description="Freeform organizer notes describing interaction context and vendor statements",
+    )
+    vendor_response: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Structured facts or terms provided by the vendor",
+    )
+
+
+class SubmitVendorOutcomeOutput(BaseModel):
+    outcome_id: str = Field(..., description="Created outcome record UUID")
+    event_id: str = Field(..., description="Associated event UUID")
+    task_id: Optional[str] = Field(None, description="Associated task UUID")
+    provider_id: str = Field(..., description="Target provider UUID")
+    provider_name: Optional[str] = Field(None, description="Target provider name")
+    outcome_status: str = Field(..., description="Stored outcome status")
+    quoted_price: Optional[float] = Field(None, description="Reported quote price")
+    currency: str = Field("INR", description="Quote currency")
+    reported_availability: str = Field("UNKNOWN", description="Reported availability")
+    communication_channel: str = Field("OTHER", description="External channel used")
+    source: str = Field("ORGANIZER_REPORTED", description="Data source provenance")
+    verification_status: str = Field("UNVERIFIED", description="Verification state: Always UNVERIFIED in Task 6")
+    organizer_notes: Optional[str] = Field(None, description="Stored organizer notes")
+    recorded_at: str = Field(..., description="ISO 8601 recording timestamp")
+    summary: str = Field(..., description="Factual summary of recorded outcome")
+
+
+
+# ==============================================================================
 # 4. IMPACT & RISK SCHEMAS
 # ==============================================================================
 

@@ -6,6 +6,7 @@ from app.agent.tools.provider_tools import (
     CheckProviderAvailabilityTool,
     CompareCandidatesTool,
     ShortlistVendorsTool,
+    SubmitVendorOutcomeTool,
 )
 
 __all__ = [
@@ -14,6 +15,7 @@ __all__ = [
     "CheckProviderAvailabilityTool",
     "CompareCandidatesTool",
     "ShortlistVendorsTool",
+    "SubmitVendorOutcomeTool",
     "vendor_tools_run",
 ]
 

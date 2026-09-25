@@ -34,8 +34,12 @@ from app.agent.tools.schemas import (
     ProviderComparisonEntry,
     ShortlistVendorsInput,
     ShortlistVendorsOutput,
+    SubmitVendorOutcomeInput,
+    SubmitVendorOutcomeOutput,
 )
 from app.agent.tools.permissions import ToolPermissionGuard
+from app.services.vendor_outcome_service import VendorOutcomeService
+from app.core.exceptions import BadRequestException, NotFoundException
 
 
 class DiscoverProvidersTool(AgentTool):
@@ -392,3 +396,99 @@ class ShortlistVendorsTool(AgentTool):
             deterministic_rationale=summary,
         )
         return ToolResult.success_result(self.name, data)
+
+
+class SubmitVendorOutcomeTool(AgentTool):
+    """Submits the organizer-reported outcome of external communication with a vendor for an event task.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    Strictly records unverified organizer-reported facts (source='ORGANIZER_REPORTED', verification_status='UNVERIFIED').
+    Does NOT confirm bookings, does NOT mutate task provider assignments, and does NOT recalculate plans.
+    """
+
+    name = "submit_vendor_outcome"
+    description = (
+        "Records the outcome of external communication with a provider (phone, email, WhatsApp external, etc.). "
+        "Strictly records unverified organizer-reported facts without altering booking or task assignments."
+    )
+    category = ToolCategory.PROVIDER
+    access_mode = ToolAccessMode.WRITE
+    input_schema = SubmitVendorOutcomeInput
+    output_schema = SubmitVendorOutcomeOutput
+    availability = ToolAvailabilityStatus.AVAILABLE
+
+    def execute(self, context: ToolContext, args: SubmitVendorOutcomeInput) -> ToolResult:
+        ToolPermissionGuard.verify_read_permission(context.db, args.event_id, context.user_id, self.name)
+
+        # Enforce viewer role restriction: viewers cannot submit operational outcomes
+        if context.user_id and not (
+            context.user_id in ("system", "anonymous_operator")
+            or context.user_id.startswith("system")
+            or context.user_id.startswith("agent")
+        ):
+            from app.models.event import Event
+            from app.models.event_member import EventMember
+            from app.models.enums import RoleType
+
+            event = context.db.query(Event).filter(Event.id == args.event_id).first()
+            if event and event.owner_id != context.user_id:
+                member = (
+                    context.db.query(EventMember)
+                    .filter(
+                        EventMember.event_id == args.event_id,
+                        EventMember.user_id == context.user_id,
+                    )
+                    .first()
+                )
+                if member and member.role == RoleType.VIEWER.value:
+                    return ToolResult.failure_result(
+                        self.name,
+                        f"User '{context.user_id}' has read-only VIEWER access and cannot record vendor outcomes.",
+                        "PERMISSION_DENIED",
+                    )
+
+        outcome_service = VendorOutcomeService(context.db)
+        try:
+            outcome = outcome_service.record_outcome(
+                event_id=args.event_id,
+                payload=args,
+                submitted_by=context.user_id,
+            )
+        except NotFoundException as exc:
+            return ToolResult.failure_result(self.name, str(exc), "NOT_FOUND")
+        except BadRequestException as exc:
+            return ToolResult.failure_result(self.name, str(exc), "INVALID_INPUT")
+        except Exception as exc:
+            return ToolResult.failure_result(
+                self.name,
+                f"Failed to record vendor outcome: {str(exc)}",
+                "PERSISTENCE_FAILURE",
+            )
+
+        vendor = context.db.query(Vendor).filter(Vendor.id == outcome.provider_id).first()
+        task = context.db.query(Task).filter(Task.id == outcome.task_id).first() if outcome.task_id else None
+
+        summary_msg = (
+            f"Recorded {outcome.outcome_status} outcome for provider '{vendor.name if vendor else outcome.provider_id}' "
+            f"via {outcome.communication_channel}. Status is UNVERIFIED pending Task 7 validation."
+        )
+
+        data = SubmitVendorOutcomeOutput(
+            outcome_id=outcome.id,
+            event_id=outcome.event_id,
+            task_id=outcome.task_id,
+            provider_id=outcome.provider_id,
+            provider_name=vendor.name if vendor else None,
+            outcome_status=outcome.outcome_status,
+            quoted_price=outcome.quoted_price,
+            currency=outcome.currency,
+            reported_availability=outcome.reported_availability,
+            communication_channel=outcome.communication_channel,
+            source=outcome.source,
+            verification_status=outcome.verification_status,
+            organizer_notes=outcome.organizer_notes,
+            recorded_at=outcome.created_at.isoformat() if outcome.created_at else "",
+            summary=summary_msg,
+        )
+        return ToolResult.success_result(self.name, data)
+

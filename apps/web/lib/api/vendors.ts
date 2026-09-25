@@ -108,4 +108,52 @@ export async function discoverProvidersForEvent(
   return apiClient.post<ProviderDiscoveryResponse>(`/events/${eventId}/providers/discover`, payload);
 }
 
+export interface VendorOutcomePayload {
+  provider_id: string;
+  task_id?: string | null;
+  communication_channel?: string;
+  outcome_status?: string;
+  quoted_price?: number | null;
+  currency?: string;
+  reported_availability?: string;
+  organizer_notes?: string | null;
+  vendor_response?: Record<string, any> | null;
+}
+
+export interface VendorOutcomeItem {
+  id: string;
+  event_id: string;
+  task_id?: string | null;
+  provider_id: string;
+  provider_name?: string | null;
+  task_name?: string | null;
+  communication_channel: string;
+  outcome_status: string;
+  quoted_price?: number | null;
+  currency: string;
+  reported_availability: string;
+  organizer_notes?: string | null;
+  vendor_response?: Record<string, any> | null;
+  source: string;
+  verification_status: string;
+  submitted_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function recordVendorOutcome(
+  eventId: string,
+  payload: VendorOutcomePayload
+): Promise<VendorOutcomeItem> {
+  return apiClient.post<VendorOutcomeItem>(`/events/${eventId}/vendor-outcomes`, payload);
+}
+
+export async function getVendorOutcomes(
+  eventId: string,
+  params?: { provider_id?: string; task_id?: string }
+): Promise<VendorOutcomeItem[]> {
+  return apiClient.get<VendorOutcomeItem[]>(`/events/${eventId}/vendor-outcomes`, { params });
+}
+
+
 

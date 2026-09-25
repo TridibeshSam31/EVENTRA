@@ -463,6 +463,18 @@ def _handle_shortlist_vendors(db: Session, user_id: str, event_id: str, **kwargs
     return res.data.model_dump() if res.success and res.data else res
 
 
+def _handle_submit_vendor_outcome(db: Session, user_id: str, event_id: str, **kwargs) -> Any:
+    from app.agent.tools.provider_tools import SubmitVendorOutcomeTool
+    from app.agent.tools.schemas import SubmitVendorOutcomeInput
+    tool = SubmitVendorOutcomeTool()
+    args_dict = {"event_id": event_id, **kwargs}
+    args_model = SubmitVendorOutcomeInput.model_validate(args_dict)
+    ctx = ToolContext(db=db, user_id=user_id, event_id=event_id)
+    res = tool.execute(ctx, args_model)
+    return res.data.model_dump() if res.success and res.data else res
+
+
+
 def _handle_analyze_impact(db: Session, user_id: str, event_id: str, incident_id: str) -> Dict[str, Any]:
     from app.agent.tools.operations_tools import analyze_impact
     return analyze_impact(db, event_id, incident_id)
@@ -644,6 +656,7 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         QualifyProviderInput,
         CompareCandidatesInput,
         ShortlistVendorsInput,
+        SubmitVendorOutcomeInput,
     )
     registry.register(
         name="discover_providers",
@@ -672,6 +685,14 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         category=ToolCategory.READ,
         parameters_schema=ShortlistVendorsInput,
         handler=_handle_shortlist_vendors,
+    )
+    registry.register(
+        name="submit_vendor_outcome",
+        description="Records the organizer-reported outcome of external communication with a provider without mutating bookings or plans.",
+        category=ToolCategory.WRITE,
+        parameters_schema=SubmitVendorOutcomeInput,
+        handler=_handle_submit_vendor_outcome,
+        requires_approval=False,
     )
 
     # 2. Deterministic Analysis & Computational Options
@@ -1086,12 +1107,14 @@ def create_default_tool_registry() -> AgentToolRegistry:
         CheckProviderAvailabilityTool,
         CompareCandidatesTool,
         ShortlistVendorsTool,
+        SubmitVendorOutcomeTool,
     )
     registry.register(DiscoverProvidersTool())
     registry.register(QualifyProviderTool())
     registry.register(CheckProviderAvailabilityTool())
     registry.register(CompareCandidatesTool())
     registry.register(ShortlistVendorsTool())
+    registry.register(SubmitVendorOutcomeTool())
 
     # 4. Impact & Risk Tools
     from app.agent.tools.impact_tools import AnalyzeImpactTool

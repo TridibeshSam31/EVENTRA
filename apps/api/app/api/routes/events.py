@@ -1,13 +1,17 @@
 """API Route: Events (Phase 1 Foundational Endpoints + Phase 2 Specification Preview)"""
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db_session, get_current_user_id
 from app.services.event_service import EventService
 from app.services.collaboration_service import CollaborationService
 from app.services.vendor_service import VendorService
+from app.schemas.vendor_outcome import (
+    VendorOutcomeCreate,
+    VendorOutcomeResponse,
+)
 from app.services.specification_service import (
     SpecificationService,
     SpecificationValidationError,
@@ -271,4 +275,63 @@ def discover_venues_for_event(
         source=source,
         items=[VenueResponse.model_validate(v) for v in venues],
     )
+
+
+# --- Phase 6: Vendor Outcome Endpoints (Task 6) ---
+
+@router.post("/{event_id}/vendor-outcomes", response_model=VendorOutcomeResponse, status_code=status.HTTP_201_CREATED)
+def record_vendor_outcome(
+    event_id: str,
+    payload: VendorOutcomeCreate,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Records the organizer-reported outcome of an external vendor interaction.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    The outcome is strictly recorded with source='ORGANIZER_REPORTED' and verification_status='UNVERIFIED'.
+    Task 6 never mutates task provider assignments or booking confirmations.
+    """
+    from app.services.vendor_outcome_service import VendorOutcomeService
+    from app.models.vendor import Vendor
+    from app.models.task import Task
+
+    service = VendorOutcomeService(db)
+    outcome = service.record_outcome(event_id, payload, submitted_by=current_user_id)
+
+    vendor = db.query(Vendor).filter(Vendor.id == outcome.provider_id).first()
+    task = db.query(Task).filter(Task.id == outcome.task_id).first() if outcome.task_id else None
+
+    resp = VendorOutcomeResponse.model_validate(outcome)
+    resp.provider_name = vendor.name if vendor else None
+    resp.task_name = task.name if task else None
+    return resp
+
+
+@router.get("/{event_id}/vendor-outcomes", response_model=List[VendorOutcomeResponse], status_code=status.HTTP_200_OK)
+def list_vendor_outcomes(
+    event_id: str,
+    provider_id: Optional[str] = Query(None, description="Optional vendor ID filter"),
+    task_id: Optional[str] = Query(None, description="Optional task ID filter"),
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Lists historical organizer-reported vendor outcomes for an event in reverse chronological order."""
+    from app.services.vendor_outcome_service import VendorOutcomeService
+    from app.models.vendor import Vendor
+    from app.models.task import Task
+
+    service = VendorOutcomeService(db)
+    outcomes = service.get_outcomes_for_event(event_id, provider_id=provider_id, task_id=task_id)
+
+    results: List[VendorOutcomeResponse] = []
+    for o in outcomes:
+        vendor = db.query(Vendor).filter(Vendor.id == o.provider_id).first()
+        task = db.query(Task).filter(Task.id == o.task_id).first() if o.task_id else None
+        item = VendorOutcomeResponse.model_validate(o)
+        item.provider_name = vendor.name if vendor else None
+        item.task_name = task.name if task else None
+        results.append(item)
+    return results
+
 

@@ -180,3 +180,35 @@ class NegotiationStatus(str, Enum):
     DECLINED = "DECLINED"
     EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
+
+
+class CommunicationChannel(str, Enum):
+    """External channel used by the organizer to communicate with the vendor outside EVENTRA."""
+    PHONE = "PHONE"
+    EMAIL = "EMAIL"
+    WHATSAPP_EXTERNAL = "WHATSAPP_EXTERNAL"
+    IN_PERSON = "IN_PERSON"
+    OTHER = "OTHER"
+
+
+class VendorOutcomeStatus(str, Enum):
+    """Status of an organizer-reported external vendor interaction."""
+    PENDING = "PENDING"
+    CONTACTED = "CONTACTED"
+    INTERESTED = "INTERESTED"
+    AVAILABLE = "AVAILABLE"
+    UNAVAILABLE = "UNAVAILABLE"
+    QUOTE_RECEIVED = "QUOTE_RECEIVED"
+    ACCEPTED = "ACCEPTED"
+    DECLINED = "DECLINED"
+    NO_RESPONSE = "NO_RESPONSE"
+    UNKNOWN = "UNKNOWN"
+
+
+class ReportedAvailability(str, Enum):
+    """Availability state reported by the vendor during external communication."""
+    AVAILABLE = "AVAILABLE"
+    UNAVAILABLE = "UNAVAILABLE"
+    CONDITIONAL = "CONDITIONAL"
+    UNKNOWN = "UNKNOWN"
+

@@ -65,6 +65,11 @@ from app.schemas.event_intent import (
     SingleChangeProposal,
     EventChangeProposal,
 )
+from app.schemas.vendor_outcome import (
+    VendorOutcomeCreate,
+    VendorOutcomeResponse,
+    PaginatedVendorOutcomesResponse,
+)
 
 __all__ = [
     "UserCreate",
@@ -132,4 +137,7 @@ __all__ = [
     "EventIntent",
     "SingleChangeProposal",
     "EventChangeProposal",
+    "VendorOutcomeCreate",
+    "VendorOutcomeResponse",
+    "PaginatedVendorOutcomesResponse",
 ]
