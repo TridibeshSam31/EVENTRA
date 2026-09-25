@@ -15,11 +15,13 @@ from app.services.incident_service import IncidentService
 from app.services.recovery_service import RecoveryService
 from app.services.action_service import ActionService
 from app.services.verification_service import VerificationService
+from app.services.final_execution_plan_service import FinalExecutionPlanService
 from app.agent.tools.base import (
     AgentTool,
     ToolCategory,
     ToolAccessMode,
     ToolAvailabilityStatus,
+    ToolResultStatus,
     ToolContext,
     ToolResult,
 )
@@ -261,6 +263,17 @@ class ExecuteRecoveryTool(AgentTool):
                 "NOT_FOUND",
             )
 
+        observed_plan = FinalExecutionPlanService(context.db).compile_plan(
+            event_id=args.event_id, user_id=context.user_id
+        )
+        option_plan_version = args.plan_version or (opt.feasibility_result or {}).get("plan_version")
+        if option_plan_version is not None and option_plan_version != observed_plan.plan_version:
+            return ToolResult.failure_result(
+                self.name,
+                "STALE_PLAN: Re-observe the final execution plan and regenerate recovery options before execution.",
+                "STALE_PLAN",
+            )
+
         if not opt.is_feasible:
             return ToolResult.failure_result(
                 self.name,
@@ -331,6 +344,16 @@ class ExecuteRecoveryTool(AgentTool):
             requires_approval=False,
             approval_id=active_approval_id,
         )
+        if not verified:
+            return ToolResult(
+                success=False,
+                tool_name=self.name,
+                status=ToolResultStatus.VERIFICATION_FAILED,
+                data=data,
+                error="RECOVERY_FAILED: Action completed but deterministic verification did not confirm recovery.",
+                error_code="RECOVERY_FAILED",
+                verification_status="VERIFICATION_FAILED",
+            )
         return ToolResult.success_result(self.name, data)
 
 

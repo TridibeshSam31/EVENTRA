@@ -126,20 +126,16 @@ def _add_vendors(db: Session, event: Event, task1: Task, task2: Task) -> tuple:
     venue_vendor = Vendor(
         name="Taj Mahal Banquet",
         category="VENUE",
+        city="Delhi",
         status="ACTIVE",
-        max_capacity=800,
-        base_price=Decimal("500000.00"),
-        currency="INR",
+        base_cost=500000.0,
     )
     catering_vendor = Vendor(
         name="Royal Rasoi Caterers",
         category="CATERING",
+        city="Delhi",
         status="ACTIVE",
-        max_capacity=700,
-        base_price=Decimal("380000.00"),
-        currency="INR",
-        cuisine_types=["Indian"],
-        dietary_options=["vegetarian"],
+        base_cost=380000.0,
     )
     db.add_all([venue_vendor, catering_vendor])
     db.flush()
@@ -284,7 +280,7 @@ def test_partially_ready_non_critical_unassigned(db_session: Session):
     db_session.add_all([task1, task2])
     db_session.flush()
 
-    venue_vendor = Vendor(name="Grand Ballroom Venue", category="VENUE", status="ACTIVE")
+    venue_vendor = Vendor(name="Grand Ballroom Venue", category="VENUE", city="Delhi", status="ACTIVE")
     db_session.add(venue_vendor)
     db_session.flush()
     task1.provider_id = venue_vendor.id
@@ -368,7 +364,7 @@ def test_blocked_budget_exceeded(db_session: Session):
     db_session.add(task1)
     db_session.flush()
 
-    vendor = Vendor(name="Royal Rasoi Caterers", category="CATERING", status="ACTIVE")
+    vendor = Vendor(name="Royal Rasoi Caterers", category="CATERING", city="Delhi", status="ACTIVE")
     db_session.add(vendor)
     db_session.flush()
     task1.provider_id = vendor.id
@@ -684,7 +680,7 @@ def test_missing_vendor_assignment_record_blocks_plan(db_session: Session):
     """Task.provider_id alone is not treated as an authoritative binding."""
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     event = _base_event(db_session, now)
-    vendor = Vendor(name="Unrecorded Caterer", category="CATERING", status="ACTIVE")
+    vendor = Vendor(name="Unrecorded Caterer", category="CATERING", city="Delhi", status="ACTIVE")
     db_session.add(vendor)
     db_session.flush()
     task = Task(

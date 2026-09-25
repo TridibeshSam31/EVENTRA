@@ -101,5 +101,13 @@ This is a living status document tracking the active engineering state of EVENTR
 
 ---
 
+## Task 10: P3 Agentic Recovery Integration
+
+- Recovery options are now pinned to the authoritative Task 9 plan version at generation time and rejected as `STALE_PLAN` if that version changes before execution.
+- Recovery execution updates the authoritative `Task.provider_id` and assignment/budget state together, preserving the action transaction and audit transition.
+- The recovery agent tool re-observes the final plan before execution and reports `VERIFICATION_FAILED` rather than a false success when post-action verification cannot confirm recovery.
+
+---
+
 ## Next Phase
 **NEXT PHASE = Task 10 — P3 agentic recovery consuming the authoritative final execution plan when live state deviates.**

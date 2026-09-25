@@ -158,6 +158,17 @@ class ActionService:
         if not recovery:
             raise NotFoundException(f"Recovery option '{recovery_option_id}' not found for event '{event_id}'.")
 
+        # Recovery options are derived from Task 9's authoritative plan version.
+        # Reject a request that was reasoned against an older operational plan.
+        expected_plan_version = (recovery.feasibility_result or {}).get("plan_version")
+        current_plan_version = 1 + self.db.query(StateTransition).filter(
+            StateTransition.event_id == event_id
+        ).count()
+        if expected_plan_version is not None and expected_plan_version != current_plan_version:
+            raise ConflictException(
+                "STALE_PLAN: The authoritative execution-plan version changed since this recovery option was generated."
+            )
+
         # Optimistic Concurrency Check: Verify state hasn't mutated since option was generated
         current_snapshot = compute_event_state_snapshot(self.db, event_id)
         if recovery.status == "STALE" or recovery.state_snapshot != current_snapshot:
@@ -220,6 +231,7 @@ class ActionService:
                     result_data.update(sub_res)
 
             # Mark recovery option executed
+            previous_recovery_status = recovery.status
             recovery.status = "EXECUTED"
             self.db.flush()
 
@@ -230,7 +242,7 @@ class ActionService:
                 event_id=event_id,
                 entity_type="RECOVERY_OPTION",
                 entity_id=recovery.id,
-                previous_state=recovery.status,
+                previous_state=previous_recovery_status,
                 new_state="EXECUTED",
                 reason=f"Executed recovery strategy: {recovery.strategy_type}",
             ))
@@ -305,6 +317,8 @@ class ActionService:
             self.db.flush()
 
         task.required_provider_category = category
+        task.provider_id = vendor.id
+        task.status = "ASSIGNED"
 
         # Update corresponding budget item if available
         budget_item = (
@@ -314,6 +328,7 @@ class ActionService:
         )
         if budget_item and cost > 0:
             budget_item.actual_amount = cost
+            budget_item.status = "COMMITTED"
 
         affected = [
             {"entity_type": "TASK", "id": task.id},

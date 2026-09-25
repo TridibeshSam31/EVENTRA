@@ -590,6 +590,7 @@ class ExecuteRecoveryInput(BaseModel):
     event_id: str = Field(..., description="Unique event identifier")
     recovery_option_id: str = Field(..., description="Recovery option identifier to execute")
     approval_id: Optional[str] = Field(None, description="ApprovalRequest ID if previously submitted and approved")
+    plan_version: Optional[int] = Field(None, ge=1, description="Task 9 plan version observed when selecting the option")
 
 
 class ExecuteRecoveryOutput(BaseModel):
