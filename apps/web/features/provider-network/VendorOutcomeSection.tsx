@@ -19,15 +19,19 @@ import {
   ShieldAlert,
   Loader2,
   Check,
+  Layers,
+  ArrowRight,
 } from "lucide-react";
 import {
   recordVendorOutcome,
   getVendorOutcomes,
   validateVendorOutcome,
   getVendorOutcomeValidation,
+  bindVendorToTask,
   VendorOutcomeItem,
   VendorOutcomePayload,
   VendorOutcomeValidation,
+  VendorTaskBindingResponse,
 } from "../../lib/api/vendors";
 
 interface VendorOutcomeSectionProps {
@@ -59,9 +63,14 @@ export function VendorOutcomeSection({
   const [availability, setAvailability] = useState("AVAILABLE");
   const [notes, setNotes] = useState("");
 
-  // Validation State
+  // Validation State (Task 7)
   const [validations, setValidations] = useState<Record<string, VendorOutcomeValidation>>({});
   const [validatingId, setValidatingId] = useState<string | null>(null);
+
+  // Binding State (Task 8)
+  const [bindingResponses, setBindingResponses] = useState<Record<string, VendorTaskBindingResponse>>({});
+  const [bindingLoadingId, setBindingLoadingId] = useState<string | null>(null);
+  const [bindingError, setBindingError] = useState<Record<string, string>>({});
 
   const loadOutcomes = async () => {
     try {
@@ -105,6 +114,49 @@ export function VendorOutcomeSection({
       setValidatingId(null);
     }
   };
+
+  const handleBindVendor = async (item: VendorOutcomeItem) => {
+    if (!item.task_id) {
+      setErrorMsg("Cannot bind vendor: no associated task ID found on this outcome.");
+      return;
+    }
+
+    try {
+      setBindingLoadingId(item.id);
+      setBindingError((prev) => ({ ...prev, [item.id]: "" }));
+      setErrorMsg(null);
+
+      const valRecord = validations[item.id];
+      const res = await bindVendorToTask(eventId, item.task_id, {
+        event_id: eventId,
+        task_id: item.task_id,
+        provider_id: item.provider_id,
+        validation_id: valRecord ? valRecord.id : undefined,
+      });
+
+      setBindingResponses((prev) => ({ ...prev, [item.id]: res }));
+
+      if (res.binding_status === "BOUND" || res.binding_status === "ALREADY_BOUND") {
+        setSuccessMsg(
+          `Vendor bound to task! Plan recalculated to v${res.plan_version_after || 2}. CPM critical path duration: ${res.plan_recalculation?.total_duration_minutes || 0}m.`
+        );
+      } else {
+        setBindingError((prev) => ({
+          ...prev,
+          [item.id]: res.decision?.reason || "Binding was blocked by deterministic feasibility check.",
+        }));
+      }
+      await loadOutcomes();
+    } catch (err: any) {
+      setBindingError((prev) => ({
+        ...prev,
+        [item.id]: err.message || "Failed to bind vendor to task.",
+      }));
+    } finally {
+      setBindingLoadingId(null);
+    }
+  };
+
 
   useEffect(() => {
     if (eventId) {
@@ -549,10 +601,98 @@ export function VendorOutcomeSection({
                     </div>
                   )}
 
-                  <div className="text-[10px] text-slate-500 border-t border-slate-900 pt-1.5 flex items-center space-x-1">
-                    <ShieldAlert className="w-3 h-3 text-cyan-400 flex-shrink-0" />
-                    <span>Pending Task 8 assignment — no booking or task binding has been executed.</span>
-                  </div>
+                  {/* Task 8: Vendor -> Task Binding & Recalculation Card */}
+                  {bindingResponses[item.id]?.binding_status === "BOUND" || bindingResponses[item.id]?.binding_status === "ALREADY_BOUND" ? (
+                    <div className="bg-emerald-950/40 border border-emerald-700/60 rounded-lg p-3 space-y-2 mt-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 font-bold text-[10px] rounded uppercase tracking-wider">
+                            ASSIGNED (TASK 8)
+                          </span>
+                          <span className="text-xs font-semibold text-emerald-200">
+                            Vendor Bound to Task
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-mono font-bold text-cyan-300">
+                          Plan v{bindingResponses[item.id]?.plan_version_after || "2"}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] text-slate-300 pt-1 border-t border-emerald-900/50">
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Critical Path:</span>
+                          <span className="font-semibold text-slate-200">
+                            {bindingResponses[item.id]?.plan_recalculation?.task_is_critical_path ? "YES (Critical)" : "Standard"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Total CPM Duration:</span>
+                          <span className="font-semibold text-slate-200">
+                            {bindingResponses[item.id]?.plan_recalculation?.total_duration_minutes || 0} mins
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">DAG Status:</span>
+                          <span className="font-semibold text-emerald-400">Strictly Acyclic</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">Budget Committed:</span>
+                          <span className="font-semibold text-cyan-300">
+                            {bindingResponses[item.id]?.plan_recalculation?.budget_committed_amount
+                              ? `₹${bindingResponses[item.id]?.plan_recalculation?.budget_committed_amount?.toLocaleString()}`
+                              : "Committed"}
+                          </span>
+                        </div>
+                      </div>
+                      <p className="text-[10px] text-slate-400 italic">
+                        {bindingResponses[item.id]?.message}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="pt-2 border-t border-slate-900 flex flex-col space-y-2 mt-2">
+                      <div className="flex items-center justify-between">
+                        <div className="text-[11px] text-slate-400">
+                          {item.task_id ? (
+                            <span>
+                              Assign to task: <strong className="text-slate-200">{item.task_name || item.task_id}</strong>
+                            </span>
+                          ) : (
+                            <span className="text-amber-400 text-[10px]">
+                              No task selected for this outcome
+                            </span>
+                          )}
+                        </div>
+                        {item.task_id && (
+                          <button
+                            type="button"
+                            onClick={() => handleBindVendor(item)}
+                            disabled={bindingLoadingId === item.id}
+                            className="px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 shadow-sm transition disabled:opacity-50"
+                          >
+                            {bindingLoadingId === item.id ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Evaluating & Binding...</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>Assign Vendor to Task</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                      {bindingError[item.id] && (
+                        <div className="bg-red-950/40 border border-red-800/60 p-2 rounded text-red-200 text-[11px] space-y-1">
+                          <div className="font-semibold flex items-center space-x-1 text-red-400">
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Binding Blocked:</span>
+                          </div>
+                          <p className="text-[10px] text-red-300">{bindingError[item.id]}</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="flex items-center justify-between pt-2 border-t border-slate-800/50">

@@ -210,6 +210,92 @@ export async function getVendorOutcomeValidation(
   return apiClient.get<VendorOutcomeValidation>(`/events/${eventId}/vendor-outcomes/${outcomeId}/validation`);
 }
 
+// ==============================================================================
+// TASK 8: VENDOR TO TASK BINDING & PLAN RECALCULATION
+// ==============================================================================
+
+export interface BindingDecision {
+  decision: "BIND" | "BLOCK";
+  can_bind: boolean;
+  reason: string;
+  reason_code?: string | null;
+  blocking_factors: string[];
+  validation_id?: string | null;
+  provider_id: string;
+  task_id: string;
+  event_id: string;
+}
+
+export interface PlanRecalculationResult {
+  schedule_recalculated: boolean;
+  critical_path_recalculated: boolean;
+  budget_recalculated: boolean;
+  is_dag_acyclic: boolean;
+  total_duration_minutes: number;
+  critical_path_task_ids: string[];
+  task_slack_minutes?: number | null;
+  task_is_critical_path: boolean;
+  budget_committed_amount?: number | null;
+  plan_version_before: number;
+  plan_version_after: number;
+}
+
+export interface VendorTaskBindingResponse {
+  binding_status: "BOUND" | "BLOCKED" | "ALREADY_BOUND";
+  event_id: string;
+  task_id: string;
+  provider_id: string;
+  validation_id?: string | null;
+  previous_provider_id?: string | null;
+  decision: BindingDecision;
+  plan_recalculation?: PlanRecalculationResult | null;
+  plan_version_before?: number | null;
+  plan_version_after?: number | null;
+  schedule_recalculated: boolean;
+  critical_path_recalculated: boolean;
+  budget_recalculated: boolean;
+  audit_id?: string | null;
+  message: string;
+}
+
+export interface VendorTaskBindingPayload {
+  event_id: string;
+  task_id: string;
+  provider_id: string;
+  validation_id?: string | null;
+  allow_reassignment?: boolean;
+  force_override_unknown?: boolean;
+}
+
+export async function bindVendorToTask(
+  eventId: string,
+  taskId: string,
+  payload: VendorTaskBindingPayload
+): Promise<VendorTaskBindingResponse> {
+  return apiClient.post<VendorTaskBindingResponse>(
+    `/events/${eventId}/tasks/${taskId}/bind-vendor`,
+    payload
+  );
+}
+
+export async function getBindingFeasibility(
+  eventId: string,
+  taskId: string,
+  providerId: string,
+  validationId?: string
+): Promise<BindingDecision> {
+  return apiClient.get<BindingDecision>(
+    `/events/${eventId}/tasks/${taskId}/binding-feasibility`,
+    {
+      params: {
+        provider_id: providerId,
+        validation_id: validationId,
+      },
+    }
+  );
+}
+
+
 
 
 

@@ -9,6 +9,7 @@ from app.services.intake_service import IntakeService
 from app.services.vendor_service import VendorService
 from app.services.vendor_outcome_service import VendorOutcomeService
 from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
+from app.services.vendor_task_binding_service import VendorTaskBindingService
 
 __all__ = [
     "EventService",
@@ -19,6 +20,7 @@ __all__ = [
     "VendorService",
     "VendorOutcomeService",
     "VendorOutcomeValidationService",
+    "VendorTaskBindingService",
 ]
 
 

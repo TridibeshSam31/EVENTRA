@@ -150,4 +150,16 @@ __all__ = [
     "VendorOutcomeClaims",
     "ClaimValidationDetail",
     "VendorOutcomeValidationResponse",
+    "VendorTaskBindingInput",
+    "BindingDecision",
+    "PlanRecalculationResult",
+    "VendorTaskBindingResponse",
 ]
+
+from app.schemas.vendor_binding import (
+    VendorTaskBindingInput,
+    BindingDecision,
+    PlanRecalculationResult,
+    VendorTaskBindingResponse,
+)
+

@@ -432,6 +432,43 @@ class ValidateVendorOutcomeOutput(BaseModel):
     validated_at: str = Field(..., description="ISO 8601 validation timestamp")
 
 
+# ==============================================================================
+# 3d. VENDOR TO TASK BINDING & PLAN RECALCULATION SCHEMAS (TASK 8)
+# ==============================================================================
+
+class BindVendorToTaskInput(BaseModel):
+    event_id: str = Field(..., description="Unique event identifier")
+    task_id: str = Field(..., description="Unique operational task identifier to bind provider to")
+    provider_id: str = Field(..., description="Unique provider/vendor identifier")
+    validation_id: Optional[str] = Field(None, description="Optional Task 7 validation ID. If omitted, uses latest validation.")
+    allow_reassignment: bool = Field(False, description="Set True to permit reassigning a task that already has an assigned provider")
+    force_override_unknown: bool = Field(False, description="Set True to explicitly override non-critical UNKNOWN availability")
+
+
+class BindVendorToTaskOutput(BaseModel):
+    binding_status: str = Field(..., description="Binding outcome: BOUND, BLOCKED, or ALREADY_BOUND")
+    event_id: str = Field(..., description="Associated event UUID")
+    task_id: str = Field(..., description="Associated task UUID")
+    provider_id: str = Field(..., description="Associated provider UUID")
+    validation_id: Optional[str] = Field(None, description="Task 7 validation UUID used")
+    previous_provider_id: Optional[str] = Field(None, description="Previously assigned provider UUID, if any")
+    decision: str = Field(..., description="Feasibility decision: BIND or BLOCK")
+    reason: str = Field(..., description="Deterministic explanation of binding decision")
+    reason_code: Optional[str] = Field(None, description="Specific blocking reason code if BLOCKED")
+    blocking_factors: List[str] = Field(default_factory=list, description="Specific failing checks or conflicts if BLOCKED")
+    plan_version_before: Optional[int] = Field(None, description="Plan sequence number before recalculation")
+    plan_version_after: Optional[int] = Field(None, description="Plan sequence number after recalculation")
+    schedule_recalculated: bool = Field(False, description="Whether planned schedule times were recalculated")
+    critical_path_recalculated: bool = Field(False, description="Whether critical path and slack were recomputed")
+    budget_recalculated: bool = Field(False, description="Whether budget commitments were recalculated")
+    is_dag_acyclic: bool = Field(True, description="Confirmation that DAG has no cycles")
+    critical_path_tasks: List[str] = Field(default_factory=list, description="Task IDs on critical path")
+    task_slack_minutes: Optional[int] = Field(None, description="Updated slack in minutes for this task")
+    task_is_critical_path: bool = Field(False, description="Whether this task is on the critical path")
+    budget_committed_amount: Optional[float] = Field(None, description="Committed quote amount")
+    audit_id: Optional[str] = Field(None, description="Immutable audit record UUID")
+    summary: str = Field(..., description="Concise operational summary")
+
 
 # ==============================================================================
 # 4. IMPACT & RISK SCHEMAS

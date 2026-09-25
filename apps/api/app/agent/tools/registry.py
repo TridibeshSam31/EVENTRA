@@ -485,6 +485,18 @@ def _handle_validate_vendor_outcome(db: Session, user_id: str, event_id: str, **
     return res.data.model_dump() if res.success and res.data else res
 
 
+def _handle_bind_vendor_to_task(db: Session, user_id: str, event_id: str, **kwargs) -> Any:
+    from app.agent.tools.provider_tools import BindVendorToTaskTool
+    from app.agent.tools.schemas import BindVendorToTaskInput
+    tool = BindVendorToTaskTool()
+    args_dict = {"event_id": event_id, **kwargs}
+    args_model = BindVendorToTaskInput.model_validate(args_dict)
+    ctx = ToolContext(db=db, user_id=user_id, event_id=event_id)
+    res = tool.execute(ctx, args_model)
+    return res.data.model_dump() if res.success and res.data else res
+
+
+
 
 
 def _handle_analyze_impact(db: Session, user_id: str, event_id: str, incident_id: str) -> Dict[str, Any]:
@@ -670,6 +682,7 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         ShortlistVendorsInput,
         SubmitVendorOutcomeInput,
         ValidateVendorOutcomeInput,
+        BindVendorToTaskInput,
     )
     registry.register(
         name="discover_providers",
@@ -715,6 +728,15 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         handler=_handle_validate_vendor_outcome,
         requires_approval=False,
     )
+    registry.register(
+        name="bind_vendor_to_task",
+        description="Evaluates feasibility and binds a qualified, validated provider to an operational task, recalculating schedule, critical path, and budget.",
+        category=ToolCategory.WRITE,
+        parameters_schema=BindVendorToTaskInput,
+        handler=_handle_bind_vendor_to_task,
+        requires_approval=False,
+    )
+
 
 
     # 2. Deterministic Analysis & Computational Options
@@ -1131,6 +1153,7 @@ def create_default_tool_registry() -> AgentToolRegistry:
         ShortlistVendorsTool,
         SubmitVendorOutcomeTool,
         ValidateVendorOutcomeTool,
+        BindVendorToTaskTool,
     )
     registry.register(DiscoverProvidersTool())
     registry.register(QualifyProviderTool())
@@ -1139,6 +1162,7 @@ def create_default_tool_registry() -> AgentToolRegistry:
     registry.register(ShortlistVendorsTool())
     registry.register(SubmitVendorOutcomeTool())
     registry.register(ValidateVendorOutcomeTool())
+    registry.register(BindVendorToTaskTool())
 
     # 4. Impact & Risk Tools
     from app.agent.tools.impact_tools import AnalyzeImpactTool

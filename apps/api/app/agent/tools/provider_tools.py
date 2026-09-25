@@ -38,10 +38,14 @@ from app.agent.tools.schemas import (
     SubmitVendorOutcomeOutput,
     ValidateVendorOutcomeInput,
     ValidateVendorOutcomeOutput,
+    BindVendorToTaskInput,
+    BindVendorToTaskOutput,
 )
 from app.agent.tools.permissions import ToolPermissionGuard
 from app.services.vendor_outcome_service import VendorOutcomeService
 from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
+from app.services.vendor_task_binding_service import VendorTaskBindingService
+from app.models.enums import BindingStatus
 from app.core.exceptions import BadRequestException, NotFoundException
 
 
@@ -586,5 +590,111 @@ class ValidateVendorOutcomeTool(AgentTool):
             validated_at=val.created_at.isoformat() if val.created_at else "",
         )
         return ToolResult.success_result(self.name, data)
+
+
+class BindVendorToTaskTool(AgentTool):
+    """Evaluates feasibility and deterministically binds a validated provider to a task.
+    
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    1. Does NOT accept blind LLM decisions or invent claims.
+    2. Enforces deterministic feasibility against Task 7 validation evidence.
+    3. Rejects bindings with failing hard requirements, critical conflicts, or missing mandatory availability.
+    4. Mutates task.provider_id and task.status = ASSIGNED upon success.
+    5. Recalculates DAG integrity, CPM critical path, schedule timings, and budget commitments.
+    6. Verifies post-bind consistency and records an immutable audit record.
+    """
+
+    name = "bind_vendor_to_task"
+    description = (
+        "Evaluates deterministic feasibility and binds a qualified, validated provider to an operational task. "
+        "Upon successful binding, recalculates task schedule, critical path (CPM), and budget commitments, "
+        "ensuring strict DAG acyclic integrity."
+    )
+    category = ToolCategory.PLANNING
+    access_mode = ToolAccessMode.WRITE
+    input_schema = BindVendorToTaskInput
+    output_schema = BindVendorToTaskOutput
+    availability = ToolAvailabilityStatus.AVAILABLE
+
+    def execute(self, context: ToolContext, args: BindVendorToTaskInput) -> ToolResult:
+        ToolPermissionGuard.verify_read_permission(context.db, args.event_id, context.user_id, self.name)
+
+        service = VendorTaskBindingService(context.db)
+        try:
+            res = service.bind_vendor_to_task(
+                event_id=args.event_id,
+                task_id=args.task_id,
+                provider_id=args.provider_id,
+                validation_id=args.validation_id,
+                user_id=context.user_id,
+                allow_reassignment=args.allow_reassignment,
+                force_override_unknown=args.force_override_unknown,
+            )
+        except Exception as exc:
+            return ToolResult.failure_result(
+                self.name,
+                f"Binding failed with operational error: {str(exc)}",
+                "BINDING_ERROR",
+            )
+
+        if res.binding_status == BindingStatus.BLOCKED:
+            output = BindVendorToTaskOutput(
+                binding_status=BindingStatus.BLOCKED.value,
+                event_id=res.event_id,
+                task_id=res.task_id,
+                provider_id=res.provider_id,
+                validation_id=res.validation_id,
+                previous_provider_id=res.previous_provider_id,
+                decision=res.decision.decision,
+                reason=res.decision.reason,
+                reason_code=res.decision.reason_code.value if res.decision.reason_code else None,
+                blocking_factors=res.decision.blocking_factors,
+                plan_version_before=res.plan_version_before,
+                plan_version_after=res.plan_version_after,
+                schedule_recalculated=res.schedule_recalculated,
+                critical_path_recalculated=res.critical_path_recalculated,
+                budget_recalculated=res.budget_recalculated,
+                is_dag_acyclic=True,
+                critical_path_tasks=[],
+                task_slack_minutes=None,
+                task_is_critical_path=False,
+                budget_committed_amount=None,
+                audit_id=res.audit_id,
+                summary=res.message,
+            )
+            return ToolResult.failure_result(
+                self.name,
+                res.message,
+                res.decision.reason_code.value if res.decision.reason_code else "BINDING_BLOCKED",
+                output.model_dump(),
+            )
+
+        # BOUND or ALREADY_BOUND
+        output = BindVendorToTaskOutput(
+            binding_status=res.binding_status.value,
+            event_id=res.event_id,
+            task_id=res.task_id,
+            provider_id=res.provider_id,
+            validation_id=res.validation_id,
+            previous_provider_id=res.previous_provider_id,
+            decision=res.decision.decision,
+            reason=res.decision.reason,
+            reason_code=None,
+            blocking_factors=[],
+            plan_version_before=res.plan_version_before,
+            plan_version_after=res.plan_version_after,
+            schedule_recalculated=res.schedule_recalculated,
+            critical_path_recalculated=res.critical_path_recalculated,
+            budget_recalculated=res.budget_recalculated,
+            is_dag_acyclic=res.plan_recalculation.is_dag_acyclic if res.plan_recalculation else True,
+            critical_path_tasks=res.plan_recalculation.critical_path_task_ids if res.plan_recalculation else [],
+            task_slack_minutes=res.plan_recalculation.task_slack_minutes if res.plan_recalculation else None,
+            task_is_critical_path=res.plan_recalculation.task_is_critical_path if res.plan_recalculation else False,
+            budget_committed_amount=res.plan_recalculation.budget_committed_amount if res.plan_recalculation else None,
+            audit_id=res.audit_id,
+            summary=res.message,
+        )
+        return ToolResult.success_result(self.name, output)
+
 
 

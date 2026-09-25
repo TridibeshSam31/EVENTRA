@@ -15,6 +15,11 @@ from app.schemas.vendor_outcome import (
 from app.schemas.vendor_outcome_validation import (
     VendorOutcomeValidationResponse,
 )
+from app.schemas.vendor_binding import (
+    VendorTaskBindingInput,
+    BindingDecision,
+    VendorTaskBindingResponse,
+)
 from app.services.specification_service import (
     SpecificationService,
     SpecificationValidationError,
@@ -385,6 +390,71 @@ def get_vendor_outcome_validation_endpoint(
     if not validation:
         raise NotFoundException(f"No validation found for vendor outcome '{outcome_id}'.")
     return VendorOutcomeValidationResponse.model_validate(validation)
+
+
+# --- Phase 8: Vendor -> Task Binding & Plan Recalculation (Task 8) ---
+
+@router.post(
+    "/{event_id}/tasks/{task_id}/bind-vendor",
+    response_model=VendorTaskBindingResponse,
+    status_code=status.HTTP_200_OK,
+)
+def bind_vendor_to_task_endpoint(
+    event_id: str,
+    task_id: str,
+    payload: VendorTaskBindingInput,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Deterministically evaluates and binds a qualified, validated provider to a task.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    1. Consumes Task 7 validated evidence.
+    2. Rejects bindings if hard requirements fail, conflicts exist, or mandatory availability is missing.
+    3. Atomically mutates task.provider_id and sets task.status = ASSIGNED.
+    4. Deterministically recalculates the execution plan (DAG verification, CPM critical path, schedule, and budget commitments).
+    5. Persists an immutable audit log.
+    """
+    from app.services.vendor_task_binding_service import VendorTaskBindingService
+
+    service = VendorTaskBindingService(db)
+    return service.bind_vendor_to_task(
+        event_id=event_id,
+        task_id=task_id,
+        provider_id=payload.provider_id,
+        validation_id=payload.validation_id,
+        user_id=current_user_id,
+        allow_reassignment=payload.allow_reassignment,
+        force_override_unknown=payload.force_override_unknown,
+    )
+
+
+@router.get(
+    "/{event_id}/tasks/{task_id}/binding-feasibility",
+    response_model=BindingDecision,
+    status_code=status.HTTP_200_OK,
+)
+def get_binding_feasibility_endpoint(
+    event_id: str,
+    task_id: str,
+    provider_id: str = Query(..., description="Provider UUID to evaluate"),
+    validation_id: Optional[str] = Query(None, description="Optional Task 7 validation UUID"),
+    force_override_unknown: bool = Query(False, description="Whether to permit override for non-critical unknowns"),
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Evaluates binding feasibility for a vendor without making any database mutations."""
+    from app.services.vendor_task_binding_service import VendorTaskBindingService
+
+    service = VendorTaskBindingService(db)
+    return service.evaluate_feasibility(
+        event_id=event_id,
+        task_id=task_id,
+        provider_id=provider_id,
+        validation_id=validation_id,
+        force_override_unknown=force_override_unknown,
+    )
+
 
 
 
