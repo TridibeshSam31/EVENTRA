@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   ArrowRight,
   CheckCircle2,
+  Compass,
 } from "lucide-react";
 
 export default function EventOverviewPage() {
@@ -28,13 +29,21 @@ export default function EventOverviewPage() {
 
   const modules = [
     {
+      title: "Final Execution Plan",
+      description: "Authoritative operational blueprint: schedule, provider bindings, critical path CPM, and checkpoints.",
+      href: `/events/${eventId}/execution-plan`,
+      icon: Compass,
+      badge: "EXECUTION READY",
+      color: "blue",
+      highlight: true,
+    },
+    {
       title: "Live Operations Command Center",
       description: "Real-time task telemetry, schedule deviations, and operational triggers.",
       href: `/events/${eventId}/live`,
       icon: Radio,
       badge: liveState?.lifecycle_state || "PLANNED",
       color: "emerald",
-      highlight: true,
     },
     {
       title: "Incident Triage & Blast Radius",

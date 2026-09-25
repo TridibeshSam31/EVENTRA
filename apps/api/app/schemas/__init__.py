@@ -162,4 +162,39 @@ from app.schemas.vendor_binding import (
     PlanRecalculationResult,
     VendorTaskBindingResponse,
 )
+from app.schemas.execution_plan import (
+    PlanReadiness,
+    PlanBlocker,
+    PlanWarning,
+    UnresolvedUnknown,
+    TaskPredecessorInfo,
+    TaskSuccessorInfo,
+    ExecutionPlanTask,
+    CriticalPathEntry,
+    ExecutionCheckpoint,
+    BudgetSummaryPlan,
+    ResourceSummaryPlan,
+    EventSummary,
+    CurrentAndNextTasks,
+    FinalExecutionPlan,
+    GenerateFinalExecutionPlanInput,
+)
+
+__all__.extend([
+    "PlanReadiness",
+    "PlanBlocker",
+    "PlanWarning",
+    "UnresolvedUnknown",
+    "TaskPredecessorInfo",
+    "TaskSuccessorInfo",
+    "ExecutionPlanTask",
+    "CriticalPathEntry",
+    "ExecutionCheckpoint",
+    "BudgetSummaryPlan",
+    "ResourceSummaryPlan",
+    "EventSummary",
+    "CurrentAndNextTasks",
+    "FinalExecutionPlan",
+    "GenerateFinalExecutionPlanInput",
+])
 

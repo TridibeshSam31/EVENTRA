@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   Clock,
   Sparkles,
+  Compass,
 } from "lucide-react";
 
 export default function PlanningPage() {
@@ -77,6 +78,13 @@ export default function PlanningPage() {
         </div>
 
         <div className="flex items-center space-x-2.5">
+          <Link
+            href={`/events/${eventId}/execution-plan`}
+            className="flex items-center space-x-1.5 px-4 py-2.5 rounded-lg bg-blue-900/60 hover:bg-blue-800/80 border border-blue-700 text-blue-200 text-xs font-bold transition shadow-lg"
+          >
+            <Compass className="w-3.5 h-3.5 text-blue-400" />
+            <span>Final Execution Blueprint →</span>
+          </Link>
           <button
             onClick={handleGeneratePlan}
             disabled={generating}

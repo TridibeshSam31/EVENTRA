@@ -866,3 +866,153 @@ export interface ProviderMessage {
   status?: string;
   timestamp: string;
 }
+
+// ==============================================================================
+// TASK 9: FINAL EXECUTION PLAN CONTRACTS
+// ==============================================================================
+export type PlanReadiness = "READY" | "PARTIALLY_READY" | "BLOCKED" | "INCOMPLETE";
+
+export interface PlanBlocker {
+  task_id?: string | null;
+  reason_code: string;
+  message: string;
+  severity: string;
+}
+
+export interface PlanWarning {
+  task_id?: string | null;
+  reason_code: string;
+  message: string;
+  severity: string;
+}
+
+export interface UnresolvedUnknown {
+  task_id?: string | null;
+  provider_id?: string | null;
+  category?: string | null;
+  field: string;
+  description: string;
+  is_critical: boolean;
+}
+
+export interface TaskPredecessorInfo {
+  task_id: string;
+  task_name: string;
+  status: string;
+  planned_end?: string | null;
+}
+
+export interface TaskSuccessorInfo {
+  task_id: string;
+  task_name: string;
+  status: string;
+  planned_start?: string | null;
+}
+
+export interface ExecutionPlanTask {
+  task_id: string;
+  task_name: string;
+  description?: string | null;
+  status: string;
+  phase?: string | null;
+  required_provider_category?: string | null;
+  assigned_provider_id?: string | null;
+  assigned_provider_name?: string | null;
+  assigned_provider_category?: string | null;
+  is_assigned: boolean;
+  planned_start?: string | null;
+  planned_end?: string | null;
+  duration_minutes: number;
+  slack_minutes?: number | null;
+  is_critical_path: boolean;
+  predecessors: TaskPredecessorInfo[];
+  successors: TaskSuccessorInfo[];
+  budget_allocation?: number | string | null;
+  committed_amount?: number | string | null;
+  requirements: string[];
+  resources: string[];
+  readiness_state: string;
+  operational_notes?: string | null;
+}
+
+export interface CriticalPathEntry {
+  sequence_order: number;
+  task_id: string;
+  task_name: string;
+  planned_start?: string | null;
+  planned_end?: string | null;
+  duration_minutes: number;
+  slack_minutes: number;
+  assigned_provider_name?: string | null;
+  status: string;
+}
+
+export interface ExecutionCheckpoint {
+  checkpoint_id: string;
+  time: string;
+  title: string;
+  description: string;
+  task_id?: string | null;
+  checkpoint_type: "START" | "COMPLETION" | "VERIFICATION" | "DEADLINE";
+}
+
+export interface BudgetSummaryPlan {
+  total_budget: number | string;
+  total_committed: number | string;
+  total_estimated: number | string;
+  remaining_budget: number | string;
+  uncommitted_allocation: number | string;
+  currency: string;
+  is_over_budget: boolean;
+  utilization_percent: number | string;
+  category_commitments: Record<string, number | string>;
+}
+
+export interface ResourceSummaryPlan {
+  total_resources: number;
+  allocated_count: number;
+  available_count: number;
+  depleted_count: number;
+  items: Array<Record<string, unknown>>;
+}
+
+export interface EventSummary {
+  event_id: string;
+  event_name: string;
+  event_type: string;
+  location?: string | null;
+  start_datetime?: string | null;
+  end_datetime?: string | null;
+  guest_count: number;
+  lifecycle_state: string;
+  total_budget: number | string;
+  currency: string;
+}
+
+export interface CurrentAndNextTasks {
+  current_task?: ExecutionPlanTask | null;
+  next_task?: ExecutionPlanTask | null;
+  position_note?: string | null;
+}
+
+export interface FinalExecutionPlan {
+  plan_id: string;
+  event_id: string;
+  plan_version: number;
+  generated_at: string;
+  event_summary: EventSummary;
+  readiness_status: PlanReadiness;
+  tasks: ExecutionPlanTask[];
+  critical_path: CriticalPathEntry[];
+  total_critical_duration_minutes: number;
+  budget_summary: BudgetSummaryPlan;
+  resource_summary: ResourceSummaryPlan;
+  current_and_next?: CurrentAndNextTasks | null;
+  execution_checkpoints: ExecutionCheckpoint[];
+  blockers: PlanBlocker[];
+  warnings: PlanWarning[];
+  unresolved_unknowns: UnresolvedUnknown[];
+  operational_focus?: string | null;
+  is_consistent: boolean;
+  consistency_errors: string[];
+}

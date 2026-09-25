@@ -20,6 +20,7 @@ import {
   BarChart3,
   History,
   FileText,
+  Compass,
 } from "lucide-react";
 import { EventSwitcher } from "./EventSwitcher";
 
@@ -37,6 +38,7 @@ export function DesktopSidebar() {
 
   const eventNav = [
     { label: "Overview", href: `/events/${eventId}`, icon: Sparkles },
+    { label: "Execution Plan", href: `/events/${eventId}/execution-plan`, icon: Compass },
     { label: "Setup", href: `/events/${eventId}/setup`, icon: Settings },
     { label: "Venue", href: `/events/${eventId}/venue`, icon: Building2 },
     { label: "Plan", href: `/events/${eventId}/plan`, icon: CalendarCheck },

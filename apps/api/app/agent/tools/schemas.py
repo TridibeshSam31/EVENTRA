@@ -636,3 +636,22 @@ class GetDecisionTraceOutput(BaseModel):
     event_id: str = Field(..., description="Event identifier")
     total: int = Field(..., description="Count of traces returned")
     traces: List[Dict[str, Any]] = Field(..., description="List of factual structured decision traces")
+
+
+# ==============================================================================
+# 7. TASK 9: FINAL EXECUTION PLAN SCHEMAS
+# ==============================================================================
+from app.schemas.execution_plan import (
+    GenerateFinalExecutionPlanInput,
+    FinalExecutionPlan,
+    PlanReadiness,
+    PlanBlocker,
+    PlanWarning,
+    UnresolvedUnknown,
+    ExecutionPlanTask,
+    CriticalPathEntry,
+    ExecutionCheckpoint,
+    BudgetSummaryPlan,
+    ResourceSummaryPlan,
+    EventSummary,
+)

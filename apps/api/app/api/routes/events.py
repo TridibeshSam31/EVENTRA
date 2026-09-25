@@ -20,6 +20,7 @@ from app.schemas.vendor_binding import (
     BindingDecision,
     VendorTaskBindingResponse,
 )
+from app.schemas.execution_plan import FinalExecutionPlan
 from app.services.specification_service import (
     SpecificationService,
     SpecificationValidationError,
@@ -456,5 +457,45 @@ def get_binding_feasibility_endpoint(
     )
 
 
+# --- Phase 9: Real Final Execution Plan Endpoints (Task 9) ---
+
+@router.get(
+    "/{event_id}/execution-plan",
+    response_model=FinalExecutionPlan,
+    status_code=status.HTTP_200_OK,
+)
+def get_final_execution_plan_endpoint(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Deterministically compiles the authoritative post-Task-8 execution plan.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    1. Consumes authoritative state (Task, VendorAssignment, Dependencies, CPM, Schedule, Budget).
+    2. Topological sequence ordering according to the DAG.
+    3. Exposes vendor assignments, timing, slack, critical path, budget, checkpoints, blockers, and warnings.
+    4. Deterministic consistency verification (DAG acyclicity, schedule precedence, deadline violations, budget overrun).
+    5. Pure read/compute: strictly idempotent, does not mutate state or increment plan version.
+    """
+    from app.services.final_execution_plan_service import FinalExecutionPlanService
+
+    service = FinalExecutionPlanService(db)
+    return service.compile_plan(event_id=event_id, user_id=current_user_id)
 
 
+@router.post(
+    "/{event_id}/execution-plan/generate",
+    response_model=FinalExecutionPlan,
+    status_code=status.HTTP_200_OK,
+)
+def generate_final_execution_plan_endpoint(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Alias/trigger endpoint to compile and return the authoritative final execution plan."""
+    from app.services.final_execution_plan_service import FinalExecutionPlanService
+
+    service = FinalExecutionPlanService(db)
+    return service.compile_plan(event_id=event_id, user_id=current_user_id)

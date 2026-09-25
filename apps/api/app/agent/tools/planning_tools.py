@@ -34,6 +34,11 @@ from app.agent.tools.schemas import (
     CreateOrUpdateTaskOutput,
 )
 from app.agent.tools.permissions import ToolPermissionGuard
+from app.services.final_execution_plan_service import FinalExecutionPlanService
+from app.schemas.execution_plan import (
+    GenerateFinalExecutionPlanInput,
+    FinalExecutionPlan,
+)
 
 
 class GetPlanTool(AgentTool):
@@ -343,6 +348,31 @@ class CreateOrUpdateTaskTool(AgentTool):
                 message=f"Task '{task.name}' ({task.id}) successfully created.",
             )
             return ToolResult.success_result(self.name, data)
+
+
+class GenerateFinalExecutionPlanTool(AgentTool):
+    """Compiles the authoritative post-Task-8 state into an execution-ready final plan."""
+
+    name = "generate_final_execution_plan"
+    description = (
+        "Deterministically compiles the authoritative operational plan: topological task execution sequence, "
+        "assigned providers, critical path timeline, slack, checkpoints, budget state, blockers, and warnings. "
+        "Strictly read/compute; does not mutate operational state or increment plan version."
+    )
+    category = ToolCategory.PLANNING
+    access_mode = ToolAccessMode.READ_ONLY
+    input_schema = GenerateFinalExecutionPlanInput
+    output_schema = FinalExecutionPlan
+    availability = ToolAvailabilityStatus.AVAILABLE
+
+    def execute(self, context: ToolContext, args: GenerateFinalExecutionPlanInput) -> ToolResult:
+        ToolPermissionGuard.verify_read_permission(context.db, args.event_id, context.user_id, self.name)
+        service = FinalExecutionPlanService(context.db)
+        try:
+            plan = service.compile_plan(event_id=args.event_id, user_id=context.user_id)
+            return ToolResult.success_result(self.name, plan)
+        except Exception as e:
+            return ToolResult.failure_result(self.name, f"Failed to generate final execution plan: {str(e)}")
 
 
 def planning_tools_run(**kwargs) -> Dict[str, Any]:

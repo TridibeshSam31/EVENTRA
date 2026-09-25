@@ -50,6 +50,7 @@ from app.agent.tools.planning_tools import (
     GetDependenciesTool,
     GetCriticalPathTool,
     CreateOrUpdateTaskTool,
+    GenerateFinalExecutionPlanTool,
 )
 from app.agent.tools.provider_tools import (
     DiscoverProvidersTool,
@@ -141,6 +142,7 @@ __all__ = [
     "GetDependenciesTool",
     "GetCriticalPathTool",
     "CreateOrUpdateTaskTool",
+    "GenerateFinalExecutionPlanTool",
     # Provider Tools
     "DiscoverProvidersTool",
     "QualifyProviderTool",

@@ -496,6 +496,17 @@ def _handle_bind_vendor_to_task(db: Session, user_id: str, event_id: str, **kwar
     return res.data.model_dump() if res.success and res.data else res
 
 
+def _handle_generate_final_execution_plan(db: Session, user_id: str, event_id: str, **kwargs) -> Any:
+    from app.agent.tools.planning_tools import GenerateFinalExecutionPlanTool
+    from app.schemas.execution_plan import GenerateFinalExecutionPlanInput
+    tool = GenerateFinalExecutionPlanTool()
+    args_dict = {"event_id": event_id, **kwargs}
+    args_model = GenerateFinalExecutionPlanInput.model_validate(args_dict)
+    ctx = ToolContext(db=db, user_id=user_id, event_id=event_id)
+    res = tool.execute(ctx, args_model)
+    return res.data.model_dump() if res.success and res.data else res
+
+
 
 
 
@@ -734,6 +745,15 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         category=ToolCategory.WRITE,
         parameters_schema=BindVendorToTaskInput,
         handler=_handle_bind_vendor_to_task,
+        requires_approval=False,
+    )
+    from app.schemas.execution_plan import GenerateFinalExecutionPlanInput
+    registry.register(
+        name="generate_final_execution_plan",
+        description="Deterministically compiles the authoritative post-Task-8 execution plan with topological task sequence, vendor assignments, critical path, budget, checkpoints, blockers, and warnings.",
+        category=ToolCategory.READ,
+        parameters_schema=GenerateFinalExecutionPlanInput,
+        handler=_handle_generate_final_execution_plan,
         requires_approval=False,
     )
 
@@ -1137,12 +1157,14 @@ def create_default_tool_registry() -> AgentToolRegistry:
         GetDependenciesTool,
         GetCriticalPathTool,
         CreateOrUpdateTaskTool,
+        GenerateFinalExecutionPlanTool,
     )
     registry.register(GetPlanTool())
     registry.register(GetTaskTool())
     registry.register(GetDependenciesTool())
     registry.register(GetCriticalPathTool())
     registry.register(CreateOrUpdateTaskTool())
+    registry.register(GenerateFinalExecutionPlanTool())
 
     # 3. Provider Tools
     from app.agent.tools.provider_tools import (

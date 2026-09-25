@@ -90,5 +90,16 @@ This is a living status document tracking the active engineering state of EVENTR
 
 ---
 
+## Task 9: Final Execution Plan
+
+- Added a deterministic, read-only `FinalExecutionPlanService` that compiles Task 8 authority into a topologically ordered operational blueprint.
+- The compiled plan exposes task/vendor bindings, schedules, predecessor/successor context, persisted CPM/slack, budget/resource summaries, operational checkpoints, current/next task, unresolved facts, warnings, and explicit blockers.
+- The compiler verifies assignment records, DAG integrity, schedule precedence, event deadlines, and budget state. It never recalculates or mutates CPM/schedule/budget data; missing Task 8 CPM state is surfaced as a warning.
+- Added `GET /api/events/{event_id}/execution-plan`, its explicit read/compute alias, and the read-only `generate_final_execution_plan` agent tool.
+- Added the organizer-facing `/events/[eventId]/execution-plan` workflow and Task 9 unit coverage, including authoritative-assignment, cycle, and non-mutation safeguards.
+- Frontend TypeScript validation passed with `node .\\node_modules\\typescript\\bin\\tsc -p apps\\web\\tsconfig.json --noEmit`. Python/pytest was unavailable in this shell and must be run from the configured backend environment.
+
+---
+
 ## Next Phase
-**NEXT PHASE = PHASE 13 — SIMULATION ENGINE & CHAOS INJECTION (or UI/PWA)**
+**NEXT PHASE = Task 10 — P3 agentic recovery consuming the authoritative final execution plan when live state deviates.**
