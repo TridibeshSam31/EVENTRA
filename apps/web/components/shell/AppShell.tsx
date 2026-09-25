@@ -47,7 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         />
 
         {/* The Glassmorphic Container wrapping the entire dashboard */}
-        <div className="bg-[#111115]/80 backdrop-blur-2xl border border-white/5 rounded-[32px] md:rounded-[48px] shadow-2xl min-h-full flex flex-col overflow-hidden relative z-10 pb-24">
+        <div className="bg-[#111115]/80 backdrop-blur-2xl border border-white/5 rounded-[32px] md:rounded-[48px] shadow-2xl h-full flex flex-col overflow-hidden relative z-10 pb-24">
            
            {/* Top Nav */}
            <header className="w-full flex flex-col xl:flex-row items-center justify-between px-6 md:px-10 py-6 gap-6 xl:gap-0 z-50 relative">

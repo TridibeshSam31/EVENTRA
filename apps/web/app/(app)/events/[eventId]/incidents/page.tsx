@@ -1,71 +1,84 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AlertTriangle, ShieldAlert, Radio, Clock, User, CheckCircle2, MessageSquare, Activity, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-const MOCK_INCIDENTS = [
-  {
-    id: 'INC-104',
-    title: 'A/V Vendor load-in delayed',
-    severity: 'critical',
-    status: 'investigating',
-    location: 'Dock B / Main Stage',
-    time: '10 mins ago',
-    description: 'The A/V equipment truck is stuck at loading dock B due to an unauthorized vehicle blocking the entrance. This will impact the Main Stage setup which was scheduled to begin 5 minutes ago.',
-    assignedTo: 'Security Team',
-    updates: [
-      { time: '10:45 AM', user: 'System', text: 'Incident automatically logged via Dock B camera alert.' },
-      { time: '10:48 AM', user: 'Alex (Security)', text: 'En route to Dock B to locate the owner of the vehicle.' }
-    ]
-  },
-  {
-    id: 'INC-103',
-    title: 'Catering headcount mismatch',
-    severity: 'warning',
-    status: 'open',
-    location: 'Hall A (Dining)',
-    time: '45 mins ago',
-    description: 'Registration system shows 1,500 checked-in attendees but catering is only prepared for 1,200 for the afternoon break based on yesterday\'s forecast. Immediate action required to prevent shortage.',
-    assignedTo: 'F&B Coordinator',
-    updates: [
-      { time: '10:10 AM', user: 'AI Assistant', text: 'Detected 25% discrepancy between live attendance and catering order.' }
-    ]
-  },
-  {
-    id: 'INC-102',
-    title: 'VIP Speaker missing from Green Room',
-    severity: 'info',
-    status: 'resolved',
-    location: 'Green Room 2',
-    time: '2 hours ago',
-    description: 'Keynote speaker John Doe is not in Green Room 2, 15 minutes before stage time.',
-    assignedTo: 'Speaker Ops',
-    updates: [
-      { time: '08:45 AM', user: 'Sarah (Speaker Ops)', text: 'Found him at the coffee stand. Escorting to stage now.' },
-      { time: '08:50 AM', user: 'Sarah (Speaker Ops)', text: 'Speaker is backstage. Incident resolved.' }
-    ]
-  }
-];
+import { useParams } from 'next/navigation';
+import { listIncidents, resolveIncident } from '../../../../../lib/api/incidents';
 
 export default function IncidentsPage() {
-  const [selectedIncidentId, setSelectedIncidentId] = useState(MOCK_INCIDENTS[0].id);
-  const selectedIncident = MOCK_INCIDENTS.find(i => i.id === selectedIncidentId);
+  const params = useParams();
+  const eventId = params.eventId as string;
+
+  const [incidents, setIncidents] = useState<any[]>([]);
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
+  const [isResolving, setIsResolving] = useState(false);
+
+  const handleResolve = async () => {
+    if (!eventId || !selectedIncidentId) return;
+    setIsResolving(true);
+    try {
+      await resolveIncident(eventId, selectedIncidentId, "Resolved by organizer action in dashboard");
+      
+      // Update local state to reflect resolved
+      setIncidents(prev => prev.map(inc => {
+        if (inc.id === selectedIncidentId) {
+          return { ...inc, status: 'RESOLVED', resolution_notes: "Resolved by organizer action in dashboard", resolved_at: new Date().toISOString() };
+        }
+        return inc;
+      }));
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+  useEffect(() => {
+    async function fetchIncidents() {
+      if (!eventId) return;
+      try {
+        const res = await listIncidents(eventId);
+        if (res && res.items) {
+           setIncidents(res.items);
+           if (res.items.length > 0 && !selectedIncidentId) {
+              setSelectedIncidentId(res.items[0].id);
+           }
+        }
+
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    fetchIncidents();
+    const interval = setInterval(fetchIncidents, 10000);
+    return () => clearInterval(interval);
+  }, [eventId, selectedIncidentId]);
+
+  const selectedIncident = incidents.find(i => i.id === selectedIncidentId) || incidents[0];
 
   const getSeverityColor = (severity: string) => {
-    switch(severity) {
+    if (!severity) return 'text-gray-400 border-white/10 bg-white/5';
+    switch(severity.toLowerCase()) {
       case 'critical': return 'text-[#D6003C] border-[#D6003C]/30 bg-[#D6003C]/10';
-      case 'warning': return 'text-yellow-500 border-yellow-500/30 bg-yellow-500/10';
-      case 'info': return 'text-blue-400 border-blue-400/30 bg-blue-400/10';
+      case 'warning':
+      case 'high': return 'text-yellow-500 border-yellow-500/30 bg-yellow-500/10';
+      case 'info':
+      case 'medium': return 'text-blue-400 border-blue-400/30 bg-blue-400/10';
+      case 'low': return 'text-green-400 border-green-400/30 bg-green-400/10';
       default: return 'text-gray-400 border-white/10 bg-white/5';
     }
   };
 
   const getSeverityIcon = (severity: string) => {
-    switch(severity) {
+    if (!severity) return <Activity size={16} />;
+    switch(severity.toLowerCase()) {
       case 'critical': return <ShieldAlert size={16} />;
-      case 'warning': return <AlertTriangle size={16} />;
-      case 'info': return <Info size={16} />;
+      case 'warning':
+      case 'high': return <AlertTriangle size={16} />;
+      case 'info':
+      case 'medium': return <Info size={16} />;
       default: return <Activity size={16} />;
     }
   };
@@ -95,7 +108,7 @@ export default function IncidentsPage() {
         
         {/* Left Column: List */}
         <div className="xl:col-span-5 flex flex-col gap-4 overflow-y-auto pr-2 no-scrollbar pb-10">
-           {MOCK_INCIDENTS.map((incident) => (
+           {incidents.map((incident) => (
              <div 
                key={incident.id}
                onClick={() => setSelectedIncidentId(incident.id)}
@@ -112,26 +125,29 @@ export default function IncidentsPage() {
                <div className="flex items-start justify-between">
                  <div className={`px-3 py-1 rounded-full border text-[10px] uppercase tracking-widest font-bold flex items-center gap-2 ${getSeverityColor(incident.severity)}`}>
                    {getSeverityIcon(incident.severity)}
-                   {incident.severity}
+                   {incident.severity || 'UNKNOWN'}
                  </div>
-                 <span className="text-xs text-gray-500 font-medium">{incident.time}</span>
+                 <span className="text-xs text-gray-500 font-medium">{new Date(incident.occurred_at || incident.created_at).toLocaleTimeString()}</span>
                </div>
 
                <div>
                  <h3 className="text-lg font-semibold text-white leading-tight mb-1">{incident.title}</h3>
-                 <p className="text-sm text-gray-400 line-clamp-2">{incident.description}</p>
+                 <p className="text-sm text-gray-400 line-clamp-2">{incident.description || 'No description provided.'}</p>
                </div>
 
                <div className="flex items-center gap-4 mt-2 pt-4 border-t border-white/5">
                  <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                    <Radio size={14} /> {incident.location}
+                    <Radio size={14} /> {incident.related_venue_id || 'Main Venue'}
                  </div>
                  <div className="flex items-center gap-1.5 text-xs text-gray-400">
-                    <User size={14} /> {incident.assignedTo}
+                    <User size={14} /> {incident.assignedTo || 'Operations Team'}
                  </div>
                </div>
              </div>
            ))}
+           {incidents.length === 0 && (
+             <div className="text-gray-500 italic p-5">No incidents currently tracked.</div>
+           )}
         </div>
 
         {/* Right Column: Details */}
@@ -139,7 +155,7 @@ export default function IncidentsPage() {
            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-[#D6003C]/50 to-transparent opacity-50" />
            
            <AnimatePresence mode="wait">
-             <motion.div 
+               <motion.div 
                key={selectedIncidentId}
                initial={{ opacity: 0, y: 10 }}
                animate={{ opacity: 1, y: 0 }}
@@ -151,25 +167,29 @@ export default function IncidentsPage() {
                    <div className="flex items-center gap-3 mb-3">
                      <span className="text-sm font-mono text-gray-500">{selectedIncident?.id}</span>
                      <span className="w-1 h-1 rounded-full bg-white/20" />
-                     <span className={`text-xs font-bold uppercase tracking-widest ${selectedIncident?.status === 'resolved' ? 'text-green-500' : 'text-white'}`}>
-                       Status: {selectedIncident?.status}
+                     <span className={`text-xs font-bold uppercase tracking-widest ${selectedIncident?.status?.toUpperCase() === 'RESOLVED' ? 'text-green-500' : 'text-white'}`}>
+                       Status: {selectedIncident?.status || 'UNKNOWN'}
                      </span>
                    </div>
-                   <h2 className="text-2xl md:text-3xl font-medium text-white mb-2">{selectedIncident?.title}</h2>
+                   <h2 className="text-2xl md:text-3xl font-medium text-white mb-2">{selectedIncident?.title || 'Unknown Incident'}</h2>
                    <div className="flex flex-wrap gap-4 md:gap-6 text-sm text-gray-400 font-medium">
-                      <span className="flex items-center gap-2"><Clock size={16} /> {selectedIncident?.time}</span>
-                      <span className="flex items-center gap-2"><Radio size={16} /> {selectedIncident?.location}</span>
+                      <span className="flex items-center gap-2"><Clock size={16} /> {selectedIncident ? new Date(selectedIncident.occurred_at || selectedIncident.created_at).toLocaleTimeString() : ''}</span>
+                      <span className="flex items-center gap-2"><Radio size={16} /> {selectedIncident?.related_venue_id || 'Main Venue'}</span>
                    </div>
                  </div>
-                 <button className="bg-[#D6003C] hover:bg-[#FF0D4A] text-white px-6 py-2.5 rounded-full text-sm font-bold uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(214,0,60,0.3)] flex items-center justify-center gap-2 flex-shrink-0 w-full md:w-auto hover:-translate-y-0.5">
-                   <CheckCircle2 size={16} /> Mark Resolved
+                 <button 
+                   onClick={handleResolve}
+                   disabled={isResolving || selectedIncident?.status?.toUpperCase() === 'RESOLVED'}
+                   className="bg-[#D6003C] hover:bg-[#FF0D4A] disabled:opacity-50 text-white px-6 py-2.5 rounded-full text-sm font-bold uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(214,0,60,0.3)] flex items-center justify-center gap-2 flex-shrink-0 w-full md:w-auto hover:-translate-y-0.5"
+                 >
+                   <CheckCircle2 size={16} /> {isResolving ? 'Resolving...' : (selectedIncident?.status?.toUpperCase() === 'RESOLVED' ? 'Resolved' : 'Mark Resolved')}
                  </button>
                </div>
 
                <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-6 mb-8 flex-shrink-0">
                  <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-3">Incident Brief</h4>
                  <p className="text-gray-300 leading-relaxed text-sm md:text-base">
-                   {selectedIncident?.description}
+                   {selectedIncident?.description || 'No description provided.'}
                  </p>
                </div>
 
@@ -179,24 +199,22 @@ export default function IncidentsPage() {
                  </h4>
                  
                  <div className="flex-1 overflow-y-auto no-scrollbar relative before:absolute before:left-3.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-white/5 space-y-6 pl-10 pr-2">
-                   {selectedIncident?.updates.map((update, idx) => (
-                     <div key={idx} className="relative">
+                   {selectedIncident?.resolution_notes ? (
+                     <div className="relative">
                        <div className="absolute -left-10 mt-1 w-7 h-7 rounded-full bg-[#111115] border border-white/10 flex items-center justify-center shadow-lg z-10">
-                          {update.user === 'System' || update.user === 'AI Assistant' ? (
-                            <Radio size={12} className="text-[#D6003C]" />
-                          ) : (
-                            <User size={12} className="text-gray-400" />
-                          )}
+                          <Radio size={12} className="text-[#D6003C]" />
                        </div>
-                       <div className="bg-[#111115] border border-white/5 rounded-2xl p-4 ml-2 border-l-2 hover:border-white/20 transition-all cursor-default" style={{ borderLeftColor: update.user === 'System' || update.user === 'AI Assistant' ? '#D6003C' : '#333' }}>
+                       <div className="bg-[#111115] border border-white/5 rounded-2xl p-4 ml-2 border-l-2 hover:border-white/20 transition-all cursor-default border-[#D6003C]">
                          <div className="flex justify-between items-center mb-2">
-                           <span className="text-sm font-semibold text-white">{update.user}</span>
-                           <span className="text-[10px] font-medium uppercase tracking-widest text-gray-500">{update.time}</span>
+                           <span className="text-sm font-semibold text-white">System Notes</span>
+                           <span className="text-[10px] font-medium uppercase tracking-widest text-gray-500">{selectedIncident.resolved_at ? new Date(selectedIncident.resolved_at).toLocaleTimeString() : ''}</span>
                          </div>
-                         <p className="text-sm text-gray-400">{update.text}</p>
+                         <p className="text-sm text-gray-400">{selectedIncident.resolution_notes}</p>
                        </div>
                      </div>
-                   ))}
+                   ) : (
+                     <div className="text-gray-500 italic text-sm">No action logs recorded.</div>
+                   )}
                  </div>
 
                  {/* Chat Input */}

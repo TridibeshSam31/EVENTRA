@@ -5,52 +5,96 @@ import { motion } from "framer-motion";
 import Image from "next/image";
 import { ArrowUpRight, Play, Pause, Clock, CheckCircle2, Circle, Users, DollarSign, Activity, AlertTriangle, Radar, ListTree, Map, ShieldAlert, FileText, Zap, Radio } from "lucide-react";
 import { listEvents } from "../../../lib/api/events";
+import { getLiveState } from "../../../lib/api/live";
+import { getPlan } from "../../../lib/api/planning";
+import { getActivityFeed } from "../../../lib/api/observability";
+import { listIncidents } from "../../../lib/api/incidents";
 import { formatRelativeTime } from "../../../lib/utils/time";
 import { TimelineCard } from "../../../components/dashboard/TimelineCard";
 
 export default function DashboardHome() {
   const [events, setEvents] = useState<any[]>([]);
   const [activeEvent, setActiveEvent] = useState<any>(null);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [activity, setActivity] = useState<any[]>([]);
+  const [incidents, setIncidents] = useState<any[]>([]);
+  const [liveState, setLiveState] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
+      setIsLoading(true);
       try {
         const evList = await listEvents();
         setEvents(evList || []);
+        
         if (evList && evList.length > 0) {
-          setActiveEvent(evList[0]);
-        } else {
-          setActiveEvent({
-            id: "conference_demo",
-            name: "Tech Launch Keynote 2026",
-            venue: "Moscone Center",
-            dates: "Oct 24-26",
-            budget: 65000,
-            budgetUtilized: 45000,
-            registrationsCurrent: 1204,
-            readiness: 92,
-            state: "NORMAL"
-          });
+          const currentEvent = evList[0];
+          setActiveEvent(currentEvent);
+          
+          try {
+            const liveState = await getLiveState(currentEvent.id);
+            if (liveState) {
+              setLiveState(liveState);
+              if (liveState.task_progress) {
+                 setTasks(liveState.task_progress.map(t => ({
+                  id: t.task_id,
+                  title: t.task_name,
+                  completed: t.status === 'COMPLETED',
+                  assignee: 'System',
+                  dueDate: t.planned_end ? new Date(t.planned_end).toLocaleDateString() : 'TBD',
+                  urgent: t.priority === 'CRITICAL' || t.priority === 'HIGH'
+               })));
+              }
+            }
+          } catch (e) {
+            try {
+               const plan = await getPlan(currentEvent.id);
+               if (plan && plan.tasks) {
+                  setTasks(plan.tasks.map(t => ({
+                     id: t.id,
+                     title: t.name,
+                     completed: t.status === 'COMPLETED',
+                     assignee: 'System',
+                     dueDate: t.planned_end ? new Date(t.planned_end).toLocaleDateString() : 'TBD',
+                     urgent: t.priority === 'CRITICAL' || t.priority === 'HIGH'
+                  })));
+               }
+            } catch(e) {}
+          }
+          
+          try {
+             const feed = await getActivityFeed(currentEvent.id, 10);
+             if (feed && feed.items) {
+                setActivity(feed.items.map(a => ({
+                   id: a.id,
+                   type: a.category,
+                   message: a.summary,
+                   timestamp: a.timestamp || new Date().toISOString(),
+                   actor: a.actor_id || 'System',
+                   action: a.status
+                })));
+             }
+          } catch(e) {}
+
+          try {
+             const incRes = await listIncidents(currentEvent.id);
+             if (incRes && incRes.items) {
+                setIncidents(incRes.items.filter(i => i.status !== 'RESOLVED'));
+             }
+          } catch(e) {}
+
         }
       } catch (err) {
-        console.error(err);
-        setActiveEvent({
-          id: "conference_demo",
-          name: "Tech Launch Keynote 2026",
-          venue: "Moscone Center",
-          dates: "Oct 24-26",
-          budget: 65000,
-          budgetUtilized: 45000,
-          registrationsCurrent: 1204,
-          readiness: 92,
-          state: "NORMAL"
-        });
+        console.error("Failed to load events", err);
+      } finally {
+        setIsLoading(false);
       }
     }
     load();
   }, []);
 
-  if (!activeEvent) {
+  if (isLoading) {
     return (
       <div className="flex h-[60vh] flex-col items-center justify-center text-center">
         <h2 className="text-2xl font-bold tracking-tight mb-2 text-white">Loading Command Center...</h2>
@@ -59,21 +103,19 @@ export default function DashboardHome() {
     );
   }
 
-  // Mocked Tasks for the UI
-  type DashboardTask = { id: string; title: string; completed: boolean; assignee: string; dueDate: string; urgent?: boolean; };
-  const sortedTasks: DashboardTask[] = [
-    { id: "1", title: "Finalize A/V Contract", completed: false, assignee: "Alex M.", dueDate: new Date(Date.now() + 86400000).toISOString(), urgent: true },
-    { id: "2", title: "Approve Catering Menu", completed: true, assignee: "Sarah J.", dueDate: new Date(Date.now() - 86400000).toISOString(), urgent: false },
-    { id: "3", title: "Confirm Keynote Speaker", completed: false, assignee: "David L.", dueDate: new Date(Date.now() + 172800000).toISOString(), urgent: false },
-  ].sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1));
+  if (!activeEvent) {
+    return (
+      <div className="flex h-[60vh] flex-col items-center justify-center text-center">
+        <h2 className="text-2xl font-bold tracking-tight mb-2 text-white">No Events Found</h2>
+        <p className="text-muted-foreground text-gray-400 mb-6">You have no active events. Start by creating a new one.</p>
+        <button onClick={() => window.location.href = '/events/new'} className="bg-[#D6003C] hover:bg-[#FF0D4A] px-6 py-3 rounded-lg text-white font-bold shadow-lg transition-colors">
+          Create New Event
+        </button>
+      </div>
+    );
+  }
 
-  // Mocked Activity for the UI
-  type DashboardActivity = { id: string; type: string; message: string; timestamp: string; actor?: string; action?: string; };
-  const activity: DashboardActivity[] = [
-    { id: "a1", type: "UPDATE", message: "Budget increased by $5,000 for A/V.", timestamp: new Date(Date.now() - 3600000).toISOString(), actor: "Sarah Chen", action: "approved the catering budget" },
-    { id: "a2", type: "TASK", message: "Catering Menu approved by Sarah J.", timestamp: new Date(Date.now() - 7200000).toISOString(), actor: "Mike Johnson", action: "uploaded the updated floor plan" },
-    { id: "a3", type: "ALERT", message: "Keynote flight delayed by 2 hours.", timestamp: new Date(Date.now() - 14400000).toISOString(), actor: "System", action: "sent automated speaker reminders" },
-  ];
+  const sortedTasks = [...tasks].sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1));
 
   return (
     <div className="w-full flex flex-col space-y-8 animate-in fade-in duration-500 pb-20">
@@ -132,21 +174,28 @@ export default function DashboardHome() {
            <div className="flex flex-col items-end">
               <div className="flex items-center gap-2">
                  <Users size={18} className="text-gray-400" />
-                 <span className="text-5xl md:text-[64px] font-light text-white leading-none tracking-tighter">{(activeEvent.registrationsCurrent || 1204).toLocaleString()}</span>
+                 <span className="text-5xl md:text-[64px] font-light text-white leading-none tracking-tighter">{(activeEvent.guest_count || 0).toLocaleString()}</span>
               </div>
               <span className="text-sm font-medium text-gray-400 mt-2">Registrations</span>
            </div>
            <div className="flex flex-col items-end">
               <div className="flex items-center gap-2">
-                 <DollarSign size={18} className="text-gray-400" />
-                 <span className="text-5xl md:text-[64px] font-light text-white leading-none tracking-tighter">{Math.floor((activeEvent.budgetUtilized || 45000) / 1000)}<span className="text-3xl text-gray-400">k</span></span>
+                 <span className="text-5xl md:text-[64px] font-light text-white leading-none tracking-tighter">
+                    <span className="text-3xl text-gray-400">$</span>
+                    {liveState?.budget_deviation?.total_spent ? Math.floor(liveState.budget_deviation.total_spent / 1000) : 0}
+                    <span className="text-3xl text-gray-400">k</span>
+                    <span className="text-3xl text-gray-600 mx-2">/</span>
+                    <span className="text-4xl text-gray-300">
+                       {Math.floor((liveState?.budget_deviation?.total_budget || activeEvent?.total_budget || 0) / 1000)}k
+                    </span>
+                 </span>
               </div>
               <span className="text-sm font-medium text-gray-400 mt-2">Spend / Budget</span>
            </div>
            <div className="flex flex-col items-end">
               <div className="flex items-center gap-2">
                  <Activity size={18} className="text-gray-400" />
-                 <span className="text-5xl md:text-[64px] font-light text-white leading-none tracking-tighter">{activeEvent.readiness || 92}<span className="text-3xl text-gray-400">%</span></span>
+                 <span className="text-5xl md:text-[64px] font-light text-white leading-none tracking-tighter">{liveState?.progress_percent ? Math.round(liveState.progress_percent) : 0}<span className="text-3xl text-gray-400">%</span></span>
               </div>
               <span className="text-sm font-medium text-gray-400 mt-2">Overall Health</span>
            </div>
@@ -169,7 +218,10 @@ export default function DashboardHome() {
               <h3 className="text-2xl font-medium text-white leading-tight mb-1">{activeEvent.name}</h3>
               <p className="text-sm text-gray-400 mb-6">{activeEvent.location || activeEvent.venue || "Moscone Center"} • {activeEvent.date || activeEvent.dates || "Oct 24-26"}</p>
               
-              <button className="w-full py-3.5 rounded-2xl bg-[#D6003C] hover:bg-[#FF0D4A] text-white text-sm font-bold uppercase tracking-wider transition-colors shadow-[0_0_20px_rgba(214,0,60,0.4)] flex items-center justify-center gap-2 group/btn">
+              <button 
+                onClick={() => window.location.href = `/events/${activeEvent.id}/live`}
+                className="w-full py-3.5 rounded-2xl bg-[#D6003C] hover:bg-[#FF0D4A] text-white text-sm font-bold uppercase tracking-wider transition-colors shadow-[0_0_20px_rgba(214,0,60,0.4)] flex items-center justify-center gap-2 group/btn"
+              >
                  <Radio size={16} className="animate-pulse" />
                  Enter Control Room
                  <ArrowUpRight size={16} className="opacity-50 group-hover/btn:opacity-100 transition-opacity" />
@@ -184,33 +236,30 @@ export default function DashboardHome() {
                  <Radar size={20} className="text-[#D6003C]" />
                  <h3 className="text-lg font-medium text-white">Risk Radar</h3>
               </div>
-              <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 cursor-pointer transition-colors">
+              <div 
+                onClick={() => window.location.href = `/events/${activeEvent.id}/recovery`}
+                className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center hover:bg-white/10 cursor-pointer transition-colors"
+              >
                  <ArrowUpRight size={16} className="text-white" />
               </div>
            </div>
            
            <div className="flex-1 flex flex-col gap-4 overflow-y-auto pr-2 no-scrollbar">
-              <div className="p-4 rounded-2xl bg-black/40 border border-[#D6003C]/30 relative overflow-hidden group">
-                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#D6003C]" />
-                 <div className="flex items-start gap-3">
-                    <AlertTriangle size={16} className="text-[#D6003C] mt-0.5 flex-shrink-0" />
-                    <div>
-                       <p className="text-sm font-medium text-white leading-snug">Catering headcount mismatch detected.</p>
-                       <p className="text-xs text-gray-400 mt-1">Expected: 1,500. Ordered: 1,200. Action required to prevent shortage.</p>
+              {incidents.slice(0, 3).map(inc => (
+                 <div key={inc.id} className={`p-4 rounded-2xl bg-black/40 border relative overflow-hidden group ${inc.severity === 'CRITICAL' ? 'border-[#D6003C]/30' : 'border-yellow-500/30'}`}>
+                    <div className={`absolute left-0 top-0 bottom-0 w-1 ${inc.severity === 'CRITICAL' ? 'bg-[#D6003C]' : 'bg-yellow-500'}`} />
+                    <div className="flex items-start gap-3">
+                       <AlertTriangle size={16} className={`mt-0.5 flex-shrink-0 ${inc.severity === 'CRITICAL' ? 'text-[#D6003C]' : 'text-yellow-500'}`} />
+                       <div>
+                          <p className="text-sm font-medium text-white leading-snug">{inc.title}</p>
+                          <p className="text-xs text-gray-400 mt-1">{inc.description}</p>
+                       </div>
                     </div>
                  </div>
-              </div>
-
-              <div className="p-4 rounded-2xl bg-black/40 border border-yellow-500/30 relative overflow-hidden group">
-                 <div className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-500" />
-                 <div className="flex items-start gap-3">
-                    <AlertTriangle size={16} className="text-yellow-500 mt-0.5 flex-shrink-0" />
-                    <div>
-                       <p className="text-sm font-medium text-white leading-snug">A/V Vendor load-in delayed.</p>
-                       <p className="text-xs text-gray-400 mt-1">Truck stuck at Dock B. Will impact Stage 1 setup by approx 45 mins.</p>
-                    </div>
-                 </div>
-              </div>
+              ))}
+              {incidents.length === 0 && (
+                 <p className="text-gray-500 text-sm mt-4">No active risks detected.</p>
+              )}
            </div>
         </div>
 
@@ -225,21 +274,21 @@ export default function DashboardHome() {
            <div className="relative w-44 h-44 mt-8 flex items-center justify-center">
               <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
                  <circle cx="50" cy="50" r="45" fill="transparent" stroke="rgba(255,255,255,0.05)" strokeWidth="8" />
-                 <circle cx="50" cy="50" r="45" fill="transparent" stroke="#D6003C" strokeWidth="8" strokeDasharray="283" strokeDashoffset={283 - (283 * ((activeEvent.budgetUtilized || 65) / (activeEvent.budget || 100)))} strokeLinecap="round" className="drop-shadow-[0_0_8px_rgba(214,0,60,0.6)] transition-all duration-1000" />
+                 <circle cx="50" cy="50" r="45" fill="transparent" stroke="#D6003C" strokeWidth="8" strokeDasharray="283" strokeDashoffset={283 - (283 * ((liveState?.budget_deviation?.total_spent || 0) / (liveState?.budget_deviation?.total_budget || activeEvent?.total_budget || 1)))} strokeLinecap="round" className="drop-shadow-[0_0_8px_rgba(214,0,60,0.6)] transition-all duration-1000" />
               </svg>
               <div className="absolute flex flex-col items-center justify-center">
                  <span className="text-3xl font-light text-white tracking-tighter">
-                   ${Math.floor((activeEvent.budgetUtilized || 45000) / 1000)}k
+                   ${liveState?.budget_deviation?.total_spent ? Math.floor(liveState.budget_deviation.total_spent / 1000) : 0}k
                  </span>
                  <span className="text-[10px] font-medium text-gray-400 uppercase tracking-widest mt-1 text-center leading-tight">
-                   Spent of<br/>${Math.floor((activeEvent.budget || 65000) / 1000)}k
+                   Spent of<br/>${Math.floor((liveState?.budget_deviation?.total_budget || activeEvent?.total_budget || 0) / 1000)}k
                  </span>
               </div>
            </div>
 
            <div className="mt-6 w-full flex items-center justify-between text-xs font-medium text-gray-400 bg-white/5 px-4 py-2 rounded-xl">
               <span>Remaining Buffer:</span>
-              <span className="text-white">${((activeEvent.budget || 65000) - (activeEvent.budgetUtilized || 45000)).toLocaleString()}</span>
+              <span className="text-white">${((liveState?.budget_deviation?.total_budget || activeEvent?.total_budget || 0) - (liveState?.budget_deviation?.total_spent || 0)).toLocaleString()}</span>
            </div>
         </div>
 

@@ -1,111 +1,106 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AlertTriangle, AlertOctagon, CheckCircle2, Clock, Users, DollarSign, ArrowRight, Zap, ShieldCheck, Truck, Video, LayoutList, Activity } from 'lucide-react';
-
-const DISRUPTIONS = [
-  {
-    id: 'D-892',
-    title: 'Critical Vendor No-Show: Apex Catering',
-    time: '15 mins ago',
-    severity: 'critical',
-    description: 'Apex Catering truck broke down on the highway. They cannot deliver the lunch service for 1,500 attendees scheduled at 12:30 PM.',
-    impact: [
-      { icon: Users, text: '1,500 VIP attendees without lunch' },
-      { icon: Clock, text: 'Lunch break starts in 1h 45m' },
-      { icon: DollarSign, text: '$12,500 prepaid (Refund flagged by legal)' }
-    ],
-    options: [
-      {
-        id: 'opt-1',
-        title: 'Activate On-Call Backup: UrbanBites',
-        badge: 'AI Recommended',
-        badgeColor: 'text-[#D6003C] bg-[#D6003C]/10 border-[#D6003C]/30',
-        icon: ShieldCheck,
-        eta: '60 mins',
-        cost: '+$1,200 Premium',
-        details: 'UrbanBites is on our preferred backup roster. They have pre-packaged gourmet lunch boxes ready for immediate dispatch from a kitchen 10 miles away.',
-        actionText: 'Dispatch UrbanBites'
-      },
-      {
-        id: 'opt-2',
-        title: 'Food Truck Fleet Scramble',
-        badge: 'Alternative',
-        badgeColor: 'text-yellow-500 bg-yellow-500/10 border-yellow-500/30',
-        icon: Truck,
-        eta: '90 mins',
-        cost: 'Budget Neutral',
-        details: 'Automatically ping 5 local partner food trucks to park outside the venue. Requires attendees to go outside and limits networking time.',
-        actionText: 'Send Fleet Ping'
-      },
-      {
-        id: 'opt-3',
-        title: 'Distribute Digital Food Vouchers',
-        badge: 'Last Resort',
-        badgeColor: 'text-gray-400 bg-white/5 border-white/10',
-        icon: Zap,
-        eta: 'Instant',
-        cost: '+$3,500 over budget',
-        details: 'Send $25 UberEats/DoorDash vouchers to all 1,500 attendee emails immediately. Allows attendees to order delivery to the venue lobbies.',
-        actionText: 'Issue Vouchers via Email'
-      }
-    ]
-  },
-  {
-    id: 'D-891',
-    title: 'Keynote Speaker Flight Delayed',
-    time: '45 mins ago',
-    severity: 'warning',
-    description: 'Dr. Sarah Chen’s flight is delayed by 2 hours due to severe weather. She will miss the 10:00 AM opening keynote slot on the Main Stage.',
-    impact: [
-      { icon: Clock, text: '10:00 AM Main Stage slot (90 mins) empty' },
-      { icon: Users, text: '4,000 attendees expecting keynote' }
-    ],
-    options: [
-      {
-        id: 'opt-4',
-        title: 'Swap Schedule with Panel 2',
-        badge: 'AI Recommended',
-        badgeColor: 'text-[#D6003C] bg-[#D6003C]/10 border-[#D6003C]/30',
-        icon: LayoutList,
-        eta: 'Instant',
-        cost: 'None',
-        details: 'Move the "Future of AI" panel up to 10:00 AM. Push Keynote to 1:00 PM. All panelists are currently on-site and in the Green Room.',
-        actionText: 'Execute Schedule Swap & Notify App'
-      },
-      {
-        id: 'opt-5',
-        title: 'Virtual Keynote via Zoom',
-        badge: 'Alternative',
-        badgeColor: 'text-yellow-500 bg-yellow-500/10 border-yellow-500/30',
-        icon: Video,
-        eta: '10:00 AM',
-        cost: 'None',
-        details: 'Speaker logs in from the airport lounge. A/V team routes her remote video feed to the Main Stage screens.',
-        actionText: 'Setup Virtual Link with A/V'
-      }
-    ]
-  }
-];
+import { useParams } from 'next/navigation';
+import { listIncidents, resolveIncident } from '../../../../../lib/api/incidents';
+import { listRecoveryOptions, generateRecoveryOptions } from '../../../../../lib/api/recovery';
+import { simulateCancellationIncident, approveRecoveryAction } from '../../../../../lib/api/events';
 
 export default function RecoveryPage() {
-  const [activeId, setActiveId] = useState(DISRUPTIONS[0].id);
+  const [disruptions, setDisruptions] = useState<any[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [resolving, setResolving] = useState(false);
   const [resolvedDisruptions, setResolvedDisruptions] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const params = useParams();
+  
+  const eventId = params.eventId as string;
 
-  const activeDisruption = DISRUPTIONS.find(d => d.id === activeId);
-  const isResolved = resolvedDisruptions.includes(activeId);
+  const fetchIncidents = async () => {
+    if (!eventId) return;
+    try {
+      const res = await listIncidents(eventId);
+      if (res && res.items) {
+        const mapped = await Promise.all(res.items.map(async (inc) => {
+          let optsResponse;
+          try {
+             optsResponse = await listRecoveryOptions(eventId, inc.id);
+             if (!optsResponse || !optsResponse.items || optsResponse.items.length === 0) {
+               optsResponse = await generateRecoveryOptions(eventId, inc.id);
+             }
+          } catch(e) {}
+          
+          const options = optsResponse?.items || [];
+          
+          return {
+            id: inc.id,
+            title: inc.title,
+            time: inc.detected_at ? new Date(inc.detected_at).toLocaleTimeString() : 'Recently',
+            severity: inc.severity?.toLowerCase() || 'warning',
+            description: inc.description || 'Anomaly detected.',
+            impact: [
+              { icon: Users, text: 'System Impact' }
+            ],
+            options: options.map((opt: any, i: number) => ({
+              id: opt.id,
+              title: opt.strategy_type || `Option ${i + 1}`,
+              badge: i === 0 ? 'AI Recommended' : 'Alternative',
+              badgeColor: i === 0 ? 'text-[#D6003C] bg-[#D6003C]/10 border-[#D6003C]/30' : 'text-yellow-500 bg-yellow-500/10 border-yellow-500/30',
+              icon: ShieldCheck,
+              eta: 'TBD',
+              cost: 'TBD',
+              details: JSON.stringify(opt.proposed_changes) || 'Details not available',
+              actionText: 'Execute'
+            }))
+          };
+        }));
+        setDisruptions(mapped);
+        if (mapped.length > 0 && !activeId) {
+          setActiveId(mapped[0].id);
+        }
+      }
+    } catch(err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const handleExecute = () => {
-    if (!selectedOption) return;
+  useEffect(() => {
+    fetchIncidents();
+  }, [eventId]);
+
+  const activeDisruption = disruptions.find(d => d.id === activeId);
+  const isResolved = activeId ? resolvedDisruptions.includes(activeId) : false;
+
+  const handleExecute = async () => {
+    if (!selectedOption || !activeId) return;
     setResolving(true);
-    setTimeout(() => {
-      setResolving(false);
+    try {
+      // In a full implementation, you'd trigger approveRecoveryAction or executeAction here.
+      // For now we will resolve the incident directly.
+      await resolveIncident(eventId, activeId, "Executed recovery option: " + selectedOption);
       setResolvedDisruptions(prev => [...prev, activeId]);
       setSelectedOption(null);
-    }, 2500);
+    } catch(e) {
+      console.error(e);
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const handleSimulate = async () => {
+    setLoading(true);
+    try {
+      await simulateCancellationIncident(eventId);
+      await fetchIncidents();
+    } catch(e) {
+      console.error(e);
+      setLoading(false);
+    }
   };
 
   return (
@@ -119,6 +114,13 @@ export default function RecoveryPage() {
           </h1>
           <p className="text-sm text-gray-400 mt-1 ml-10">AI-driven disruption analysis and mitigation plans.</p>
         </div>
+        <button 
+          onClick={handleSimulate}
+          disabled={loading}
+          className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-lg text-sm font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+        >
+          {loading ? 'Processing...' : 'Simulate Incident'}
+        </button>
       </div>
 
       <div className="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-6 min-h-0 overflow-y-auto no-scrollbar pb-20 xl:pb-0">
@@ -130,7 +132,7 @@ export default function RecoveryPage() {
            </h3>
            
            <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-4">
-              {DISRUPTIONS.map((disruption) => {
+              {disruptions.map((disruption) => {
                  const isActive = activeId === disruption.id;
                  const resolved = resolvedDisruptions.includes(disruption.id);
                  
@@ -208,7 +210,7 @@ export default function RecoveryPage() {
                    <div className="bg-[#111115] border border-white/5 rounded-2xl p-5 mb-8 flex-shrink-0">
                       <h4 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-4">Impact Blast Radius</h4>
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                         {activeDisruption?.impact.map((imp, idx) => (
+                         {activeDisruption?.impact.map((imp: any, idx: number) => (
                             <div key={idx} className="flex items-start gap-3">
                                <div className="bg-[#D6003C]/10 border border-[#D6003C]/20 p-2 rounded-lg text-[#D6003C] shrink-0">
                                   <imp.icon size={16} />
@@ -226,7 +228,7 @@ export default function RecoveryPage() {
                       </h4>
                       
                       <div className="flex-1 overflow-y-auto no-scrollbar space-y-4 pb-6">
-                         {activeDisruption?.options.map((opt) => {
+                         {activeDisruption?.options.map((opt: any) => {
                             const isSelected = selectedOption === opt.id;
                             
                             return (
@@ -291,7 +293,7 @@ export default function RecoveryPage() {
                                  disabled={resolving}
                                  className="bg-[#D6003C] hover:bg-[#FF0D4A] disabled:opacity-50 text-white px-6 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(214,0,60,0.3)] flex items-center gap-2"
                                >
-                                  {resolving ? 'Executing...' : activeDisruption?.options.find(o => o.id === selectedOption)?.actionText}
+                                  {resolving ? 'Executing...' : activeDisruption?.options.find((o: any) => o.id === selectedOption)?.actionText}
                                   {!resolving && <ArrowRight size={16} />}
                                </button>
                             </motion.div>

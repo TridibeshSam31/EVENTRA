@@ -49,7 +49,11 @@ class EventService:
     def create_event(self, data: EventCreate) -> Event:
         owner = self.get_user(data.owner_id)
         if not owner:
-            raise NotFoundException(f"Owner user with id '{data.owner_id}' not found.")
+            # Auto-create the user if they don't exist for demo/development purposes
+            owner = User(id=data.owner_id, name="Default Operator", email=f"{data.owner_id}@eventra.local")
+            self.db.add(owner)
+            self.db.commit()
+            self.db.refresh(owner)
 
         event = Event(
             owner_id=data.owner_id,

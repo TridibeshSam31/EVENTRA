@@ -113,7 +113,9 @@ function StatusBadge({
   )
 }
 
-export function TimelineCard() {
+export function TimelineCard({ tasks = [] }: { tasks?: any[] }) {
+  const displayTasks = tasks && tasks.length > 0 ? tasks.slice(0, 5) : pipelineSteps;
+  
   return (
     <div className="bg-white/[0.03] border border-white/5 rounded-3xl p-6 lg:col-span-2 relative overflow-hidden flex flex-col min-h-[400px] hover:border-white/10 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgb(214,0,60,0.05)] transition-all duration-300 group">
       <div className="flex justify-between items-center mb-8 relative z-10">
@@ -130,60 +132,59 @@ export function TimelineCard() {
       
       <div className="flex-1 w-full relative z-10 flex flex-col p-4 bg-black/20 rounded-2xl border border-white/5 overflow-y-auto no-scrollbar">
         <div className="w-full max-w-lg mx-auto mt-4">
-          <Timeline defaultValue={3}>
-            {pipelineSteps.map((step) => (
-              <TimelineItem key={step.id} step={step.id} className="ms-10 pb-10 text-white">
-                <TimelineHeader>
-                  <TimelineSeparator className="group-data-[orientation=vertical]/timeline:-left-7 group-data-[orientation=vertical]/timeline:h-[calc(100%-1.5rem-0.25rem)] group-data-[orientation=vertical]/timeline:translate-y-7 border-white/20" />
-                  <div className="flex items-center gap-2">
-                    <TimelineTitle className="text-sm font-semibold text-white">
-                      {step.title}
-                    </TimelineTitle>
-                    <StatusBadge status={step.status} duration={step.duration} />
-                  </div>
-                  <TimelineIndicator
-                    className={cn(
-                      "bg-black border border-white/20 text-gray-400 group-data-completed/timeline-item:bg-[#16A34A] group-data-completed/timeline-item:text-white flex size-6 items-center justify-center group-data-[orientation=vertical]/timeline:-left-7",
-                      step.status === "active" && "ring-[#0284C7]/30 ring-2 border-[#0284C7] bg-[#0284C7]/10 text-[#0284C7]"
-                    )}
-                  >
-                    <StatusIcon status={step.status} />
-                  </TimelineIndicator>
-                </TimelineHeader>
-                <TimelineContent className="mt-2">
-                  <Frame stacked dense spacing="sm" className="bg-black/40 border-white/10">
-                    <Collapsible defaultOpen className="group/collapsible">
-                      <CollapsibleTrigger className="flex w-full hover:bg-white/5 p-2 rounded-lg transition-colors">
-                        <FrameHeader className="flex grow flex-row items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <Avatar className="size-5 border border-white/10">
-                              <AvatarImage
-                                src={step.user.avatar}
-                                alt={step.user.name}
-                              />
-                              <AvatarFallback className="bg-black text-xs">
-                                {step.user.name.charAt(0)}
-                              </AvatarFallback>
-                            </Avatar>
-                            <span className="text-gray-300 text-xs font-medium">
-                              {step.user.name}
-                            </span>
-                          </div>
-                          <ChevronRightIcon  className="text-gray-500 size-4 transition-transform duration-200 group-data-open/collapsible:rotate-90" />
-                        </FrameHeader>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent>
-                        <FramePanel className="bg-black/60 border-t border-white/5 p-3 mt-1 rounded-b-lg">
-                          <p className="text-gray-400 text-sm leading-relaxed font-mono">
-                            {step.description}
-                          </p>
-                        </FramePanel>
-                      </CollapsibleContent>
-                    </Collapsible>
-                  </Frame>
-                </TimelineContent>
-              </TimelineItem>
-            ))}
+          <Timeline defaultValue={displayTasks.length > 0 ? (displayTasks[displayTasks.length - 1].id || 3) : 3}>
+            {displayTasks.map((step: any, index: number) => {
+              const statusValue = step.completed ? "completed" : (index === 0 && !step.completed ? "active" : step.status || "pending");
+              return (
+                <TimelineItem key={step.id || index} step={step.id || index} className="ms-10 pb-10 text-white">
+                  <TimelineHeader>
+                    <TimelineSeparator className="group-data-[orientation=vertical]/timeline:-left-7 group-data-[orientation=vertical]/timeline:h-[calc(100%-1.5rem-0.25rem)] group-data-[orientation=vertical]/timeline:translate-y-7 border-white/20" />
+                    <div className="flex items-center gap-2">
+                      <TimelineTitle className="text-sm font-semibold text-white">
+                        {step.title}
+                      </TimelineTitle>
+                      <StatusBadge status={statusValue} duration={step.duration || (step.dueDate || "TBD")} />
+                    </div>
+                    <TimelineIndicator
+                      className={cn(
+                        "bg-black border border-white/20 text-gray-400 group-data-completed/timeline-item:bg-[#16A34A] group-data-completed/timeline-item:text-white flex size-6 items-center justify-center group-data-[orientation=vertical]/timeline:-left-7",
+                        statusValue === "active" && "ring-[#0284C7]/30 ring-2 border-[#0284C7] bg-[#0284C7]/10 text-[#0284C7]"
+                      )}
+                    >
+                      <StatusIcon status={statusValue} />
+                    </TimelineIndicator>
+                  </TimelineHeader>
+                  <TimelineContent className="mt-2">
+                    <Frame stacked dense spacing="sm" className="bg-black/40 border-white/10">
+                      <Collapsible defaultOpen className="group/collapsible">
+                        <CollapsibleTrigger className="flex w-full hover:bg-white/5 p-2 rounded-lg transition-colors">
+                          <FrameHeader className="flex grow flex-row items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <Avatar className="size-5 border border-white/10">
+                                <AvatarFallback className="bg-black text-xs">
+                                  {step.user?.name?.charAt(0) || step.assignee?.charAt(0) || 'S'}
+                                </AvatarFallback>
+                              </Avatar>
+                              <span className="text-gray-300 text-xs font-medium">
+                                {step.user?.name || step.assignee || 'System'}
+                              </span>
+                            </div>
+                            <ChevronRightIcon  className="text-gray-500 size-4 transition-transform duration-200 group-data-open/collapsible:rotate-90" />
+                          </FrameHeader>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <FramePanel className="bg-black/60 border-t border-white/5 p-3 mt-1 rounded-b-lg">
+                            <p className="text-gray-400 text-sm leading-relaxed font-mono">
+                              {step.description || "System operation logged and timestamped."}
+                            </p>
+                          </FramePanel>
+                        </CollapsibleContent>
+                      </Collapsible>
+                    </Frame>
+                  </TimelineContent>
+                </TimelineItem>
+              );
+            })}
           </Timeline>
         </div>
       </div>

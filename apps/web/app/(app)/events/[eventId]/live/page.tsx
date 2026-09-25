@@ -1,10 +1,49 @@
 "use client";
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Radio, Users, User, Mic, Video, Activity, AlertTriangle, Shield, Clock, Zap, Map, Wifi, Battery, MessageSquare, CheckCircle2 } from 'lucide-react';
+import { useParams } from 'next/navigation';
+import { getLiveState } from '../../../../../lib/api/live';
+import { getActivityFeed } from '../../../../../lib/api/observability';
+import { getPlan } from '../../../../../lib/api/planning';
 
 export default function LiveOpsPage() {
+  const params = useParams();
+  const eventId = params.eventId as string;
+
+  const [liveState, setLiveState] = useState<any>(null);
+  const [activities, setActivities] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      if (!eventId) return;
+      try {
+        const [stateRes, activityRes, planRes] = await Promise.all([
+          getLiveState(eventId).catch(() => null),
+          getActivityFeed(eventId).catch(() => ({ items: [] })),
+          getPlan(eventId).catch(() => ({ tasks: [] }))
+        ]);
+        if (stateRes) setLiveState(stateRes);
+        if (activityRes?.items) setActivities(activityRes.items);
+        if (planRes?.tasks) setTasks(planRes.tasks);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+    const interval = setInterval(loadData, 15000);
+    return () => clearInterval(interval);
+  }, [eventId]);
+
+  const liveCap = liveState?.venue_capacity_current || 4250;
+  const maxCap = liveState?.venue_capacity_max || 5000;
+  const currentPhase = liveState?.current_phase || "Tech Launch Keynote";
+
   return (
     <div className="flex flex-col h-full max-h-[calc(100vh-80px)] overflow-hidden p-4 md:p-8">
       {/* Header */}
@@ -23,7 +62,7 @@ export default function LiveOpsPage() {
         <div className="flex items-center gap-3">
           <div className="hidden md:flex items-center gap-2 bg-[#0B0B0F] border border-white/5 rounded-xl px-4 py-2">
              <Clock size={16} className="text-gray-400" />
-             <span className="text-sm font-mono text-white">10:45:22 AM</span>
+             <span className="text-sm font-mono text-white">{new Date().toLocaleTimeString()}</span>
           </div>
           <button className="bg-red-500/10 hover:bg-red-500/20 text-red-500 border border-red-500/30 px-4 py-2 rounded-xl text-sm font-bold uppercase tracking-wider transition-all flex items-center gap-2 shadow-[0_0_15px_rgba(239,68,68,0.1)] hover:shadow-[0_0_20px_rgba(239,68,68,0.3)]">
             <AlertTriangle size={16} /> <span className="hidden sm:inline">Broadcast</span> Emergency
@@ -59,7 +98,7 @@ export default function LiveOpsPage() {
                 </div>
                 
                 <div className="relative z-10">
-                   <h2 className="text-3xl md:text-4xl font-medium text-white mb-2 tracking-tight leading-tight">Tech Launch Keynote</h2>
+                   <h2 className="text-3xl md:text-4xl font-medium text-white mb-2 tracking-tight leading-tight">{currentPhase}</h2>
                    <p className="text-gray-400 flex items-center gap-2"><User size={16} /> Speaker: Jane Doe, VP Engineering</p>
                 </div>
 
@@ -139,8 +178,8 @@ export default function LiveOpsPage() {
                     <span className="text-[10px] md:text-xs font-bold uppercase tracking-widest">Live Capacity</span>
                  </div>
                  <div>
-                    <span className="text-2xl md:text-3xl font-light text-white">4,250</span>
-                    <span className="text-[10px] md:text-xs text-gray-500 ml-1 md:ml-2">/ 5,000</span>
+                    <span className="text-2xl md:text-3xl font-light text-white">{liveCap}</span>
+                    <span className="text-[10px] md:text-xs text-gray-500 ml-1 md:ml-2">/ {maxCap}</span>
                  </div>
               </motion.div>
               
@@ -225,51 +264,38 @@ export default function LiveOpsPage() {
               
               <div className="flex-1 overflow-y-auto no-scrollbar relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-0.5 before:bg-white/5 space-y-6">
                  
-                 <div className="relative pl-8 group/item">
-                    <div className="absolute left-0 mt-1 w-6 h-6 rounded-full bg-[#111115] border border-white/10 flex items-center justify-center z-10 group-hover/item:border-white/30 transition-colors">
-                       <CheckCircle2 size={12} className="text-gray-500" />
-                    </div>
-                    <div>
-                       <p className="text-[10px] md:text-xs font-mono text-gray-500 mb-0.5">09:00 AM</p>
-                       <p className="text-sm font-medium text-gray-400 line-through">Doors Open / Registration</p>
-                    </div>
-                 </div>
-
-                 <div className="relative pl-8">
-                    <div className="absolute left-0 mt-1 w-6 h-6 rounded-full bg-[#D6003C]/20 border border-[#D6003C] flex items-center justify-center z-10 shadow-[0_0_15px_rgba(214,0,60,0.5)]">
-                       <div className="w-2 h-2 rounded-full bg-[#D6003C] animate-pulse" />
-                    </div>
-                    <div className="bg-[#D6003C]/5 border border-[#D6003C]/20 rounded-2xl p-3 -mt-2 hover:bg-[#D6003C]/10 transition-colors cursor-pointer">
-                       <div className="flex justify-between items-center mb-1">
-                          <p className="text-[10px] md:text-xs font-mono text-[#D6003C]">10:00 AM (LIVE)</p>
-                          <span className="text-[9px] uppercase tracking-widest text-[#D6003C] font-bold bg-[#D6003C]/20 px-2 py-0.5 rounded-full border border-[#D6003C]/30">On Time</span>
+                 {tasks && tasks.length > 0 ? (
+                   tasks.slice(0, 5).map((task, idx) => {
+                     const isLive = task.status === 'IN_PROGRESS';
+                     const isDone = task.status === 'COMPLETED';
+                     return (
+                       <div key={task.id} className="relative pl-8 group/item">
+                          <div className={`absolute left-0 mt-1 w-6 h-6 rounded-full flex items-center justify-center z-10 transition-colors ${isLive ? 'bg-[#D6003C]/20 border border-[#D6003C] shadow-[0_0_15px_rgba(214,0,60,0.5)]' : 'bg-[#111115] border border-white/10 group-hover/item:border-white/30'}`}>
+                             {isLive ? <div className="w-2 h-2 rounded-full bg-[#D6003C] animate-pulse" /> : isDone ? <CheckCircle2 size={12} className="text-gray-500" /> : <div className="w-2 h-2 rounded-full bg-gray-500" />}
+                          </div>
+                          
+                          {isLive ? (
+                            <div className="bg-[#D6003C]/5 border border-[#D6003C]/20 rounded-2xl p-3 -mt-2 hover:bg-[#D6003C]/10 transition-colors cursor-pointer">
+                               <div className="flex justify-between items-center mb-1">
+                                  <p className="text-[10px] md:text-xs font-mono text-[#D6003C]">{new Date(task.planned_start || Date.now()).toLocaleTimeString()} (LIVE)</p>
+                                  <span className="text-[9px] uppercase tracking-widest text-[#D6003C] font-bold bg-[#D6003C]/20 px-2 py-0.5 rounded-full border border-[#D6003C]/30">On Time</span>
+                               </div>
+                               <p className="text-sm font-medium text-white">{task.name}</p>
+                               <p className="text-[10px] md:text-xs text-gray-400 mt-1">{task.phase || 'Execution'}</p>
+                            </div>
+                          ) : (
+                            <div>
+                               <p className="text-[10px] md:text-xs font-mono text-gray-500 mb-0.5">{new Date(task.planned_start || Date.now()).toLocaleTimeString()}</p>
+                               <p className={`text-sm font-medium ${isDone ? 'text-gray-400 line-through' : 'text-white'}`}>{task.name}</p>
+                               <p className="text-[10px] md:text-xs text-gray-400">{task.phase || 'Execution'}</p>
+                            </div>
+                          )}
                        </div>
-                       <p className="text-sm font-medium text-white">Tech Launch Keynote</p>
-                       <p className="text-[10px] md:text-xs text-gray-400 mt-1">Main Stage • Jane Doe</p>
-                    </div>
-                 </div>
-
-                 <div className="relative pl-8 group/item">
-                    <div className="absolute left-0 mt-1 w-6 h-6 rounded-full bg-[#111115] border border-white/10 flex items-center justify-center z-10 group-hover/item:border-white/30 transition-colors">
-                       <div className="w-2 h-2 rounded-full bg-gray-500" />
-                    </div>
-                    <div>
-                       <p className="text-[10px] md:text-xs font-mono text-gray-500 mb-0.5">11:30 AM</p>
-                       <p className="text-sm font-medium text-white">Networking Break</p>
-                       <p className="text-[10px] md:text-xs text-gray-400">Hall A • Catering Prep</p>
-                    </div>
-                 </div>
-                 
-                 <div className="relative pl-8 group/item">
-                    <div className="absolute left-0 mt-1 w-6 h-6 rounded-full bg-[#111115] border border-white/10 flex items-center justify-center z-10 group-hover/item:border-white/30 transition-colors">
-                       <div className="w-2 h-2 rounded-full bg-gray-500" />
-                    </div>
-                    <div>
-                       <p className="text-[10px] md:text-xs font-mono text-gray-500 mb-0.5">12:30 PM</p>
-                       <p className="text-sm font-medium text-white">Panel: Future of AI</p>
-                       <p className="text-[10px] md:text-xs text-gray-400">Stage 2</p>
-                    </div>
-                 </div>
+                     );
+                   })
+                 ) : (
+                    <div className="text-sm text-gray-500 italic pl-4">No tasks found.</div>
+                 )}
               </div>
            </motion.div>
 
@@ -283,22 +309,19 @@ export default function LiveOpsPage() {
               </div>
               
               <div className="flex-1 overflow-y-auto no-scrollbar space-y-3 md:space-y-4">
-                 <div className="bg-[#111115] border border-white/5 rounded-2xl p-3 text-xs md:text-sm hover:bg-white/[0.02] transition-colors">
-                    <span className="text-[10px] md:text-xs font-mono text-gray-500 block mb-1">10:42:15 AM</span>
-                    <span className="text-gray-300"><span className="text-white font-semibold">System:</span> Audio check passed for Stage 2.</span>
-                 </div>
-                 <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-2xl p-3 text-xs md:text-sm hover:bg-yellow-500/20 transition-colors">
-                    <span className="text-[10px] md:text-xs font-mono text-yellow-500/70 block mb-1">10:40:02 AM</span>
-                    <span className="text-yellow-200/90"><span className="text-yellow-500 font-bold">Alert:</span> VIP arrival at North Gate. Security team dispatched.</span>
-                 </div>
-                 <div className="bg-[#111115] border border-white/5 rounded-2xl p-3 text-xs md:text-sm hover:bg-white/[0.02] transition-colors">
-                    <span className="text-[10px] md:text-xs font-mono text-gray-500 block mb-1">10:35:55 AM</span>
-                    <span className="text-gray-300"><span className="text-white font-semibold">David (Prod):</span> Lighting cue 42 executing.</span>
-                 </div>
-                 <div className="bg-[#111115] border border-white/5 rounded-2xl p-3 text-xs md:text-sm hover:bg-white/[0.02] transition-colors">
-                    <span className="text-[10px] md:text-xs font-mono text-gray-500 block mb-1">10:30:00 AM</span>
-                    <span className="text-gray-300"><span className="text-[#D6003C] font-bold">Director:</span> Keynote is officially live.</span>
-                 </div>
+                 {activities && activities.length > 0 ? (
+                    activities.map((act) => (
+                      <div key={act.id} className="bg-[#111115] border border-white/5 rounded-2xl p-3 text-xs md:text-sm hover:bg-white/[0.02] transition-colors">
+                         <span className="text-[10px] md:text-xs font-mono text-gray-500 block mb-1">{new Date(act.timestamp).toLocaleTimeString()}</span>
+                         <span className="text-gray-300">
+                           <span className={`font-semibold mr-1 ${act.severity === 'WARNING' || act.severity === 'ERROR' ? 'text-yellow-500' : 'text-white'}`}>{act.source}:</span>
+                           {act.action} - {act.details?.reason || act.details?.description || 'Event logged'}
+                         </span>
+                      </div>
+                    ))
+                 ) : (
+                    <div className="text-sm text-gray-500 italic">No activity logs available.</div>
+                 )}
               </div>
 
               {/* Chat Input */}

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Settings, Zap, ArrowRight, Calendar, Users, MapPin, AlignLeft, ShieldCheck, DollarSign, Mic, StopCircle, RadioTower } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { createEvent } from '../../../../lib/api/events';
 
 export default function NewEventPage() {
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -12,7 +13,24 @@ export default function NewEventPage() {
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [isDeploying, setIsDeploying] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const router = useRouter();
+
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    start_datetime: '',
+    end_datetime: '',
+    location: '',
+    guest_count: '',
+    event_type: 'conference',
+    total_budget: '',
+    security_level: 'standard'
+  });
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+  };
 
   useEffect(() => {
     if (isListening) {
@@ -22,13 +40,31 @@ export default function NewEventPage() {
     }
   }, [isListening]);
 
-  const handleDeploy = (e: React.FormEvent) => {
+  const handleDeploy = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsDeploying(true);
-    // Simulate deployment process
-    setTimeout(() => {
+    setErrorMsg('');
+    
+    try {
+      await createEvent({
+        name: formData.name,
+        description: formData.description,
+        event_type: formData.event_type.toUpperCase(),
+        location: formData.location,
+        start_datetime: formData.start_datetime ? new Date(formData.start_datetime).toISOString() : null,
+        end_datetime: formData.end_datetime ? new Date(formData.end_datetime).toISOString() : null,
+        guest_count: parseInt(formData.guest_count || '0', 10),
+        state: "NORMAL",
+        total_budget: parseFloat(formData.total_budget || '0'),
+        currency: "USD",
+        owner_id: "default-operator" // Add an operator id since it's required
+      });
       router.push('/dashboard');
-    }, 2000);
+    } catch (err: any) {
+      console.error("Failed to create event:", err);
+      setErrorMsg(err.message || "Failed to create event. Please check inputs.");
+      setIsDeploying(false);
+    }
   };
 
   return (
@@ -81,6 +117,12 @@ export default function NewEventPage() {
                   </div>
                 </div>
 
+                {errorMsg && (
+                  <div className="mb-6 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+                    {errorMsg}
+                  </div>
+                )}
+
                 <form onSubmit={step === 3 ? handleDeploy : (e) => { e.preventDefault(); setStep(s => s + 1); }} className="space-y-6">
                   
                   {/* STEP 1: Core Details */}
@@ -90,14 +132,14 @@ export default function NewEventPage() {
                         <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Operation Name</label>
                         <div className="relative">
                           <Settings className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                          <input required type="text" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all" placeholder="e.g. Operation: Neon Summit 2026" />
+                          <input required name="name" value={formData.name} onChange={handleChange} type="text" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all" placeholder="e.g. Operation: Neon Summit 2026" />
                         </div>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Event Description</label>
                         <div className="relative">
                           <AlignLeft className="absolute left-4 top-4 w-4 h-4 text-gray-500" />
-                          <textarea required rows={3} className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all resize-none" placeholder="Primary objective and scope..." />
+                          <textarea required name="description" value={formData.description} onChange={handleChange} rows={3} className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all resize-none" placeholder="Primary objective and scope..." />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -105,14 +147,14 @@ export default function NewEventPage() {
                           <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Start Date</label>
                           <div className="relative">
                             <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                            <input required type="date" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all text-gray-300" />
+                            <input required name="start_datetime" value={formData.start_datetime} onChange={handleChange} type="date" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all text-gray-300" />
                           </div>
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">End Date</label>
                           <div className="relative">
                             <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                            <input required type="date" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all text-gray-300" />
+                            <input required name="end_datetime" value={formData.end_datetime} onChange={handleChange} type="date" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all text-gray-300" />
                           </div>
                         </div>
                       </div>
@@ -126,7 +168,7 @@ export default function NewEventPage() {
                         <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Primary Location Coordinates (Venue)</label>
                         <div className="relative">
                           <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                          <input required type="text" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all" placeholder="Enter venue name or address..." />
+                          <input required name="location" value={formData.location} onChange={handleChange} type="text" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all" placeholder="Enter venue name or address..." />
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -134,12 +176,12 @@ export default function NewEventPage() {
                           <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Expected Capacity</label>
                           <div className="relative">
                             <Users className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                            <input required type="number" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all" placeholder="e.g. 5000" />
+                            <input required name="guest_count" value={formData.guest_count} onChange={handleChange} type="number" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all" placeholder="e.g. 5000" />
                           </div>
                         </div>
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Event Classification</label>
-                          <select required className="w-full bg-black/50 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all text-gray-300 appearance-none">
+                          <select required name="event_type" value={formData.event_type} onChange={handleChange} className="w-full bg-black/50 border border-white/10 rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all text-gray-300 appearance-none">
                             <option value="conference">Conference / Summit</option>
                             <option value="festival">Music Festival</option>
                             <option value="corporate">Corporate Retreat</option>
@@ -157,14 +199,14 @@ export default function NewEventPage() {
                         <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Total Allocated Budget ($)</label>
                         <div className="relative">
                           <DollarSign className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                          <input required type="number" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all" placeholder="e.g. 150000" />
+                          <input required name="total_budget" value={formData.total_budget} onChange={handleChange} type="number" className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all" placeholder="e.g. 150000" />
                         </div>
                       </div>
                       <div className="space-y-1.5">
                         <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">Security Clearance Level</label>
                         <div className="relative">
                           <ShieldCheck className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                          <select required className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all text-gray-300 appearance-none">
+                          <select required name="security_level" value={formData.security_level} onChange={handleChange} className="w-full bg-black/50 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-sm focus:outline-none focus:border-[#D6003C]/50 transition-all text-gray-300 appearance-none">
                             <option value="standard">Standard (Public Access)</option>
                             <option value="elevated">Elevated (Ticketed / ID Required)</option>
                             <option value="maximum">Maximum (VIP / Government)</option>

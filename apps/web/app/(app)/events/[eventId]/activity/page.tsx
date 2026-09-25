@@ -4,102 +4,59 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { History, Filter, Radio, ShieldCheck, Truck, Users, Settings, Clock, CheckCircle2, AlertTriangle, Activity, MapPin, Zap } from 'lucide-react';
 
-const INITIAL_LOGS = [
-  { id: 'l-10', time: 'Just now', type: 'system', message: 'Smart Recovery protocol completed. Dashboard nominal.', icon: CheckCircle2 },
-  { id: 'l-9', time: '2 mins ago', type: 'vendor', message: 'UrbanBites (Backup Catering) dispatched from local HQ.', icon: Truck },
-  { id: 'l-8', time: '5 mins ago', type: 'system', message: 'Executive Authorization granted by David M. for catering swap.', icon: ShieldCheck },
-  { id: 'l-7', time: '12 mins ago', type: 'security', message: 'Sector 4 crowd density normalized.', icon: Users },
-  { id: 'l-6', time: '15 mins ago', type: 'vendor', message: 'Apex Catering flagged as NO-SHOW by automated gate sensors.', icon: AlertTriangle },
-  { id: 'l-5', time: '22 mins ago', type: 'av', message: 'Main stage mic check completed. Audio nominal.', icon: Radio },
-  { id: 'l-4', time: '35 mins ago', type: 'staff', message: 'Shift change: Registration desk team Bravo clocked in.', icon: Users },
-  { id: 'l-3', time: '41 mins ago', type: 'vendor', message: 'SoundMax A/V equipment calibrated for Panel 2.', icon: Settings },
-  { id: 'l-2', time: '1 hr ago', type: 'security', message: 'VIP entrance secured and metal detectors online.', icon: ShieldCheck },
-  { id: 'l-1', time: '1.5 hrs ago', type: 'system', message: 'Eventra Live Ops OS booted and tracking initiated.', icon: Activity },
-];
-
-const VENDORS = [
-  { 
-    id: 'v-1', 
-    name: 'UrbanBites', 
-    category: 'Catering (Backup)', 
-    status: 'in-transit', 
-    progress: 45,
-    eta: '14 mins',
-    lastUpdate: 'Passing Checkpoint Alpha',
-    health: 'good',
-    color: 'text-yellow-500'
-  },
-  { 
-    id: 'v-2', 
-    name: 'SoundMax', 
-    category: 'A/V & Tech', 
-    status: 'live', 
-    progress: 100,
-    eta: 'Active',
-    lastUpdate: 'Operating Main Stage',
-    health: 'good',
-    color: 'text-blue-500'
-  },
-  { 
-    id: 'v-3', 
-    name: 'EliteSec', 
-    category: 'Private Security', 
-    status: 'deployed',
-    progress: 100, 
-    eta: 'Active',
-    lastUpdate: 'Patrolling Perimeter',
-    health: 'good',
-    color: 'text-green-500'
-  },
-  { 
-    id: 'v-4', 
-    name: 'Apex Catering', 
-    category: 'Catering (Primary)', 
-    status: 'offline', 
-    progress: 0,
-    eta: 'Unknown',
-    lastUpdate: 'Truck breakdown on Route 9',
-    health: 'critical',
-    color: 'text-[#D6003C]'
-  }
-];
-
-const RANDOM_EVENTS = [
-  { type: 'security', message: 'Routine perimeter sweep completed. All clear.', icon: ShieldCheck },
-  { type: 'av', message: 'Adjusting master volume output for Hall B by -2dB.', icon: Settings },
-  { type: 'staff', message: 'Water station 3 resupplied by logistics team.', icon: Users },
-  { type: 'system', message: 'Live network ping nominal. 12ms latency.', icon: Activity },
-  { type: 'vendor', message: 'Merch tent 1 reports 50% stock remaining on hoodies.', icon: Truck }
-];
+import { getActivityFeed } from '../../../../../lib/api/observability';
+import { getEventAssignments } from '../../../../../lib/api/vendors';
+import { useParams } from 'next/navigation';
 
 export default function ActivityPage() {
+  const params = useParams();
+  const eventId = params.eventId as string;
+
   const [filter, setFilter] = useState('all');
-  const [logs, setLogs] = useState(INITIAL_LOGS);
+  const [logs, setLogs] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<any[]>([]);
 
-  // Simulate live incoming data to make it feel alive
   useEffect(() => {
-    const interval = setInterval(() => {
-      const randomEvent = RANDOM_EVENTS[Math.floor(Math.random() * RANDOM_EVENTS.length)];
-      const newLog = {
-        id: `l-${Date.now()}`,
-        time: 'Just now',
-        type: randomEvent.type,
-        message: randomEvent.message,
-        icon: randomEvent.icon
-      };
-      
-      setLogs(prev => {
-        // Update the 'Just now' of previous top log to '1 min ago' just for visual progression
-        const updatedPrev = prev.map((log, idx) => {
-           if (idx === 0 && log.time === 'Just now') return { ...log, time: '1 min ago' };
-           return log;
-        });
-        return [newLog, ...updatedPrev].slice(0, 50);
-      });
-    }, 8000); // New log every 8 seconds
+    async function loadData() {
+      if (!eventId) return;
+      try {
+        const [feedRes, assignmentsRes] = await Promise.all([
+           getActivityFeed(eventId, 50).catch(() => ({ items: [] })),
+           getEventAssignments(eventId).catch(() => [])
+        ]);
 
+        if (feedRes?.items) {
+           setLogs(feedRes.items.map((item: any) => ({
+             id: item.id,
+             time: new Date(item.timestamp).toLocaleTimeString(),
+             type: item.category?.toLowerCase() || 'system',
+             message: `${item.action}: ${item.summary || item.details?.reason || ''}`,
+             icon: item.severity === 'ERROR' || item.severity === 'WARNING' ? AlertTriangle : (item.category === 'VENDOR' ? Truck : Activity)
+           })));
+        }
+
+        if (assignmentsRes && Array.isArray(assignmentsRes)) {
+           setVendors(assignmentsRes.map((assignment: any) => ({
+             id: assignment.id,
+             name: assignment.provider_name || 'Vendor',
+             category: 'Assigned Provider',
+             status: assignment.status?.toLowerCase() || 'unknown',
+             progress: assignment.status === 'BOUND' ? 100 : 50,
+             eta: 'Active',
+             lastUpdate: 'Assigned to task',
+             health: assignment.status === 'BLOCKED' ? 'critical' : 'good',
+             color: assignment.status === 'BLOCKED' ? 'text-[#D6003C]' : 'text-green-500'
+           })));
+        }
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    loadData();
+    const interval = setInterval(loadData, 10000);
     return () => clearInterval(interval);
-  }, []);
+  }, [eventId]);
 
   const filteredLogs = filter === 'all' ? logs : logs.filter(l => l.type === filter);
 
@@ -219,11 +176,11 @@ export default function ActivityPage() {
              <h3 className="text-xs font-bold text-gray-400 uppercase tracking-[0.2em] flex items-center gap-2">
                 <MapPin size={14} className="text-white" /> Tactical HUD
              </h3>
-             <span className="text-[10px] font-mono text-gray-500 tracking-widest">{VENDORS.length} ACTIVE</span>
+             <span className="text-[10px] font-mono text-gray-500 tracking-widest">{vendors.length} ACTIVE</span>
            </div>
            
            <div className="flex-1 overflow-y-auto no-scrollbar space-y-4">
-              {VENDORS.map(vendor => (
+              {vendors.map(vendor => (
                  <div key={vendor.id} className="p-6 rounded-[2rem] bg-gradient-to-br from-[#111115] to-[#0A0A0F] border border-white/5 hover:border-white/10 transition-all relative overflow-hidden group shadow-xl">
                     
                     {/* Abstract HUD styling */}
