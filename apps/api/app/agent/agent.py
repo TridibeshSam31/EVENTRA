@@ -128,6 +128,7 @@ class EventOperationsAgent:
             "operational_intent": final_state.get("operational_intent"),
             "provider_operation": final_state.get("provider_operation_result"),
             "tool_history": final_state.get("tool_history", []),
+            "last_decision": final_state.get("last_decision"),
             "step_count": final_state.get("step_count"),
             "error": final_state.get("error"),
         }

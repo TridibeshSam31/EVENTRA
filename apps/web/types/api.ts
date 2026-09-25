@@ -1016,3 +1016,37 @@ export interface FinalExecutionPlan {
   is_consistent: boolean;
   consistency_errors: string[];
 }
+
+// --- Phase 11: Real Pause / Resume (Task 11) ---
+export type EventExecutionState = "RUNNING" | "PAUSING" | "PAUSED" | "RESUMING";
+
+export interface EventExecutionStateResponse {
+  event_id: string;
+  execution_state: EventExecutionState;
+  previous_state?: string | null;
+  plan_version: number;
+  is_paused: boolean;
+  can_pause: boolean;
+  can_resume: boolean;
+  active_incidents_count: number;
+  last_pause_record?: Record<string, unknown> | null;
+  updated_at?: string | null;
+}
+
+export interface PauseResumeRecordResponse {
+  id: string;
+  event_id: string;
+  operation_type: "PAUSE" | "RESUME";
+  requested_by: string;
+  requested_at: string;
+  reason?: string | null;
+  previous_state: string;
+  target_state: string;
+  plan_version: number;
+  status: string;
+  approval_reference?: string | null;
+  validation_result?: Record<string, unknown> | null;
+  completed_at?: string | null;
+  audit_reference?: string | null;
+}
+

@@ -29,6 +29,7 @@ import {
 } from "../../../../lib/api/live";
 import { createIncident } from "../../../../lib/api/incidents";
 import { getAssignmentsForEvent } from "../../../../lib/api/vendors";
+import { ExecutionPauseControl } from "../../../../components/operations";
 import type {
   EventLiveState,
   TaskProgress,
@@ -261,6 +262,9 @@ export default function LiveCommandPage() {
           )}
         </div>
       </div>
+
+      {/* Task 11 Real Pause / Resume Operational Control */}
+      <ExecutionPauseControl eventId={eventId} onStateChange={() => fetchLiveState()} />
 
       {error && (
         <div className="p-4 rounded-xl border border-rose-500/30 bg-rose-500/5 text-rose-300 text-xs flex items-center justify-between">

@@ -675,6 +675,18 @@ class MockLLMProvider(LLMProvider):
             if isinstance(dec, dict):
                 return AgentDecision.model_validate(dec)
 
+        # Check if event execution is paused
+        exec_state = operational_context.get("execution_state")
+        if exec_state in ("PAUSED", "PAUSING"):
+            return AgentDecision(
+                decision_type=DecisionType.WAIT,
+                reason_code=ReasonCode.EVENT_EXECUTION_PAUSED.value,
+                action_intent="HALT_FOR_PAUSE",
+                rationale=f"Event execution is {exec_state}. Agent halts consequential operations and waits for resume.",
+                terminate=True,
+                termination_status="PAUSED",
+            )
+
         # 4. Intelligent default deterministic operational loop
         obj_lower = (current_objective or "").lower()
         hist_tools = [h.get("tool") for h in tool_history if isinstance(h, dict)]

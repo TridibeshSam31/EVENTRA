@@ -62,6 +62,7 @@ def get_event_state(db: Session, event_id: str) -> Dict[str, Any]:
         },
         "objectives_count": len(objectives),
         "open_incidents_count": len(open_incidents),
+        "execution_state": getattr(event, "execution_state", None) or "RUNNING",
     }
 
 
@@ -389,4 +390,77 @@ def modify_event_plan(
     from app.services.intake_service import IntakeService
     service = IntakeService(db)
     return service.modify_plan(event_id=event_id, modification_text=modification, user_id=user_id)
+
+
+def pause_event(
+    db: Session,
+    event_id: str,
+    reason: str,
+    user_id: str = "anonymous_operator",
+    plan_version: Optional[int] = None,
+    approval_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Transactionally pauses operational execution of an event (Task 11)."""
+    from app.services.pause_resume_service import PauseResumeService
+    service = PauseResumeService(db)
+    rec = service.pause_event(
+        event_id=event_id,
+        user_id=user_id,
+        reason=reason,
+        plan_version=plan_version,
+        approval_id=approval_id,
+    )
+    return {
+        "id": rec.id,
+        "event_id": rec.event_id,
+        "operation_type": rec.operation_type,
+        "previous_state": rec.previous_state,
+        "target_state": rec.target_state,
+        "plan_version": rec.plan_version,
+        "status": rec.status,
+        "completed_at": rec.completed_at.isoformat() if rec.completed_at else None,
+    }
+
+
+def resume_event(
+    db: Session,
+    event_id: str,
+    user_id: str = "anonymous_operator",
+    reason: Optional[str] = None,
+    plan_version: Optional[int] = None,
+    approval_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Transactionally resumes operational execution of an event (Task 11)."""
+    from app.services.pause_resume_service import PauseResumeService
+    service = PauseResumeService(db)
+    rec = service.resume_event(
+        event_id=event_id,
+        user_id=user_id,
+        reason=reason,
+        plan_version=plan_version,
+        approval_id=approval_id,
+    )
+    return {
+        "id": rec.id,
+        "event_id": rec.event_id,
+        "operation_type": rec.operation_type,
+        "previous_state": rec.previous_state,
+        "target_state": rec.target_state,
+        "plan_version": rec.plan_version,
+        "status": rec.status,
+        "validation_result": rec.validation_result,
+        "completed_at": rec.completed_at.isoformat() if rec.completed_at else None,
+    }
+
+
+def get_execution_state(
+    db: Session,
+    event_id: str,
+    user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Retrieves authoritative current execution state for an event."""
+    from app.services.pause_resume_service import PauseResumeService
+    service = PauseResumeService(db)
+    return service.get_execution_state(event_id=event_id, user_id=user_id)
+
 

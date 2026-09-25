@@ -69,4 +69,27 @@ export async function approveRecoveryAction(eventId: string, approvalId: string)
   return apiClient.post<any>(`/events/${eventId}/recovery/approve`, { approval_id: approvalId });
 }
 
+export async function pauseEvent(
+  eventId: string,
+  payload: { reason: string; plan_version?: number }
+): Promise<any> {
+  return apiClient.post<any>(`/events/${eventId}/pause`, payload);
+}
+
+export async function resumeEvent(
+  eventId: string,
+  payload?: { reason?: string; plan_version?: number }
+): Promise<any> {
+  return apiClient.post<any>(`/events/${eventId}/resume`, payload || {});
+}
+
+export async function getEventExecutionState(eventId: string): Promise<any> {
+  return apiClient.get<any>(`/events/${eventId}/execution-state`);
+}
+
+export async function getEventPauseHistory(eventId: string): Promise<any[]> {
+  return apiClient.get<any[]>(`/events/${eventId}/pause-history`);
+}
+
+
 

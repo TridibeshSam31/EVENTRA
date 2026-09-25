@@ -3,6 +3,7 @@ from app.models.enums import (
     EventType,
     EventState,
     EventLifecycleState,
+    EventExecutionState,
     TaskStatus,
     TaskPriority,
     VendorStatus,
@@ -47,6 +48,7 @@ from app.models.audit import Audit, AuditRecord
 from app.models.verification import VerificationResult
 from app.models.notification import Notification
 from app.models.recovery import Recovery
+from app.models.pause_record import EventPauseRecord
 from app.models.requirement import Requirement
 from app.models.objective import Objective
 from app.models.constraint import Constraint
@@ -93,6 +95,7 @@ __all__ = [
     "Budget",
     "Incident",
     "Recovery",
+    "EventPauseRecord",
     "Approval",
     "ApprovalRequest",
     "ActionExecution",

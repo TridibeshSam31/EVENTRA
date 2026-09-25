@@ -19,6 +19,7 @@ from app.models.budget import BudgetItem
 from app.models.recovery import Recovery
 from app.models.action import ActionExecution
 from app.models.state_transition import StateTransition
+from app.models.enums import EventExecutionState
 from app.engines.auth.snapshot import compute_event_state_snapshot
 
 
@@ -56,6 +57,14 @@ class ActionService:
         event = self.db.query(Event).filter(Event.id == event_id).first()
         if not event:
             raise NotFoundException(f"Event with id '{event_id}' not found.")
+
+        # Central Execution Pause Guard (Task 11)
+        execution_state = getattr(event, "execution_state", None) or EventExecutionState.RUNNING.value
+        if execution_state in (EventExecutionState.PAUSED.value, EventExecutionState.PAUSING.value):
+            raise ConflictException(
+                f"EXECUTION_PAUSED: Event execution is currently '{execution_state}'. "
+                "Consequential mutations are blocked until the event is resumed."
+            )
 
         # 1. Idempotency Check
         action_id = action_id or str(uuid.uuid4())
@@ -150,6 +159,18 @@ class ActionService:
         action_id: Optional[str] = None,
     ) -> ActionExecution:
         """Executes a Phase 8 recovery option with strict optimistic concurrency revalidation."""
+        event = self.db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            raise NotFoundException(f"Event with id '{event_id}' not found.")
+
+        # Central Execution Pause Guard (Task 11)
+        execution_state = getattr(event, "execution_state", None) or EventExecutionState.RUNNING.value
+        if execution_state in (EventExecutionState.PAUSED.value, EventExecutionState.PAUSING.value):
+            raise ConflictException(
+                f"EXECUTION_PAUSED: Event execution is currently '{execution_state}'. "
+                "Recovery mutations are blocked until the event is resumed."
+            )
+
         recovery = (
             self.db.query(Recovery)
             .filter(Recovery.id == recovery_option_id, Recovery.event_id == event_id)

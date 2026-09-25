@@ -21,6 +21,12 @@ from app.schemas.vendor_binding import (
     VendorTaskBindingResponse,
 )
 from app.schemas.execution_plan import FinalExecutionPlan
+from app.schemas.pause_resume import (
+    PauseEventRequest,
+    ResumeEventRequest,
+    EventExecutionStateResponse,
+    PauseResumeRecordResponse,
+)
 from app.services.specification_service import (
     SpecificationService,
     SpecificationValidationError,
@@ -499,3 +505,76 @@ def generate_final_execution_plan_endpoint(
 
     service = FinalExecutionPlanService(db)
     return service.compile_plan(event_id=event_id, user_id=current_user_id)
+
+
+# --- Phase 11: Real Pause / Resume Execution Endpoints (Task 11) ---
+
+@router.post(
+    "/{event_id}/pause",
+    response_model=PauseResumeRecordResponse,
+    status_code=status.HTTP_200_OK,
+)
+def pause_event_endpoint(
+    event_id: str,
+    payload: PauseEventRequest,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Explicitly, transactionally, and safely pauses live event execution."""
+    from app.services.pause_resume_service import PauseResumeService
+
+    service = PauseResumeService(db)
+    return service.pause_event(event_id=event_id, user_id=current_user_id, request=payload)
+
+
+@router.post(
+    "/{event_id}/resume",
+    response_model=PauseResumeRecordResponse,
+    status_code=status.HTTP_200_OK,
+)
+def resume_event_endpoint(
+    event_id: str,
+    payload: ResumeEventRequest,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Safely resumes live event execution following state integrity validation."""
+    from app.services.pause_resume_service import PauseResumeService
+
+    service = PauseResumeService(db)
+    return service.resume_event(event_id=event_id, user_id=current_user_id, request=payload)
+
+
+@router.get(
+    "/{event_id}/execution-state",
+    response_model=EventExecutionStateResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_execution_state_endpoint(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Retrieves authoritative current execution state, plan version, and pause/resume flags."""
+    from app.services.pause_resume_service import PauseResumeService
+
+    service = PauseResumeService(db)
+    return service.get_execution_state(event_id=event_id, user_id=current_user_id)
+
+
+@router.get(
+    "/{event_id}/pause-history",
+    response_model=List[PauseResumeRecordResponse],
+    status_code=status.HTTP_200_OK,
+)
+def get_pause_history_endpoint(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Retrieves chronological audit history of all pause and resume operations."""
+    from app.services.pause_resume_service import PauseResumeService
+
+    service = PauseResumeService(db)
+    return service.get_pause_history(event_id=event_id, user_id=current_user_id)
+

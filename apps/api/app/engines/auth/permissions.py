@@ -27,6 +27,8 @@ class Permissions:
     APPROVAL_VIEW = "APPROVAL_VIEW"
     APPROVAL_CREATE = "APPROVAL_CREATE"
     APPROVAL_APPROVE = "APPROVAL_APPROVE"
+    EVENT_PAUSE = "EVENT_PAUSE"
+    EVENT_RESUME = "EVENT_RESUME"
 
 
 ALL_PERMISSIONS: Set[str] = {
@@ -53,6 +55,8 @@ ALL_PERMISSIONS: Set[str] = {
     Permissions.APPROVAL_VIEW,
     Permissions.APPROVAL_CREATE,
     Permissions.APPROVAL_APPROVE,
+    Permissions.EVENT_PAUSE,
+    Permissions.EVENT_RESUME,
 }
 
 # Role Defaults
@@ -80,6 +84,8 @@ ROLE_PERMISSIONS_MAP: Dict[str, Set[str]] = {
         Permissions.APPROVAL_VIEW,
         Permissions.APPROVAL_CREATE,
         Permissions.APPROVAL_APPROVE,
+        Permissions.EVENT_PAUSE,
+        Permissions.EVENT_RESUME,
     },
     RoleType.COLLABORATOR.value: {
         Permissions.EVENT_VIEW,

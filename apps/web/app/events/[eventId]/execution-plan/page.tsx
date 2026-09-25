@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { getFinalExecutionPlan, generateFinalExecutionPlan } from "../../../../lib/api/planning";
+import { ExecutionPauseControl } from "../../../../components/operations";
 import type { FinalExecutionPlan, ExecutionPlanTask, PlanReadiness } from "../../../../types/api";
 import {
   Compass,
@@ -166,6 +167,10 @@ export default function ExecutionPlanPage() {
           </Link>
         </div>
       </div>
+
+      {/* Task 11 Real Pause / Resume Operational Control */}
+      <ExecutionPauseControl eventId={eventId} onStateChange={() => loadPlan()} />
+
 
       {error && (
         <div className="p-4 rounded-xl bg-red-950/60 border border-red-800 text-red-300 text-xs flex items-start space-x-3">

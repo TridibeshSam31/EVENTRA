@@ -20,6 +20,14 @@ class EventState(str, Enum):
     RECOVERY = "RECOVERY"
 
 
+class EventExecutionState(str, Enum):
+    """Authoritative execution lifecycle states for Task 11 Pause / Resume."""
+    RUNNING = "RUNNING"
+    PAUSING = "PAUSING"
+    PAUSED = "PAUSED"
+    RESUMING = "RESUMING"
+
+
 class TaskStatus(str, Enum):
     PENDING = "PENDING"
     ASSIGNED = "ASSIGNED"

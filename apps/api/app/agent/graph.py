@@ -289,10 +289,30 @@ def decide_next_step_node(state: AgentState, config: Optional[RunnableConfig] = 
 
     # Build bounded operational context
     event_state = state.get("current_event_state") or {}
+    exec_state = event_state.get("execution_state") or "RUNNING"
+
+    # Execution Pause Gate: halt consequential execution if event is paused or pausing
+    if exec_state in ("PAUSED", "PAUSING"):
+        decision = AgentDecision(
+            decision_type=DecisionType.WAIT,
+            reason_code=ReasonCode.EVENT_EXECUTION_PAUSED.value,
+            action_intent="HALT_FOR_PAUSE",
+            rationale=f"Event execution is {exec_state}. Consequential agent mutations and recovery actions are blocked until resumed.",
+            terminate=True,
+            termination_status="PAUSED",
+        )
+        return {
+            "last_decision": decision.model_dump(),
+            "status": "PAUSED",
+            "termination_status": "PAUSED",
+            "current_phase": "TERMINATED",
+        }
+
     operational_context = {
         "event_id": state["event_id"],
         "event_name": event_state.get("name"),
         "event_state": event_state.get("state"),
+        "execution_state": exec_state,
         "lifecycle_state": event_state.get("lifecycle_state"),
         "budget_remaining": event_state.get("budget_remaining"),
         "task_counts": event_state.get("task_counts"),
@@ -345,6 +365,13 @@ def route_after_decide(state: AgentState) -> str:
     last_dec = state.get("last_decision") or {}
     dec_type = last_dec.get("decision_type", DecisionType.FAIL.value)
 
+    if (
+        last_dec.get("reason_code") == ReasonCode.EVENT_EXECUTION_PAUSED.value
+        or state.get("termination_status") == "PAUSED"
+        or state.get("status") == "PAUSED"
+    ):
+        return "end_paused"
+
     if dec_type == DecisionType.TOOL_CALL.value:
         tool_name = last_dec.get("tool_name")
         # Consequential WRITE tools must route through action validation first
@@ -363,6 +390,7 @@ def route_after_decide(state: AgentState) -> str:
         return "end_completed"
 
     return "end_failed"
+
 
 
 def tool_execution_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
@@ -784,6 +812,25 @@ def end_failed_node(state: AgentState, config: Optional[RunnableConfig] = None) 
     }
 
 
+def end_paused_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
+    """Terminal node when event execution is paused."""
+    last_dec = state.get("last_decision") or {}
+    rationale = last_dec.get("rationale") or "Event execution is paused. Consequential mutations are blocked until resumed."
+    messages = list(state.get("messages", []))
+    messages.append({
+        "role": "agent",
+        "type": "status",
+        "content": rationale,
+    })
+    return {
+        "status": "PAUSED",
+        "termination_status": "PAUSED",
+        "final_response": rationale,
+        "current_phase": "TERMINATED",
+        "messages": messages,
+    }
+
+
 class EventOperationsAgentGraph:
     """Compiled LangGraph StateGraph implementing the real bounded event operations loop."""
 
@@ -806,6 +853,7 @@ class EventOperationsAgentGraph:
         builder.add_node("verify", verify_node)
         builder.add_node("end_completed", end_completed_node)
         builder.add_node("end_failed", end_failed_node)
+        builder.add_node("end_paused", end_paused_node)
 
         # 2. Register Edges
         builder.add_edge(START, "observe")
@@ -829,6 +877,7 @@ class EventOperationsAgentGraph:
                 "wait_for_approval": "wait_for_approval",
                 "end_completed": "end_completed",
                 "end_failed": "end_failed",
+                "end_paused": "end_paused",
             },
         )
 
@@ -878,6 +927,7 @@ class EventOperationsAgentGraph:
 
         builder.add_edge("end_completed", END)
         builder.add_edge("end_failed", END)
+        builder.add_edge("end_paused", END)
 
         self._compiled_graph = builder.compile()
         return self._compiled_graph

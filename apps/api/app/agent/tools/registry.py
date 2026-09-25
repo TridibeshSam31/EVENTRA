@@ -168,6 +168,24 @@ ExecuteRecoveryInput = ExecuteActionInput
 VerifyRecoveryInput = VerifyActionInput
 
 
+class PauseEventInput(BaseModel):
+    event_id: str = Field(..., description="Event UUID")
+    reason: str = Field(..., description="Operational rationale for pausing execution")
+    plan_version: Optional[int] = Field(None, ge=1, description="Observed Task 9 plan version for concurrency safety")
+    approval_id: Optional[str] = Field(None, description="Optional approved approval reference")
+
+
+class ResumeEventInput(BaseModel):
+    event_id: str = Field(..., description="Event UUID")
+    reason: Optional[str] = Field(None, description="Optional operational rationale for resuming execution")
+    plan_version: Optional[int] = Field(None, ge=1, description="Observed Task 9 plan version for concurrency safety")
+    approval_id: Optional[str] = Field(None, description="Optional approved approval reference")
+
+
+class GetExecutionStateInput(BaseModel):
+    event_id: str = Field(..., description="Event UUID")
+
+
 # --- Central Tool Registry for Task 4 ---
 
 class ToolRegistry:
@@ -675,6 +693,55 @@ def _handle_get_recovery_status(db: Session, user_id: str, event_id: str, incide
     }
 
 
+def _handle_pause_event(
+    db: Session,
+    user_id: str,
+    event_id: str,
+    reason: str,
+    plan_version: Optional[int] = None,
+    approval_id: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    from app.agent.tools.operations_tools import pause_event
+    return pause_event(
+        db=db,
+        event_id=event_id,
+        reason=reason,
+        user_id=user_id,
+        plan_version=plan_version,
+        approval_id=approval_id,
+    )
+
+
+def _handle_resume_event(
+    db: Session,
+    user_id: str,
+    event_id: str,
+    reason: Optional[str] = None,
+    plan_version: Optional[int] = None,
+    approval_id: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    from app.agent.tools.operations_tools import resume_event
+    return resume_event(
+        db=db,
+        event_id=event_id,
+        user_id=user_id,
+        reason=reason,
+        plan_version=plan_version,
+        approval_id=approval_id,
+    )
+
+
+def _handle_get_execution_state(
+    db: Session,
+    user_id: str,
+    event_id: str,
+) -> Dict[str, Any]:
+    from app.agent.tools.operations_tools import get_execution_state
+    return get_execution_state(db=db, event_id=event_id, user_id=user_id)
+
+
 def create_default_functional_tool_registry() -> ToolRegistry:
     """Builds and populates the default central ToolRegistry for Task 4 agent loop."""
     registry = ToolRegistry()
@@ -927,6 +994,31 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         category=ToolCategory.READ,
         parameters_schema=GetRecoveryStatusInput,
         handler=_handle_get_recovery_status,
+    )
+    registry.register(
+        name="pause_event",
+        description="Transactionally pauses operational execution of the event. Consequential action mutations become blocked.",
+        category=ToolCategory.WRITE,
+        parameters_schema=PauseEventInput,
+        handler=_handle_pause_event,
+        requires_approval=True,
+        permission_action="EVENT_PAUSE",
+    )
+    registry.register(
+        name="resume_event",
+        description="Transactionally resumes operational execution from PAUSED state after re-observing and validating state.",
+        category=ToolCategory.WRITE,
+        parameters_schema=ResumeEventInput,
+        handler=_handle_resume_event,
+        requires_approval=True,
+        permission_action="EVENT_RESUME",
+    )
+    registry.register(
+        name="get_execution_state",
+        description="Retrieves the authoritative current operational execution state (RUNNING, PAUSING, PAUSED, RESUMING).",
+        category=ToolCategory.READ,
+        parameters_schema=GetExecutionStateInput,
+        handler=_handle_get_execution_state,
     )
 
     return registry
