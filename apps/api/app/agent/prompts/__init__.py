@@ -7,6 +7,7 @@ from app.agent.prompts.vendor import VENDOR_PROMPT
 from app.agent.prompts.event_understanding import (
     EVENT_UNDERSTANDING_SYSTEM_PROMPT,
     EVENT_UPDATE_SYSTEM_PROMPT,
+    VENDOR_OUTCOME_PARSING_SYSTEM_PROMPT,
 )
 
 __all__ = [
@@ -18,4 +19,6 @@ __all__ = [
     "VENDOR_PROMPT",
     "EVENT_UNDERSTANDING_SYSTEM_PROMPT",
     "EVENT_UPDATE_SYSTEM_PROMPT",
+    "VENDOR_OUTCOME_PARSING_SYSTEM_PROMPT",
 ]
+

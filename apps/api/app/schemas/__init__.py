@@ -70,6 +70,12 @@ from app.schemas.vendor_outcome import (
     VendorOutcomeResponse,
     PaginatedVendorOutcomesResponse,
 )
+from app.schemas.vendor_outcome_validation import (
+    ExtractedClaim,
+    VendorOutcomeClaims,
+    ClaimValidationDetail,
+    VendorOutcomeValidationResponse,
+)
 
 __all__ = [
     "UserCreate",
@@ -140,4 +146,8 @@ __all__ = [
     "VendorOutcomeCreate",
     "VendorOutcomeResponse",
     "PaginatedVendorOutcomesResponse",
+    "ExtractedClaim",
+    "VendorOutcomeClaims",
+    "ClaimValidationDetail",
+    "VendorOutcomeValidationResponse",
 ]

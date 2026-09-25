@@ -403,6 +403,35 @@ class SubmitVendorOutcomeOutput(BaseModel):
     summary: str = Field(..., description="Factual summary of recorded outcome")
 
 
+# ==============================================================================
+# 3c. VENDOR OUTCOME VALIDATION SCHEMAS (TASK 7)
+# ==============================================================================
+
+class ValidateVendorOutcomeInput(BaseModel):
+    event_id: str = Field(..., description="Unique event identifier")
+    vendor_outcome_id: str = Field(..., description="Target vendor outcome UUID to parse and validate")
+
+
+class ValidateVendorOutcomeOutput(BaseModel):
+    validation_id: str = Field(..., description="Created validation record UUID")
+    vendor_outcome_id: str = Field(..., description="Associated vendor outcome UUID")
+    event_id: str = Field(..., description="Associated event UUID")
+    task_id: Optional[str] = Field(None, description="Associated task UUID")
+    provider_id: str = Field(..., description="Target provider UUID")
+    provider_name: Optional[str] = Field(None, description="Target provider name")
+    overall_status: str = Field(..., description="Overall status: VALIDATED, PARTIALLY_VALIDATED, FAILED, CONFLICT, INSUFFICIENT_INFORMATION")
+    extracted_claims: List[Dict[str, Any]] = Field(default_factory=list, description="Extracted factual claims")
+    claim_results: List[Dict[str, Any]] = Field(default_factory=list, description="Evaluation results for each claim")
+    hard_requirements_passed: List[str] = Field(default_factory=list, description="Hard requirements satisfied")
+    hard_requirements_failed: List[str] = Field(default_factory=list, description="Hard requirements failed")
+    preferences_matched: List[str] = Field(default_factory=list, description="Desirable preferences matched")
+    conflicts: List[str] = Field(default_factory=list, description="Detected conflicts against master data or calendar")
+    unknown_facts: List[str] = Field(default_factory=list, description="Preserved unknown facts")
+    validator_version: str = Field("1.0.0", description="Validator version")
+    summary: str = Field(..., description="Concise deterministic summary of validation results")
+    validated_at: str = Field(..., description="ISO 8601 validation timestamp")
+
+
 
 # ==============================================================================
 # 4. IMPACT & RISK SCHEMAS

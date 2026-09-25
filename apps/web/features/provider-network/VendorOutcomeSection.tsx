@@ -17,12 +17,17 @@ import {
   Plus,
   Send,
   ShieldAlert,
+  Loader2,
+  Check,
 } from "lucide-react";
 import {
   recordVendorOutcome,
   getVendorOutcomes,
+  validateVendorOutcome,
+  getVendorOutcomeValidation,
   VendorOutcomeItem,
   VendorOutcomePayload,
+  VendorOutcomeValidation,
 } from "../../lib/api/vendors";
 
 interface VendorOutcomeSectionProps {
@@ -54,15 +59,50 @@ export function VendorOutcomeSection({
   const [availability, setAvailability] = useState("AVAILABLE");
   const [notes, setNotes] = useState("");
 
+  // Validation State
+  const [validations, setValidations] = useState<Record<string, VendorOutcomeValidation>>({});
+  const [validatingId, setValidatingId] = useState<string | null>(null);
+
   const loadOutcomes = async () => {
     try {
       setLoading(true);
       const data = await getVendorOutcomes(eventId);
       setOutcomes(data || []);
+
+      // Load existing validation records
+      if (data && data.length > 0) {
+        for (const item of data) {
+          if (item.verification_status && item.verification_status !== "UNVERIFIED") {
+            try {
+              const val = await getVendorOutcomeValidation(eventId, item.id);
+              if (val) {
+                setValidations((prev) => ({ ...prev, [item.id]: val }));
+              }
+            } catch {
+              // Silently ignore if not yet available
+            }
+          }
+        }
+      }
     } catch (err: any) {
       console.error("Failed to load vendor outcomes:", err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleValidate = async (outcomeId: string) => {
+    try {
+      setValidatingId(outcomeId);
+      setErrorMsg(null);
+      const val = await validateVendorOutcome(eventId, outcomeId);
+      setValidations((prev) => ({ ...prev, [outcomeId]: val }));
+      setSuccessMsg(`Outcome successfully evaluated. Overall: ${val.overall_status}`);
+      await loadOutcomes();
+    } catch (err: any) {
+      setErrorMsg(err.message || "Failed to validate vendor outcome.");
+    } finally {
+      setValidatingId(null);
     }
   };
 
@@ -419,10 +459,132 @@ export function VendorOutcomeSection({
                 </div>
               )}
 
+              {/* Task 7: Deterministic Claims & Validation Results */}
+              {validations[item.id] ? (
+                <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-3 space-y-3 mt-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-semibold text-slate-300">Deterministic Evaluation:</span>
+                      <span
+                        className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded border ${
+                          validations[item.id].overall_status === "VALIDATED"
+                            ? "bg-emerald-950/70 border-emerald-700 text-emerald-300"
+                            : validations[item.id].overall_status === "PARTIALLY_VALIDATED"
+                            ? "bg-blue-950/70 border-blue-700 text-blue-300"
+                            : validations[item.id].overall_status === "CONFLICT"
+                            ? "bg-amber-950/70 border-amber-700 text-amber-300"
+                            : "bg-red-950/70 border-red-700 text-red-300"
+                        }`}
+                      >
+                        {validations[item.id].overall_status}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleValidate(item.id)}
+                      disabled={validatingId === item.id}
+                      className="text-[10px] text-cyan-400 hover:text-cyan-300 flex items-center space-x-1"
+                    >
+                      {validatingId === item.id ? (
+                        <>
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          <span>Re-evaluating...</span>
+                        </>
+                      ) : (
+                        <span>Re-evaluate</span>
+                      )}
+                    </button>
+                  </div>
+
+                  {validations[item.id].summary && (
+                    <p className="text-[11px] text-slate-400">
+                      {validations[item.id].summary}
+                    </p>
+                  )}
+
+                  {/* Individual Claims Breakdown */}
+                  {validations[item.id].claim_results && validations[item.id].claim_results.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-1">
+                      {validations[item.id].claim_results.map((claim, idx) => (
+                        <div
+                          key={idx}
+                          className={`p-2 rounded-md border text-[11px] space-y-1 ${
+                            claim.status === "PASS"
+                              ? "bg-emerald-950/20 border-emerald-800/40 text-emerald-200"
+                              : claim.status === "FAIL"
+                              ? "bg-red-950/20 border-red-800/40 text-red-200"
+                              : claim.status === "CONFLICT"
+                              ? "bg-amber-950/20 border-amber-800/40 text-amber-200"
+                              : "bg-slate-900 border-slate-800 text-slate-300"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold uppercase tracking-wider text-[10px] text-slate-400">
+                              {claim.field || claim.claim_type}
+                            </span>
+                            <span
+                              className={`flex items-center space-x-1 text-[10px] font-bold ${
+                                claim.status === "PASS"
+                                  ? "text-emerald-400"
+                                  : claim.status === "FAIL"
+                                  ? "text-red-400"
+                                  : claim.status === "CONFLICT"
+                                  ? "text-amber-400"
+                                  : "text-slate-400"
+                              }`}
+                            >
+                              {claim.status === "PASS" && <CheckCircle2 className="w-3 h-3" />}
+                              {claim.status === "FAIL" && <XCircle className="w-3 h-3" />}
+                              {claim.status === "CONFLICT" && <AlertCircle className="w-3 h-3" />}
+                              {claim.status === "UNKNOWN" && <HelpCircle className="w-3 h-3" />}
+                              <span>{claim.status}</span>
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-300 leading-tight">
+                            {claim.explanation}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="text-[10px] text-slate-500 border-t border-slate-900 pt-1.5 flex items-center space-x-1">
+                    <ShieldAlert className="w-3 h-3 text-cyan-400 flex-shrink-0" />
+                    <span>Pending Task 8 assignment — no booking or task binding has been executed.</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between pt-2 border-t border-slate-800/50">
+                  <span className="text-[11px] text-slate-400">
+                    Awaiting deterministic claims parsing & validation.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleValidate(item.id)}
+                    disabled={validatingId === item.id}
+                    className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg text-xs font-semibold flex items-center space-x-1.5 transition disabled:opacity-50"
+                  >
+                    {validatingId === item.id ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>Validating...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Validate Claims</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
               <div className="text-[10px] text-slate-500 flex items-center justify-between pt-1">
                 <span>Recorded: {new Date(item.created_at).toLocaleString()}</span>
                 <span className="text-slate-600 font-mono">ID: {item.id.slice(0, 8)}...</span>
               </div>
+
             </div>
           ))}
         </div>

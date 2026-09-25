@@ -151,6 +151,8 @@ class MockLLMProvider(LLMProvider):
             return self._mock_generate_event_intent(user_prompt, output_schema)
         elif schema_name == "EventChangeProposal":
             return self._mock_generate_event_change_proposal(user_prompt, output_schema)
+        elif schema_name == "VendorOutcomeClaims":
+            return self._mock_generate_vendor_outcome_claims(user_prompt, output_schema)
 
         # Build minimal valid mock instance by inspecting fields
         mock_fields: Dict[str, Any] = {}
@@ -425,6 +427,130 @@ class MockLLMProvider(LLMProvider):
             summary=f"Proposed {len(changes)} modifications based on prompt.",
         )
         return proposal
+
+    def _mock_generate_vendor_outcome_claims(self, user_prompt: str, output_schema: Type[T]) -> T:
+        """Deterministic mock builder for VendorOutcomeClaims strictly for tests and offline fallback."""
+        import re
+        from app.schemas.vendor_outcome_validation import VendorOutcomeClaims, ExtractedClaim
+
+        text_lower = user_prompt.lower()
+        claims: List[ExtractedClaim] = []
+        ambiguities: List[str] = []
+
+        # 1. Capacity
+        cap_match = re.search(r"(?:can\s+(?:do|cater|handle|accommodate)|capacity|up to|guests?|pax)\s*(?:for\s*)?(\d+)", text_lower)
+        if not cap_match:
+            cap_match = re.search(r"(\d+)\s*(?:guests|people|pax|attendees)", text_lower)
+        if cap_match:
+            cap_val = int(cap_match.group(1))
+            claims.append(ExtractedClaim(
+                claim_type="CAPACITY",
+                field="capacity",
+                raw_value=cap_val,
+                normalized_value=cap_val,
+                unit="guests",
+                source_text=cap_match.group(0),
+                confidence=0.98,
+                precision="EXACT",
+            ))
+
+        # 2. Quoted Price
+        price_val = None
+        price_src = None
+        price_prec = "APPROXIMATE" if any(w in text_lower for w in ["around", "approx", "about", "roughly"]) else "EXACT"
+
+        lakh_match = re.search(r"(?:₹|rs\.?|inr)?\s*(\d+(?:\.\d+)?)\s*(?:lakh|lac|l)\b", text_lower)
+        if lakh_match:
+            try:
+                price_val = float(lakh_match.group(1)) * 100000.0
+                price_src = lakh_match.group(0)
+            except ValueError:
+                pass
+        if price_val is None:
+            raw_num_match = re.search(r"(?:₹|rs\.?|inr|quote(?:\s+is)?)\s*(\d[\d,]{3,})", text_lower)
+            if raw_num_match:
+                cleaned_num = raw_num_match.group(1).replace(",", "")
+                try:
+                    price_val = float(cleaned_num)
+                    price_src = raw_num_match.group(0)
+                except ValueError:
+                    pass
+
+        if price_val is not None:
+            claims.append(ExtractedClaim(
+                claim_type="PRICE",
+                field="quoted_price",
+                raw_value=price_val,
+                normalized_value=price_val,
+                unit="INR",
+                source_text=price_src or str(price_val),
+                confidence=0.99,
+                precision=price_prec,
+            ))
+
+        # 3. Vegetarian / Dietary capability
+        if "veg" in text_lower or "vegetarian" in text_lower:
+            is_non_veg_only = bool(re.search(r"\b(?:only\s+non[- ]?veg|no\s+veg|cannot\s+do\s+veg|non[- ]?veg\s+only)\b", text_lower))
+            if is_non_veg_only:
+                claims.append(ExtractedClaim(
+                    claim_type="VEGETARIAN",
+                    field="vegetarian",
+                    raw_value=False,
+                    normalized_value=False,
+                    source_text="only non-vegetarian menu" if "non" in text_lower else "no veg",
+                    confidence=0.95,
+                    precision="EXACT",
+                ))
+            else:
+                veg_match = re.search(r"\b(?:veg(?:etarian)?\s*(?:menu)?\s*(?:is\s*)?(?:available|fine|possible|yes)?)\b", text_lower)
+                claims.append(ExtractedClaim(
+                    claim_type="VEGETARIAN",
+                    field="vegetarian",
+                    raw_value=True,
+                    normalized_value=True,
+                    source_text=veg_match.group(0) if veg_match else "vegetarian",
+                    confidence=0.98,
+                    precision="EXACT",
+                ))
+
+        # 4. Availability
+        if "available" in text_lower or "unavailable" in text_lower:
+            is_unavail = bool(re.search(r"\b(?:not\s+available|unavailable|cannot\s+do|booked|busy)\b", text_lower))
+            avail_val = "UNAVAILABLE" if is_unavail else "AVAILABLE"
+            claims.append(ExtractedClaim(
+                claim_type="AVAILABILITY",
+                field="reported_availability",
+                raw_value=avail_val,
+                normalized_value=avail_val,
+                source_text="available" if avail_val == "AVAILABLE" else "unavailable",
+                confidence=0.95,
+                precision="EXACT",
+            ))
+
+        # 5. Date mention
+        date_match = re.search(r"\b(?:december|dec|november|nov|january|jan|february|feb|march|mar|april|apr|may|june|jun|july|jul|august|aug|september|sep|october|oct)\s+\d{1,2}\b", text_lower)
+        if date_match:
+            claims.append(ExtractedClaim(
+                claim_type="DATE",
+                field="date",
+                raw_value=date_match.group(0).title(),
+                normalized_value=date_match.group(0).title(),
+                source_text=date_match.group(0),
+                confidence=0.95,
+                precision="EXACT",
+            ))
+
+        # 6. Ambiguities
+        for vague in ["probably", "might", "around", "should be able", "approx", "maybe"]:
+            if vague in text_lower:
+                ambiguities.append(f"Ambiguous statement detected: '{vague}'")
+
+        res = VendorOutcomeClaims(
+            claims=claims,
+            ambiguities=ambiguities,
+            summary=f"Extracted {len(claims)} claims with {len(ambiguities)} ambiguities.",
+        )
+        return res
 
     def interpret_incident(
         self,

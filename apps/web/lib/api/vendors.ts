@@ -155,5 +155,61 @@ export async function getVendorOutcomes(
   return apiClient.get<VendorOutcomeItem[]>(`/events/${eventId}/vendor-outcomes`, { params });
 }
 
+export interface ExtractedClaim {
+  claim_type: string;
+  field: string;
+  raw_value: any;
+  normalized_value?: any;
+  unit?: string | null;
+  source_text?: string | null;
+  confidence: number;
+  precision: string;
+}
+
+export interface ClaimValidationDetail {
+  claim_type: string;
+  field: string;
+  status: "PASS" | "FAIL" | "UNKNOWN" | "CONFLICT";
+  is_hard_requirement: boolean;
+  reported_value?: any;
+  authoritative_value?: any;
+  explanation: string;
+  source_evidence?: string | null;
+}
+
+export interface VendorOutcomeValidation {
+  id: string;
+  vendor_outcome_id: string;
+  event_id: string;
+  task_id?: string | null;
+  provider_id: string;
+  overall_status: "VALIDATED" | "PARTIALLY_VALIDATED" | "FAILED" | "CONFLICT" | "INSUFFICIENT_INFORMATION";
+  extracted_claims: ExtractedClaim[];
+  claim_results: ClaimValidationDetail[];
+  hard_requirements_passed: string[];
+  hard_requirements_failed: string[];
+  preferences_matched: string[];
+  conflicts: string[];
+  unknown_facts: string[];
+  validator_version: string;
+  summary?: string | null;
+  created_at: string;
+}
+
+export async function validateVendorOutcome(
+  eventId: string,
+  outcomeId: string
+): Promise<VendorOutcomeValidation> {
+  return apiClient.post<VendorOutcomeValidation>(`/events/${eventId}/vendor-outcomes/${outcomeId}/validate`, {});
+}
+
+export async function getVendorOutcomeValidation(
+  eventId: string,
+  outcomeId: string
+): Promise<VendorOutcomeValidation> {
+  return apiClient.get<VendorOutcomeValidation>(`/events/${eventId}/vendor-outcomes/${outcomeId}/validation`);
+}
+
+
 
 

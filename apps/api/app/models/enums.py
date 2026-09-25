@@ -212,3 +212,36 @@ class ReportedAvailability(str, Enum):
     CONDITIONAL = "CONDITIONAL"
     UNKNOWN = "UNKNOWN"
 
+
+class ClaimValidationStatus(str, Enum):
+    """Deterministic validation evaluation of an organizer-reported claim."""
+    PASS = "PASS"
+    FAIL = "FAIL"
+    UNKNOWN = "UNKNOWN"
+    CONFLICT = "CONFLICT"
+
+
+class OverallValidationStatus(str, Enum):
+    """Overall validation status for a parsed and validated vendor outcome."""
+    VALIDATED = "VALIDATED"
+    PARTIALLY_VALIDATED = "PARTIALLY_VALIDATED"
+    FAILED = "FAILED"
+    CONFLICT = "CONFLICT"
+    INSUFFICIENT_INFORMATION = "INSUFFICIENT_INFORMATION"
+
+
+class ClaimType(str, Enum):
+    """Categorization of facts extracted from organizer-reported vendor outcomes."""
+    CAPACITY = "CAPACITY"
+    PRICE = "PRICE"
+    CURRENCY = "CURRENCY"
+    AVAILABILITY = "AVAILABILITY"
+    DATE = "DATE"
+    VEGETARIAN = "VEGETARIAN"
+    LOCATION = "LOCATION"
+    CATEGORY = "CATEGORY"
+    REQUIREMENT = "REQUIREMENT"
+    PREFERENCE = "PREFERENCE"
+    TERMS = "TERMS"
+
+

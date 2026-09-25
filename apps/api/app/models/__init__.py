@@ -18,6 +18,9 @@ from app.models.enums import (
     CommunicationChannel,
     VendorOutcomeStatus,
     ReportedAvailability,
+    ClaimValidationStatus,
+    OverallValidationStatus,
+    ClaimType,
 )
 from app.models.venue import Venue
 from app.models.venue_availability import VenueAvailability
@@ -25,6 +28,7 @@ from app.models.vendor import Vendor
 from app.models.provider_availability import ProviderAvailability
 from app.models.vendor_assignment import VendorAssignment
 from app.models.vendor_outcome import VendorOutcome
+from app.models.vendor_outcome_validation import VendorOutcomeValidation
 from app.models.event import Event
 from app.models.event_member import EventMember
 from app.models.user import User
@@ -66,12 +70,16 @@ __all__ = [
     "CommunicationChannel",
     "VendorOutcomeStatus",
     "ReportedAvailability",
+    "ClaimValidationStatus",
+    "OverallValidationStatus",
+    "ClaimType",
     "Venue",
     "VenueAvailability",
     "Vendor",
     "ProviderAvailability",
     "VendorAssignment",
     "VendorOutcome",
+    "VendorOutcomeValidation",
     "Event",
     "EventMember",
     "User",

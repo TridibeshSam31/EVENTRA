@@ -36,9 +36,12 @@ from app.agent.tools.schemas import (
     ShortlistVendorsOutput,
     SubmitVendorOutcomeInput,
     SubmitVendorOutcomeOutput,
+    ValidateVendorOutcomeInput,
+    ValidateVendorOutcomeOutput,
 )
 from app.agent.tools.permissions import ToolPermissionGuard
 from app.services.vendor_outcome_service import VendorOutcomeService
+from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
 from app.core.exceptions import BadRequestException, NotFoundException
 
 
@@ -491,4 +494,97 @@ class SubmitVendorOutcomeTool(AgentTool):
             summary=summary_msg,
         )
         return ToolResult.success_result(self.name, data)
+
+
+class ValidateVendorOutcomeTool(AgentTool):
+    """Parses and deterministically validates an organizer-reported vendor outcome against system state.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    Evaluates claims deterministically into PASS, FAIL, UNKNOWN, or CONFLICT.
+    Does NOT assign or bind the vendor to the task, does NOT mutate task status or provider_id,
+    and does NOT recalculate the event plan or DAG.
+    """
+
+    name = "validate_vendor_outcome"
+    description = (
+        "Parses organizer-reported vendor outcome notes and evaluates claims against event requirements, "
+        "budget, guest capacity, calendar availability, and vendor master data. "
+        "Returns structured deterministic validation results without mutating task assignments or event plans."
+    )
+    category = ToolCategory.PROVIDER
+    access_mode = ToolAccessMode.WRITE
+    input_schema = ValidateVendorOutcomeInput
+    output_schema = ValidateVendorOutcomeOutput
+    availability = ToolAvailabilityStatus.AVAILABLE
+
+    def execute(self, context: ToolContext, args: ValidateVendorOutcomeInput) -> ToolResult:
+        ToolPermissionGuard.verify_read_permission(context.db, args.event_id, context.user_id, self.name)
+
+        # Enforce viewer role restriction: viewers cannot perform operational validations
+        if context.user_id and not (
+            context.user_id in ("system", "anonymous_operator")
+            or context.user_id.startswith("system")
+            or context.user_id.startswith("agent")
+        ):
+            from app.models.event import Event
+            from app.models.event_member import EventMember
+            from app.models.enums import RoleType
+
+            event = context.db.query(Event).filter(Event.id == args.event_id).first()
+            if event and event.owner_id != context.user_id:
+                member = (
+                    context.db.query(EventMember)
+                    .filter(
+                        EventMember.event_id == args.event_id,
+                        EventMember.user_id == context.user_id,
+                    )
+                    .first()
+                )
+                if member and member.role == RoleType.VIEWER.value:
+                    return ToolResult.failure_result(
+                        self.name,
+                        f"User '{context.user_id}' has read-only VIEWER access and cannot validate vendor outcomes.",
+                        "PERMISSION_DENIED",
+                    )
+
+        validation_service = VendorOutcomeValidationService(context.db)
+        try:
+            val = validation_service.validate_outcome(
+                outcome_id=args.vendor_outcome_id,
+                event_id=args.event_id,
+            )
+        except NotFoundException as exc:
+            return ToolResult.failure_result(self.name, str(exc), "NOT_FOUND")
+        except BadRequestException as exc:
+            return ToolResult.failure_result(self.name, str(exc), "INVALID_INPUT")
+        except Exception as exc:
+            return ToolResult.failure_result(
+                self.name,
+                f"Failed to validate vendor outcome: {str(exc)}",
+                "VALIDATION_FAILURE",
+            )
+
+        vendor = context.db.query(Vendor).filter(Vendor.id == val.provider_id).first()
+
+        data = ValidateVendorOutcomeOutput(
+            validation_id=val.id,
+            vendor_outcome_id=val.vendor_outcome_id,
+            event_id=val.event_id,
+            task_id=val.task_id,
+            provider_id=val.provider_id,
+            provider_name=vendor.name if vendor else None,
+            overall_status=val.overall_status,
+            extracted_claims=val.extracted_claims or [],
+            claim_results=val.claim_results or [],
+            hard_requirements_passed=val.hard_requirements_passed or [],
+            hard_requirements_failed=val.hard_requirements_failed or [],
+            preferences_matched=val.preferences_matched or [],
+            conflicts=val.conflicts or [],
+            unknown_facts=val.unknown_facts or [],
+            validator_version=val.validator_version,
+            summary=val.summary or f"Validation evaluated with overall status: {val.overall_status}",
+            validated_at=val.created_at.isoformat() if val.created_at else "",
+        )
+        return ToolResult.success_result(self.name, data)
+
 

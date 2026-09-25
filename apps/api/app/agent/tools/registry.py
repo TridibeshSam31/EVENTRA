@@ -474,6 +474,18 @@ def _handle_submit_vendor_outcome(db: Session, user_id: str, event_id: str, **kw
     return res.data.model_dump() if res.success and res.data else res
 
 
+def _handle_validate_vendor_outcome(db: Session, user_id: str, event_id: str, **kwargs) -> Any:
+    from app.agent.tools.provider_tools import ValidateVendorOutcomeTool
+    from app.agent.tools.schemas import ValidateVendorOutcomeInput
+    tool = ValidateVendorOutcomeTool()
+    args_dict = {"event_id": event_id, **kwargs}
+    args_model = ValidateVendorOutcomeInput.model_validate(args_dict)
+    ctx = ToolContext(db=db, user_id=user_id, event_id=event_id)
+    res = tool.execute(ctx, args_model)
+    return res.data.model_dump() if res.success and res.data else res
+
+
+
 
 def _handle_analyze_impact(db: Session, user_id: str, event_id: str, incident_id: str) -> Dict[str, Any]:
     from app.agent.tools.operations_tools import analyze_impact
@@ -657,6 +669,7 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         CompareCandidatesInput,
         ShortlistVendorsInput,
         SubmitVendorOutcomeInput,
+        ValidateVendorOutcomeInput,
     )
     registry.register(
         name="discover_providers",
@@ -694,6 +707,15 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         handler=_handle_submit_vendor_outcome,
         requires_approval=False,
     )
+    registry.register(
+        name="validate_vendor_outcome",
+        description="Parses organizer-reported vendor outcome notes and evaluates claims against requirements, budget, guest capacity, and calendar.",
+        category=ToolCategory.WRITE,
+        parameters_schema=ValidateVendorOutcomeInput,
+        handler=_handle_validate_vendor_outcome,
+        requires_approval=False,
+    )
+
 
     # 2. Deterministic Analysis & Computational Options
     registry.register(
@@ -1108,6 +1130,7 @@ def create_default_tool_registry() -> AgentToolRegistry:
         CompareCandidatesTool,
         ShortlistVendorsTool,
         SubmitVendorOutcomeTool,
+        ValidateVendorOutcomeTool,
     )
     registry.register(DiscoverProvidersTool())
     registry.register(QualifyProviderTool())
@@ -1115,6 +1138,7 @@ def create_default_tool_registry() -> AgentToolRegistry:
     registry.register(CompareCandidatesTool())
     registry.register(ShortlistVendorsTool())
     registry.register(SubmitVendorOutcomeTool())
+    registry.register(ValidateVendorOutcomeTool())
 
     # 4. Impact & Risk Tools
     from app.agent.tools.impact_tools import AnalyzeImpactTool

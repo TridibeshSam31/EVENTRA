@@ -12,6 +12,9 @@ from app.schemas.vendor_outcome import (
     VendorOutcomeCreate,
     VendorOutcomeResponse,
 )
+from app.schemas.vendor_outcome_validation import (
+    VendorOutcomeValidationResponse,
+)
 from app.services.specification_service import (
     SpecificationService,
     SpecificationValidationError,
@@ -333,5 +336,55 @@ def list_vendor_outcomes(
         item.task_name = task.name if task else None
         results.append(item)
     return results
+
+
+# --- Phase 7: Vendor Outcome Parsing & Validation Endpoints (Task 7) ---
+
+@router.post(
+    "/{event_id}/vendor-outcomes/{outcome_id}/validate",
+    response_model=VendorOutcomeValidationResponse,
+    status_code=status.HTTP_200_OK,
+)
+def validate_vendor_outcome_endpoint(
+    event_id: str,
+    outcome_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Parses and deterministically validates an organizer-reported vendor outcome against system state.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    Evaluates claims deterministically into PASS, FAIL, UNKNOWN, or CONFLICT.
+    Does NOT assign or bind the vendor to the task, does NOT mutate task status or provider_id,
+    and does NOT recalculate the event plan or DAG.
+    """
+    from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
+    from app.models.vendor import Vendor
+
+    service = VendorOutcomeValidationService(db)
+    validation = service.validate_outcome(outcome_id=outcome_id, event_id=event_id)
+    return VendorOutcomeValidationResponse.model_validate(validation)
+
+
+@router.get(
+    "/{event_id}/vendor-outcomes/{outcome_id}/validation",
+    response_model=VendorOutcomeValidationResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_vendor_outcome_validation_endpoint(
+    event_id: str,
+    outcome_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Retrieves the latest deterministic validation result for a vendor outcome."""
+    from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
+
+    service = VendorOutcomeValidationService(db)
+    validation = service.get_validation(outcome_id=outcome_id)
+    if not validation:
+        raise NotFoundException(f"No validation found for vendor outcome '{outcome_id}'.")
+    return VendorOutcomeValidationResponse.model_validate(validation)
+
 
 
