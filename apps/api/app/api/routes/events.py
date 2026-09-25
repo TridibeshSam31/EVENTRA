@@ -269,8 +269,11 @@ def discover_venues_for_event(
     event_service = EventService(db)
     event = event_service.get_event(event_id)
     target_city = discovery_in.city
-    if not target_city and event and event.location and isinstance(event.location, dict):
-        target_city = event.location.get("city")
+    if not target_city and event and event.location:
+        if isinstance(event.location, dict):
+            target_city = event.location.get("city")
+        elif isinstance(event.location, str):
+            target_city = event.location
     if not target_city:
         target_city = "Seattle"
 
