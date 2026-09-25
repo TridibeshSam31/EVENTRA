@@ -553,3 +553,516 @@ class VendorService:
         anchor_coords = (anchor_lat, anchor_lon) if (anchor_lat is not None and anchor_lon is not None) else None
         return processed_vendors, created, updated, source, queries, anchor_coords, anchor_label, anchor_mode
 
+    def qualify_vendor_deterministically(
+        self,
+        vendor: Vendor,
+        required_category: Optional[str] = None,
+        hard_requirements: Optional[List[str]] = None,
+        preferences: Optional[List[str]] = None,
+        guest_count: Optional[int] = None,
+        max_budget: Optional[float] = None,
+        max_distance_km: Optional[float] = None,
+        event_date: Optional[datetime] = None,
+        distance_km: Optional[float] = None,
+        location: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Deterministically evaluates provider attributes against hard requirements and preferences.
+
+        STRICT GUARDRAILS:
+        - NEVER fabricates live availability, custom prices, capacities, or confirmations.
+        - Missing or unconfirmed fields are explicitly marked UNKNOWN.
+        - Hard requirement failures trigger DISQUALIFIED.
+        - Preference mismatches NEVER disqualify candidates, only informing comparison & ranking.
+        """
+        import re
+        from datetime import timedelta
+
+        # 1. Category Check
+        category_match = True
+        if required_category:
+            req_cat = required_category.strip().upper()
+            v_cat = (vendor.category or "").strip().upper()
+            v_raw = (vendor.raw_category or "").strip().upper()
+            category_match = (v_cat == req_cat or v_raw == req_cat or req_cat in v_cat or v_cat in req_cat or req_cat in v_raw or v_raw in req_cat)
+
+        # 2. Budget Check (authoritative base_cost only)
+        budget_pass = True
+        budget_status = "PASS"
+        if max_budget is not None:
+            if vendor.base_cost is not None:
+                budget_pass = (vendor.base_cost <= max_budget)
+                budget_status = "PASS" if budget_pass else "FAIL"
+                budget_note = (
+                    f"Base cost {vendor.base_cost} <= max budget {max_budget}"
+                    if budget_pass
+                    else f"Base cost {vendor.base_cost} exceeds max budget {max_budget}"
+                )
+            else:
+                budget_pass = True  # Unknown cost does not disqualify, marked UNKNOWN
+                budget_status = "UNKNOWN"
+                budget_note = "Base cost unknown in database; quote must be confirmed directly"
+        else:
+            budget_note = "No budget ceiling specified"
+
+        # 3. Distance Check
+        dist_val = distance_km if distance_km is not None else getattr(vendor, "distance_km", None)
+        distance_pass = True
+        dist_status = "PASS"
+        if max_distance_km is not None and dist_val is not None:
+            distance_pass = (dist_val <= max_distance_km)
+            dist_status = "PASS" if distance_pass else "FAIL"
+            dist_note = (
+                f"Distance {dist_val:.1f} km <= max radius {max_distance_km} km"
+                if distance_pass
+                else f"Distance {dist_val:.1f} km exceeds radius {max_distance_km} km"
+            )
+        elif max_distance_km is not None and dist_val is None:
+            dist_status = "UNKNOWN"
+            dist_note = "Distance cannot be calculated without GPS coordinates"
+        else:
+            dist_note = "No radius constraint specified" if dist_val is None else f"Distance: {dist_val:.1f} km"
+
+        # Location text check (e.g. city match)
+        loc_pass = True
+        loc_status = "PASS"
+        if location and vendor.city:
+            loc_clean = location.strip().lower()
+            city_clean = vendor.city.strip().lower()
+            if loc_clean in city_clean or city_clean in loc_clean:
+                loc_pass = True
+                loc_status = "PASS"
+            else:
+                loc_pass = False
+                loc_status = "FAIL"
+        elif location and not vendor.city:
+            loc_status = "UNKNOWN"
+
+        # 4. Capacity Check
+        capacity_status = "UNKNOWN"
+        capacity_note = "Guest capacity not recorded in directory; must be confirmed with provider"
+        capacity_pass = True
+        if guest_count is not None:
+            text_corpus = " ".join([
+                getattr(vendor, "service_description", "") or "",
+                " ".join(vendor.capabilities or []),
+            ]).lower()
+            cap_match = re.search(r'(?:capacity|guests?|pax|max_guests)[\s:=_-]*(\d+)', text_corpus)
+            if cap_match:
+                try:
+                    detected_cap = int(cap_match.group(1))
+                    if detected_cap >= guest_count:
+                        capacity_pass = True
+                        capacity_status = "PASS"
+                        capacity_note = f"Verified capacity {detected_cap} >= required guests {guest_count}"
+                    else:
+                        capacity_pass = False
+                        capacity_status = "FAIL"
+                        capacity_note = f"Verified capacity {detected_cap} < required guests {guest_count}"
+                except ValueError:
+                    pass
+        else:
+            capacity_status = "PASS"
+            capacity_note = "No guest count constraint specified"
+
+        # 5. Availability Check (evaluated against recorded calendar slots ONLY)
+        availability_status = "UNKNOWN"
+        availability_note = "Real-time availability is UNKNOWN; EVENTRA does not fabricate live availability"
+        availability_pass = True
+        if event_date is not None:
+            start_dt = event_date
+            end_dt = start_dt + timedelta(hours=8)
+            try:
+                avail_res = self.check_provider_availability(vendor.id, start_dt, end_dt)
+                if not avail_res.is_available:
+                    availability_pass = False
+                    availability_status = "FAIL"
+                    availability_note = f"Calendar slot conflict: {avail_res.reason or 'Booked/Blocked slot'}"
+                elif len(avail_res.conflicts) == 0:
+                    availability_pass = True
+                    availability_status = "PASS"
+                    availability_note = "No database calendar conflicts for requested date"
+                else:
+                    availability_status = "UNKNOWN"
+                    availability_note = "Calendar record unverified for requested date"
+            except Exception:
+                availability_status = "UNKNOWN"
+
+        # 6. Hard Requirements Matching
+        hard_requirement_results: Dict[str, str] = {}
+        hard_reqs_passed: List[str] = []
+        hard_reqs_failed: List[str] = []
+        vendor_caps_lower = [c.lower() for c in (vendor.capabilities or [])]
+        vendor_desc_lower = (vendor.service_description or "").lower()
+        vendor_name_lower = (vendor.name or "").lower()
+
+        for req in (hard_requirements or []):
+            req_str = req.strip()
+            req_lower = req_str.lower()
+            matched = False
+
+            # Check exact or token match in capabilities
+            for cap in vendor_caps_lower:
+                if req_lower == cap or req_lower in cap.split("_") or req_lower in cap.split(" "):
+                    matched = True
+                    break
+
+            if not matched:
+                full_text = f"{vendor_name_lower} {vendor_desc_lower}"
+                if req_lower in ("vegetarian", "veg"):
+                    # Avoid matching inside "non-vegetarian", "non vegetarian", "non-veg"
+                    cleaned = re.sub(r'\bnon[- ]?veg(?:etarian)?\b', '', full_text)
+                    matched = bool(re.search(r'\bveg(?:etarian)?\b', cleaned))
+                elif req_lower in ("non-vegetarian", "non_vegetarian", "non-veg"):
+                    matched = bool(re.search(r'\bnon[- ]?veg(?:etarian)?\b', full_text))
+                else:
+                    matched = bool(re.search(rf'\b{re.escape(req_lower)}\b', full_text))
+
+            if matched:
+                hard_requirement_results[req_str] = "PASS"
+                hard_reqs_passed.append(req_str)
+            else:
+                hard_requirement_results[req_str] = "FAIL"
+                hard_reqs_failed.append(req_str)
+
+        # 7. Preferences Matching (Soft criteria — never disqualifies)
+        preference_results: Dict[str, str] = {}
+        prefs_matched: List[str] = []
+        prefs_unmatched: List[str] = []
+
+        for pref in (preferences or []):
+            pref_str = pref.strip()
+            pref_lower = pref_str.lower()
+            matched = False
+            if "rating" in pref_lower or "rated" in pref_lower or "star" in pref_lower:
+                if vendor.rating is not None and vendor.rating >= 4.0:
+                    matched = True
+            elif "review" in pref_lower or "established" in pref_lower:
+                if vendor.review_count is not None and vendor.review_count >= 10:
+                    matched = True
+            else:
+                for cap in vendor_caps_lower:
+                    if pref_lower == cap or pref_lower in cap.split("_") or pref_lower in cap.split(" "):
+                        matched = True
+                        break
+                if not matched:
+                    full_text = f"{vendor_name_lower} {vendor_desc_lower}"
+                    matched = bool(re.search(rf'\b{re.escape(pref_lower)}\b', full_text))
+
+            if matched:
+                preference_results[pref_str] = "PASS"
+                prefs_matched.append(pref_str)
+            else:
+                preference_results[pref_str] = "UNMATCHED"
+                prefs_unmatched.append(pref_str)
+
+        # 8. Composite Qualification Status
+        has_hard_fail = (
+            not category_match
+            or budget_status == "FAIL"
+            or dist_status == "FAIL"
+            or loc_status == "FAIL"
+            or capacity_status == "FAIL"
+            or availability_status == "FAIL"
+            or len(hard_reqs_failed) > 0
+        )
+
+        if has_hard_fail:
+            status = "DISQUALIFIED"
+            is_qualified = False
+        else:
+            status = "QUALIFIED"
+            is_qualified = True
+
+        # 9. Truthful Unknown Facts Tracking
+        unknown_facts: List[str] = [
+            "live_availability_for_event_dates",
+            "exact_per_plate_or_package_quote",
+            "staffing_and_equipment_limits",
+            "deposit_and_cancellation_terms",
+        ]
+        if capacity_status == "UNKNOWN":
+            unknown_facts.append("guest_capacity_ceiling")
+        if budget_status == "UNKNOWN":
+            unknown_facts.append("binding_base_cost")
+        if dist_status == "UNKNOWN":
+            unknown_facts.append("exact_transit_distance")
+
+        # 10. Summary construction
+        summary_parts = []
+        summary_parts.append(f"Category: {'MATCH' if category_match else 'MISMATCH'}")
+        summary_parts.append(f"Budget: {budget_note}")
+        summary_parts.append(f"Distance: {dist_note}")
+        if hard_reqs_passed:
+            summary_parts.append(f"Passed requirements: {', '.join(hard_reqs_passed)}")
+        if hard_reqs_failed:
+            summary_parts.append(f"Failed requirements: {', '.join(hard_reqs_failed)}")
+        if prefs_matched:
+            summary_parts.append(f"Matched preferences: {', '.join(prefs_matched)}")
+        if capacity_status != "PASS":
+            summary_parts.append(f"Capacity: {capacity_status}")
+
+        return {
+            "provider_id": vendor.id,
+            "name": vendor.name,
+            "is_qualified": is_qualified,
+            "status": status,
+            "category_match": category_match,
+            "budget_check": {
+                "passed": budget_pass,
+                "status": budget_status,
+                "note": budget_note,
+                "base_cost": vendor.base_cost,
+                "max_budget": max_budget,
+            },
+            "distance_check": {
+                "passed": distance_pass,
+                "status": dist_status,
+                "note": dist_note,
+                "distance_km": dist_val,
+                "max_distance_km": max_distance_km,
+            },
+            "capability_match": {
+                "matched": hard_reqs_passed,
+                "missing": hard_reqs_failed,
+            },
+            "capacity_check": {
+                "passed": capacity_pass,
+                "status": capacity_status,
+                "note": capacity_note,
+                "guest_count": guest_count,
+            },
+            "availability_check": {
+                "passed": availability_pass,
+                "status": availability_status,
+                "note": availability_note,
+            },
+            "hard_requirement_results": hard_requirement_results,
+            "preference_results": preference_results,
+            "hard_requirements_passed": hard_reqs_passed,
+            "hard_requirements_failed": hard_reqs_failed,
+            "preferences_matched": prefs_matched,
+            "known_facts": {
+                "name": vendor.name,
+                "category": vendor.category,
+                "status": vendor.status,
+                "base_cost": vendor.base_cost,
+                "rating": vendor.rating,
+                "review_count": vendor.review_count,
+                "city": vendor.city,
+                "capabilities": vendor.capabilities or [],
+                "source": vendor.source,
+            },
+            "unknown_facts": unknown_facts,
+            "qualification_summary": " | ".join(summary_parts),
+        }
+
+    def compare_candidates_deterministically(
+        self,
+        vendors: List[Vendor],
+        hard_requirements: Optional[List[str]] = None,
+        preferences: Optional[List[str]] = None,
+        guest_count: Optional[int] = None,
+        max_budget: Optional[float] = None,
+        max_distance_km: Optional[float] = None,
+        required_category: Optional[str] = None,
+        shortlist_limit: int = 5,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str]:
+        """Deterministically compares candidate providers and ranks them using transparent objective criteria.
+
+        Strict Ranking Order:
+        1. Qualification Status: QUALIFIED > INSUFFICIENT_INFORMATION > DISQUALIFIED
+        2. Preference Matches Count: Descending
+        3. Rating: Descending (Nulls last)
+        4. Review Count: Descending (Nulls last)
+        5. Base Cost: Ascending (Nulls last)
+        6. Distance: Ascending (Nulls last)
+        7. Stable Tie-breaker: Name ASC, ID ASC
+        """
+        matrix = []
+        for v in vendors:
+            eval_res = self.qualify_vendor_deterministically(
+                vendor=v,
+                required_category=required_category or v.category,
+                hard_requirements=hard_requirements,
+                preferences=preferences,
+                guest_count=guest_count,
+                max_budget=max_budget,
+                max_distance_km=max_distance_km,
+            )
+
+            req_matches = list(eval_res["hard_requirements_passed"])
+            if v.rating and v.rating >= 4.0:
+                req_matches.append(f"High customer rating ({v.rating:.1f}/5.0)")
+            if v.review_count and v.review_count >= 10:
+                req_matches.append(f"Established review track record ({v.review_count} reviews)")
+
+            req_mismatches = list(eval_res["hard_requirements_failed"])
+            if not v.base_cost:
+                req_mismatches.append("Base cost not provided in record")
+
+            known_constraints = []
+            if v.base_cost:
+                known_constraints.append(f"Starting cost: {v.base_cost}")
+            dist_km = getattr(v, "distance_km", None)
+            if dist_km is not None:
+                known_constraints.append(f"Distance: {dist_km:.1f} km")
+
+            entry = {
+                "provider_id": v.id,
+                "name": v.name,
+                "category": v.category,
+                "base_cost": v.base_cost,
+                "rating": v.rating,
+                "review_count": v.review_count,
+                "distance_km": dist_km,
+                "capabilities": v.capabilities or [],
+                "qualification_status": eval_res["status"],
+                "requirement_matches": req_matches,
+                "requirement_mismatches": req_mismatches,
+                "preferences_matched": eval_res["preferences_matched"],
+                "known_constraints": known_constraints,
+                "unknown_fields": eval_res["unknown_facts"][:4],
+                "is_shortlisted": False,
+            }
+            matrix.append(entry)
+
+        # Deterministic sorting
+        def sort_key(item):
+            status_priority = 0 if item["qualification_status"] == "QUALIFIED" else (1 if item["qualification_status"] == "INSUFFICIENT_INFORMATION" else 2)
+            pref_count = -len(item["preferences_matched"])
+            rating_val = -(item["rating"] if item["rating"] is not None else -1.0)
+            rev_val = -(item["review_count"] if item["review_count"] is not None else -1)
+            cost_val = item["base_cost"] if item["base_cost"] is not None else 9999999.0
+            dist_val = item["distance_km"] if item["distance_km"] is not None else 99999.0
+            return (status_priority, pref_count, rating_val, rev_val, cost_val, dist_val, item["name"], item["provider_id"])
+
+        matrix.sort(key=sort_key)
+
+        # Build shortlist: strictly exclude DISQUALIFIED providers
+        shortlist = []
+        for item in matrix:
+            if item["qualification_status"] != "DISQUALIFIED":
+                item["is_shortlisted"] = True
+                shortlist.append(item)
+                if len(shortlist) >= shortlist_limit:
+                    break
+
+        qualified_count = sum(1 for m in matrix if m["qualification_status"] == "QUALIFIED")
+        disqualified_count = sum(1 for m in matrix if m["qualification_status"] == "DISQUALIFIED")
+
+        names_summary = ", ".join(f"{m['name']} ({m['qualification_status']}, Rating: {m['rating'] or 'N/A'})" for m in matrix)
+        deterministic_summary = (
+            f"Compared {len(matrix)} provider candidates ({qualified_count} qualified, {disqualified_count} disqualified). "
+            f"Shortlisted top {len(shortlist)} using deterministic criteria (no disqualified candidates, ranked by requirements, rating, and cost): {names_summary}"
+        )
+
+        return matrix, shortlist, deterministic_summary
+
+    def generate_deterministic_shortlist(
+        self,
+        event_id: str,
+        task_id: Optional[str] = None,
+        category: Optional[str] = None,
+        location: Optional[str] = None,
+        guest_count: Optional[int] = None,
+        hard_requirements: Optional[List[str]] = None,
+        preferences: Optional[List[str]] = None,
+        max_budget: Optional[float] = None,
+        radius_km: Optional[float] = None,
+        limit: int = 5,
+        search_query: Optional[str] = None,
+    ) -> Tuple[List[Vendor], List[Dict[str, Any]], int, str]:
+        """Orchestrates end-to-end task-aware deterministic vendor discovery, qualification, and shortlisting.
+
+        Returns: (all_candidate_vendors, shortlisted_entries, disqualified_count, deterministic_rationale)
+        """
+        from app.models.task import Task
+        from app.models.requirement import Requirement
+        from app.models.event import Event
+
+        event = self.db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            raise ValueError(f"Event with id '{event_id}' not found")
+
+        resolved_category = category
+        resolved_budget = max_budget
+        resolved_location = location or getattr(event, "location", None) or "Delhi"
+        resolved_guest_count = guest_count or getattr(event, "guest_count", None)
+
+        hard_reqs = list(hard_requirements or [])
+        soft_prefs = list(preferences or [])
+
+        # 1. Task-Aware Context Resolution
+        if task_id:
+            task = self.db.query(Task).filter(Task.id == task_id, Task.event_id == event_id).first()
+            if task:
+                if not resolved_category and task.required_provider_category:
+                    resolved_category = task.required_provider_category
+                # Parse task title/description for domain requirement cues
+                task_text = f"{task.name} {task.description or ''}".lower()
+                if "vegetarian" in task_text and "vegetarian" not in [r.lower() for r in hard_reqs]:
+                    hard_reqs.append("vegetarian")
+
+        # 2. Event Requirement Records Resolution
+        db_requirements = self.db.query(Requirement).filter(Requirement.event_id == event_id).all()
+        for r in db_requirements:
+            is_relevant = True
+            if resolved_category and r.type and r.type != "GENERAL":
+                is_relevant = (resolved_category.lower() in r.type.lower() or r.type.lower() in resolved_category.lower())
+
+            if is_relevant:
+                req_text = r.name
+                if r.required:
+                    if req_text not in hard_reqs:
+                        hard_reqs.append(req_text)
+                else:
+                    if req_text not in soft_prefs:
+                        soft_prefs.append(req_text)
+
+        # 3. Retrieve Candidate Vendors (merging database records with discovery)
+        clean_cat = resolved_category.strip().upper() if resolved_category else None
+
+        # Fetch authoritative database records matching category/city
+        local_db_vendors, _ = self.search_vendors(category=clean_cat, city=resolved_location, limit=max(limit * 3, 50))
+        if not local_db_vendors and clean_cat:
+            local_db_vendors, _ = self.search_vendors(category=clean_cat, limit=max(limit * 3, 50))
+
+        disc_req = ProviderDiscoveryRequest(
+            category=clean_cat,
+            location=resolved_location,
+            query=search_query,
+            radius_km=radius_km,
+            limit=max(limit * 3, 20),
+            use_real_scraper=False,
+        )
+
+        try:
+            discovered, created, updated, source, queries, anchor_coords, anchor_label, anchor_mode = (
+                self.discover_providers_for_event(event_id, disc_req)
+            )
+        except Exception:
+            discovered = []
+
+        # Merge local DB records with discovered records, prioritizing local DB entries
+        vendors_dict = {v.id: v for v in local_db_vendors}
+        for v in discovered:
+            if v.id not in vendors_dict:
+                vendors_dict[v.id] = v
+
+        vendors = list(vendors_dict.values())
+
+        # 4. Deterministic Qualification & Shortlisting
+        matrix, shortlist, summary = self.compare_candidates_deterministically(
+            vendors=vendors,
+            hard_requirements=hard_reqs,
+            preferences=soft_prefs,
+            guest_count=resolved_guest_count,
+            max_budget=resolved_budget,
+            max_distance_km=radius_km,
+            required_category=clean_cat,
+            shortlist_limit=limit,
+        )
+
+        disqualified_count = sum(1 for m in matrix if m["qualification_status"] == "DISQUALIFIED")
+        return vendors, shortlist, disqualified_count, summary
+

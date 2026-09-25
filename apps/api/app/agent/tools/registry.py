@@ -419,6 +419,50 @@ def _handle_get_provider_status(db: Session, user_id: str, event_id: str, catego
     return {"found": True, "assignments": results}
 
 
+def _handle_discover_providers(db: Session, user_id: str, event_id: str, **kwargs) -> Any:
+    from app.agent.tools.provider_tools import DiscoverProvidersTool
+    from app.agent.tools.schemas import DiscoverProvidersInput
+    tool = DiscoverProvidersTool()
+    args_dict = {"event_id": event_id, **kwargs}
+    args_model = DiscoverProvidersInput.model_validate(args_dict)
+    ctx = ToolContext(db=db, user_id=user_id, event_id=event_id)
+    res = tool.execute(ctx, args_model)
+    return res.data.model_dump() if res.success and res.data else res
+
+
+def _handle_qualify_provider(db: Session, user_id: str, event_id: str, **kwargs) -> Any:
+    from app.agent.tools.provider_tools import QualifyProviderTool
+    from app.agent.tools.schemas import QualifyProviderInput
+    tool = QualifyProviderTool()
+    args_dict = {"event_id": event_id, **kwargs}
+    args_model = QualifyProviderInput.model_validate(args_dict)
+    ctx = ToolContext(db=db, user_id=user_id, event_id=event_id)
+    res = tool.execute(ctx, args_model)
+    return res.data.model_dump() if res.success and res.data else res
+
+
+def _handle_compare_candidates(db: Session, user_id: str, event_id: str, **kwargs) -> Any:
+    from app.agent.tools.provider_tools import CompareCandidatesTool
+    from app.agent.tools.schemas import CompareCandidatesInput
+    tool = CompareCandidatesTool()
+    args_dict = {"event_id": event_id, **kwargs}
+    args_model = CompareCandidatesInput.model_validate(args_dict)
+    ctx = ToolContext(db=db, user_id=user_id, event_id=event_id)
+    res = tool.execute(ctx, args_model)
+    return res.data.model_dump() if res.success and res.data else res
+
+
+def _handle_shortlist_vendors(db: Session, user_id: str, event_id: str, **kwargs) -> Any:
+    from app.agent.tools.provider_tools import ShortlistVendorsTool
+    from app.agent.tools.schemas import ShortlistVendorsInput
+    tool = ShortlistVendorsTool()
+    args_dict = {"event_id": event_id, **kwargs}
+    args_model = ShortlistVendorsInput.model_validate(args_dict)
+    ctx = ToolContext(db=db, user_id=user_id, event_id=event_id)
+    res = tool.execute(ctx, args_model)
+    return res.data.model_dump() if res.success and res.data else res
+
+
 def _handle_analyze_impact(db: Session, user_id: str, event_id: str, incident_id: str) -> Dict[str, Any]:
     from app.agent.tools.operations_tools import analyze_impact
     return analyze_impact(db, event_id, incident_id)
@@ -594,6 +638,40 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         category=ToolCategory.READ,
         parameters_schema=GetProviderStatusInput,
         handler=_handle_get_provider_status,
+    )
+    from app.agent.tools.schemas import (
+        DiscoverProvidersInput,
+        QualifyProviderInput,
+        CompareCandidatesInput,
+        ShortlistVendorsInput,
+    )
+    registry.register(
+        name="discover_providers",
+        description="Discovers provider candidates matching event/task requirements and produces a deterministic shortlist.",
+        category=ToolCategory.READ,
+        parameters_schema=DiscoverProvidersInput,
+        handler=_handle_discover_providers,
+    )
+    registry.register(
+        name="qualify_provider",
+        description="Evaluates whether known provider information satisfies event or task requirements.",
+        category=ToolCategory.READ,
+        parameters_schema=QualifyProviderInput,
+        handler=_handle_qualify_provider,
+    )
+    registry.register(
+        name="compare_candidates",
+        description="Deterministically compares structured provider candidates against requirements and constraints.",
+        category=ToolCategory.READ,
+        parameters_schema=CompareCandidatesInput,
+        handler=_handle_compare_candidates,
+    )
+    registry.register(
+        name="shortlist_vendors",
+        description="Generates an explainable deterministic shortlist of provider candidates for an event task.",
+        category=ToolCategory.READ,
+        parameters_schema=ShortlistVendorsInput,
+        handler=_handle_shortlist_vendors,
     )
 
     # 2. Deterministic Analysis & Computational Options
@@ -1007,11 +1085,13 @@ def create_default_tool_registry() -> AgentToolRegistry:
         QualifyProviderTool,
         CheckProviderAvailabilityTool,
         CompareCandidatesTool,
+        ShortlistVendorsTool,
     )
     registry.register(DiscoverProvidersTool())
     registry.register(QualifyProviderTool())
     registry.register(CheckProviderAvailabilityTool())
     registry.register(CompareCandidatesTool())
+    registry.register(ShortlistVendorsTool())
 
     # 4. Impact & Risk Tools
     from app.agent.tools.impact_tools import AnalyzeImpactTool

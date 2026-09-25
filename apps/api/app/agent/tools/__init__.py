@@ -56,6 +56,7 @@ from app.agent.tools.provider_tools import (
     QualifyProviderTool,
     CheckProviderAvailabilityTool,
     CompareCandidatesTool,
+    ShortlistVendorsTool,
 )
 from app.agent.tools.impact_tools import AnalyzeImpactTool
 from app.agent.tools.risk_tools import AssessRiskTool
@@ -143,6 +144,7 @@ __all__ = [
     "QualifyProviderTool",
     "CheckProviderAvailabilityTool",
     "CompareCandidatesTool",
+    "ShortlistVendorsTool",
     # Impact & Risk Tools
     "AnalyzeImpactTool",
     "AssessRiskTool",

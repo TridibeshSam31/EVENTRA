@@ -192,14 +192,17 @@ class CreateOrUpdateTaskOutput(BaseModel):
 
 class DiscoverProvidersInput(BaseModel):
     event_id: str = Field(..., description="Unique event identifier")
+    task_id: Optional[str] = Field(None, description="Optional task ID to contextualize category, requirements, and budget")
     category: Optional[str] = Field(None, description="Provider category (e.g. CATERING, PHOTOGRAPHY, VENUE)")
     location: Optional[str] = Field(None, description="City or locality to anchor search")
     query: Optional[str] = Field(None, description="Specific natural language or keyword query")
     radius_km: Optional[float] = Field(None, description="Maximum distance radius in kilometers")
     limit: int = Field(10, ge=1, le=50, description="Maximum number of candidates to return")
     guest_count: Optional[int] = Field(None, description="Target guest count capacity filter")
-    requirements: List[str] = Field(default_factory=list, description="Mandatory requirements (e.g. vegetarian)")
-    preferences: List[str] = Field(default_factory=list, description="Desirable preferences")
+    requirements: List[str] = Field(default_factory=list, description="Mandatory hard requirements (e.g. vegetarian)")
+    preferences: List[str] = Field(default_factory=list, description="Desirable preferences (e.g. rating >= 4.5, candid style)")
+    max_budget: Optional[float] = Field(None, description="Maximum acceptable base cost ceiling")
+    shortlist_limit: Optional[int] = Field(5, ge=1, le=20, description="Maximum number of candidates for deterministic shortlist")
 
 
 class ProviderCandidate(BaseModel):
@@ -217,24 +220,37 @@ class ProviderCandidate(BaseModel):
     capabilities: List[str] = Field(default_factory=list, description="Verified capabilities from evidence")
     known_constraints: List[str] = Field(default_factory=list, description="Known operational constraints")
     unknown_fields: List[str] = Field(default_factory=list, description="Attributes explicitly not confirmed")
+    qualification_status: str = Field("QUALIFIED", description="Deterministic status: QUALIFIED, DISQUALIFIED, or INSUFFICIENT_INFORMATION")
+    requirement_matches: List[str] = Field(default_factory=list, description="Matched hard requirements")
+    requirement_failures: List[str] = Field(default_factory=list, description="Failed hard requirements")
+    preference_matches: List[str] = Field(default_factory=list, description="Matched soft preferences")
+    shortlist_rationale: Optional[str] = Field(None, description="Deterministic factual rationale for inclusion")
 
 
 class DiscoverProvidersOutput(BaseModel):
     event_id: str = Field(..., description="Event identifier")
+    task_id: Optional[str] = Field(None, description="Task identifier if context-aware")
     total_found: int = Field(..., description="Total candidate providers found")
     providers: List[ProviderCandidate] = Field(..., description="List of structured provider candidates")
+    shortlist: List[ProviderCandidate] = Field(default_factory=list, description="Deterministically shortlisted qualified candidates")
+    total_shortlisted: int = Field(0, description="Total candidates in deterministic shortlist")
     search_location: Optional[str] = Field(None, description="Geographic location resolved for search")
     search_category: Optional[str] = Field(None, description="Category filter applied")
     search_radius_km: Optional[float] = Field(None, description="Radius filter applied")
+    deterministic_summary: Optional[str] = Field(None, description="Factual, explainable summary of discovery and shortlisting")
 
 
 class QualifyProviderInput(BaseModel):
     event_id: str = Field(..., description="Unique event identifier")
     provider_id: str = Field(..., description="Unique provider ID to qualify")
+    task_id: Optional[str] = Field(None, description="Optional task ID to contextualize requirements")
     required_category: Optional[str] = Field(None, description="Required category for the task/event")
+    guest_count: Optional[int] = Field(None, description="Required guest count capacity to evaluate")
     max_budget: Optional[float] = Field(None, description="Maximum available budget ceiling")
     max_distance_km: Optional[float] = Field(None, description="Maximum acceptable distance in km")
-    required_capabilities: List[str] = Field(default_factory=list, description="Required capabilities")
+    required_capabilities: List[str] = Field(default_factory=list, description="Mandatory required capabilities/hard requirements")
+    preferences: List[str] = Field(default_factory=list, description="Soft preferences (desirable, non-disqualifying)")
+    event_date: Optional[datetime] = Field(None, description="Optional event date to check recorded DB availability")
 
 
 class QualifyProviderOutput(BaseModel):
@@ -246,8 +262,15 @@ class QualifyProviderOutput(BaseModel):
     budget_check: Dict[str, Any] = Field(..., description="Deterministic budget evaluation against base cost")
     distance_check: Dict[str, Any] = Field(..., description="Deterministic distance evaluation against radius")
     capability_match: Dict[str, Any] = Field(..., description="Matched vs missing capabilities")
+    capacity_check: Dict[str, Any] = Field(default_factory=dict, description="Capacity evaluation: PASS, FAIL, or UNKNOWN")
+    availability_check: Dict[str, Any] = Field(default_factory=dict, description="Availability evaluation: PASS, FAIL, or UNKNOWN")
+    hard_requirement_results: Dict[str, str] = Field(default_factory=dict, description="Status for each hard requirement: PASS, FAIL, UNKNOWN")
+    preference_results: Dict[str, str] = Field(default_factory=dict, description="Status for each preference: PASS, FAIL, UNKNOWN")
+    hard_requirements_passed: List[str] = Field(default_factory=list, description="List of passed hard requirements")
+    hard_requirements_failed: List[str] = Field(default_factory=list, description="List of failed hard requirements")
+    preferences_matched: List[str] = Field(default_factory=list, description="List of matched preferences")
     known_facts: Dict[str, Any] = Field(..., description="Authoritatively verified facts from DB")
-    unknown_facts: List[str] = Field(..., description="Facts that remain UNKNOWN (e.g. live availability, capacity)")
+    unknown_facts: List[str] = Field(..., description="Facts that remain UNKNOWN (e.g. live availability, custom pricing)")
     qualification_summary: str = Field(..., description="Factual, deterministic explanation of qualification")
 
 
@@ -271,8 +294,12 @@ class CheckProviderAvailabilityOutput(BaseModel):
 
 class CompareCandidatesInput(BaseModel):
     event_id: str = Field(..., description="Unique event identifier")
-    provider_ids: List[str] = Field(..., min_length=1, max_length=10, description="List of provider IDs to compare")
+    provider_ids: List[str] = Field(..., min_length=1, max_length=20, description="List of provider IDs to compare")
     task_id: Optional[str] = Field(None, description="Optional task ID to contextualize requirements")
+    hard_requirements: List[str] = Field(default_factory=list, description="Hard requirements to compare against")
+    preferences: List[str] = Field(default_factory=list, description="Preferences to compare against")
+    guest_count: Optional[int] = Field(None, description="Guest count capacity")
+    max_budget: Optional[float] = Field(None, description="Max budget ceiling")
 
 
 class ProviderComparisonEntry(BaseModel):
@@ -284,17 +311,43 @@ class ProviderComparisonEntry(BaseModel):
     review_count: Optional[int] = Field(None, description="Review count")
     distance_km: Optional[float] = Field(None, description="Distance from event")
     capabilities: List[str] = Field(default_factory=list, description="Capabilities")
-    requirement_matches: List[str] = Field(default_factory=list, description="Matched requirements")
-    requirement_mismatches: List[str] = Field(default_factory=list, description="Unmet requirements")
+    qualification_status: str = Field("QUALIFIED", description="QUALIFIED, DISQUALIFIED, or INSUFFICIENT_INFORMATION")
+    requirement_matches: List[str] = Field(default_factory=list, description="Matched hard requirements")
+    requirement_mismatches: List[str] = Field(default_factory=list, description="Unmet hard requirements")
+    preferences_matched: List[str] = Field(default_factory=list, description="Matched soft preferences")
     known_constraints: List[str] = Field(default_factory=list, description="Known constraints")
     unknown_fields: List[str] = Field(default_factory=list, description="Explicitly unknown attributes")
+    is_shortlisted: bool = Field(False, description="Whether candidate meets criteria for shortlist")
 
 
 class CompareCandidatesOutput(BaseModel):
     event_id: str = Field(..., description="Event identifier")
     total_compared: int = Field(..., description="Number of candidates compared")
     comparison_matrix: List[ProviderComparisonEntry] = Field(..., description="Detailed deterministic comparison table")
+    shortlist: List[ProviderComparisonEntry] = Field(default_factory=list, description="Deterministically shortlisted qualified candidates")
     deterministic_summary: str = Field(..., description="Summary of objective differences across candidates")
+
+
+class ShortlistVendorsInput(BaseModel):
+    event_id: str = Field(..., description="Unique event identifier")
+    task_id: Optional[str] = Field(None, description="Optional task ID to contextualize requirements")
+    category: Optional[str] = Field(None, description="Provider category (e.g. CATERING, PHOTOGRAPHY)")
+    limit: int = Field(5, ge=1, le=20, description="Maximum number of candidates in shortlist")
+    hard_requirements: List[str] = Field(default_factory=list, description="Mandatory requirements")
+    preferences: List[str] = Field(default_factory=list, description="Soft preferences")
+    max_budget: Optional[float] = Field(None, description="Max budget ceiling")
+    location: Optional[str] = Field(None, description="City or anchor location")
+    guest_count: Optional[int] = Field(None, description="Guest count capacity")
+
+
+class ShortlistVendorsOutput(BaseModel):
+    event_id: str = Field(..., description="Event identifier")
+    task_id: Optional[str] = Field(None, description="Task identifier if context-aware")
+    total_candidates: int = Field(..., description="Total candidate providers evaluated")
+    total_shortlisted: int = Field(..., description="Total candidates included in shortlist")
+    shortlist: List[ProviderCandidate] = Field(..., description="Deterministically ranked shortlisted candidates")
+    disqualified_count: int = Field(0, description="Count of evaluated providers that failed hard requirements")
+    deterministic_rationale: str = Field(..., description="Objective explanation of shortlisting decisions")
 
 
 # ==============================================================================
