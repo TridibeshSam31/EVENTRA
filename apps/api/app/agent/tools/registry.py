@@ -742,6 +742,30 @@ def _handle_get_execution_state(
     return get_execution_state(db=db, event_id=event_id, user_id=user_id)
 
 
+def _handle_call_vendor(
+    db: Session,
+    user_id: str,
+    event_id: str,
+    task_id: str,
+    provider_id: str,
+    reason: Optional[str] = "P3_RECOVERY",
+    recovery_option_id: Optional[str] = None,
+    call_objective: Optional[str] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    from app.agent.tools.communication_tools import call_vendor
+    return call_vendor(
+        event_id=event_id,
+        task_id=task_id,
+        provider_id=provider_id,
+        reason=reason,
+        recovery_option_id=recovery_option_id,
+        call_objective=call_objective,
+        db=db,
+        user_id=user_id,
+    )
+
+
 def create_default_functional_tool_registry() -> ToolRegistry:
     """Builds and populates the default central ToolRegistry for Task 4 agent loop."""
     registry = ToolRegistry()
@@ -1019,6 +1043,15 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         category=ToolCategory.READ,
         parameters_schema=GetExecutionStateInput,
         handler=_handle_get_execution_state,
+    )
+    from app.agent.tools.schemas import CallVendorInput
+    registry.register(
+        name="call_vendor",
+        description="Initiates an authorized, deterministic voice call to a vendor for operational recovery or engagement.",
+        category=ToolCategory.WRITE,
+        parameters_schema=CallVendorInput,
+        handler=_handle_call_vendor,
+        requires_approval=False,
     )
 
     return registry
@@ -1372,12 +1405,14 @@ def create_default_tool_registry() -> AgentToolRegistry:
         GenerateRecoveryOptionsTool,
         ValidateRecoveryOptionTool,
         ExecuteRecoveryTool,
+        CallVendorTool,
     )
     registry.register(GetActiveIncidentsTool())
     registry.register(InspectIncidentTool())
     registry.register(GenerateRecoveryOptionsTool())
     registry.register(ValidateRecoveryOptionTool())
     registry.register(ExecuteRecoveryTool())
+    registry.register(CallVendorTool())
 
     # 6. Observability Tools
     from app.agent.tools.trace_tools import (

@@ -86,3 +86,48 @@ class ProviderCommunicationService:
             )
 
         return result
+
+    def make_call(
+        self,
+        event_id: str,
+        provider_id: str,
+        recipient_phone: str,
+        task_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        custom_field: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+        actor_id: Optional[str] = "system",
+        actor_type: Optional[str] = "SYSTEM",
+    ) -> IntegrationResult[Dict[str, Any]]:
+        """Initiates an outbound telephony call to a vendor/provider."""
+        result = self._provider.make_call(
+            event_id=event_id,
+            provider_id=provider_id,
+            recipient_phone=recipient_phone,
+            task_id=task_id,
+            session_id=session_id,
+            custom_field=custom_field,
+            metadata=metadata,
+        )
+
+        if self._audit:
+            self._audit.record(
+                event_id=event_id,
+                actor_id=actor_id or "system",
+                actor_type=actor_type or "SYSTEM",
+                action="PROVIDER_CALL_INITIATED",
+                action_type="COMMUNICATION",
+                target_type="PROVIDER",
+                target_id=provider_id,
+                after_state={
+                    "provider_id": provider_id,
+                    "task_id": task_id,
+                    "recipient_phone": recipient_phone,
+                    "session_id": session_id,
+                    "success": result.success,
+                    "channel": result.data.get("channel") if result.data else "UNKNOWN",
+                    "call_sid": result.data.get("call_sid") if result.data else None,
+                },
+            )
+
+        return result

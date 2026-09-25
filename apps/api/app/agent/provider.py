@@ -466,6 +466,25 @@ class MockLLMProvider(LLMProvider):
                 price_src = lakh_match.group(0)
             except ValueError:
                 pass
+        detected_unit = "INR"
+        if any(sym in text_lower for sym in ["$", "usd", "dollar", "bucks"]) or "'form_currency': 'usd'" in text_lower or '"form_currency": "usd"' in text_lower:
+            detected_unit = "USD"
+        elif any(sym in text_lower for sym in ["€", "eur", "euro"]) or "'form_currency': 'eur'" in text_lower or '"form_currency": "eur"' in text_lower:
+            detected_unit = "EUR"
+        elif any(sym in text_lower for sym in ["£", "gbp", "pound"]) or "'form_currency': 'gbp'" in text_lower or '"form_currency": "gbp"' in text_lower:
+            detected_unit = "GBP"
+
+        usd_match = re.search(r"(?:\$|usd|dollars?)\s*(\d+(?:,\d+)*(?:\.\d+)?)", text_lower)
+        if not usd_match:
+            usd_match = re.search(r"(\d+(?:,\d+)*(?:\.\d+)?)\s*(?:usd|dollars?)", text_lower)
+        if usd_match:
+            try:
+                price_val = float(usd_match.group(1).replace(",", ""))
+                price_src = usd_match.group(0)
+                detected_unit = "USD"
+            except ValueError:
+                pass
+
         if price_val is None:
             raw_num_match = re.search(r"(?:₹|rs\.?|inr|quote(?:\s+is)?)\s*(\d[\d,]{3,})", text_lower)
             if raw_num_match:
@@ -482,7 +501,7 @@ class MockLLMProvider(LLMProvider):
                 field="quoted_price",
                 raw_value=price_val,
                 normalized_value=price_val,
-                unit="INR",
+                unit=detected_unit,
                 source_text=price_src or str(price_val),
                 confidence=0.99,
                 precision=price_prec,

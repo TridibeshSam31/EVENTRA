@@ -69,6 +69,7 @@ from app.agent.tools.recovery_tools import (
     GenerateRecoveryOptionsTool,
     ValidateRecoveryOptionTool,
     ExecuteRecoveryTool,
+    CallVendorTool,
 )
 from app.agent.tools.trace_tools import (
     RecordDecisionTool,
@@ -100,6 +101,11 @@ from app.agent.tools.communication_tools import (
     confirm_provider_engagement,
     simulate_provider_response,
     get_provider_negotiation_history,
+    get_negotiation_constraints,
+    submit_vendor_negotiation_response,
+    request_negotiation_approval,
+    confirm_authorized_engagement,
+    call_vendor,
 )
 
 __all__ = [
@@ -160,6 +166,7 @@ __all__ = [
     "GenerateRecoveryOptionsTool",
     "ValidateRecoveryOptionTool",
     "ExecuteRecoveryTool",
+    "CallVendorTool",
     # Observability Tools
     "RecordDecisionTool",
     "GetDecisionTraceTool",
@@ -185,4 +192,9 @@ __all__ = [
     "confirm_provider_engagement",
     "simulate_provider_response",
     "get_provider_negotiation_history",
+    "get_negotiation_constraints",
+    "submit_vendor_negotiation_response",
+    "request_negotiation_approval",
+    "confirm_authorized_engagement",
+    "call_vendor",
 ]

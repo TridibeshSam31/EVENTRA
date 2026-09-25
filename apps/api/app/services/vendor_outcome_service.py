@@ -96,6 +96,7 @@ class VendorOutcomeService:
             avail_raw = payload.get("reported_availability", "UNKNOWN")
             organizer_notes = payload.get("organizer_notes")
             vendor_response = payload.get("vendor_response")
+            source_raw = payload.get("source")
             sub_by = payload.get("submitted_by") or submitted_by
         else:
             provider_id = payload.provider_id
@@ -107,6 +108,7 @@ class VendorOutcomeService:
             avail_raw = payload.reported_availability
             organizer_notes = payload.organizer_notes
             vendor_response = payload.vendor_response
+            source_raw = getattr(payload, "source", None)
             sub_by = getattr(payload, "submitted_by", None) or submitted_by
 
         # 1. Validate Event existence
@@ -157,6 +159,8 @@ class VendorOutcomeService:
         if avail_norm not in valid_avail:
             avail_norm = ReportedAvailability.UNKNOWN.value
 
+        source_norm = str(source_raw or "ORGANIZER_REPORTED").strip().upper()
+
         # 5. Build Persistent VendorOutcome Record
         outcome = VendorOutcome(
             event_id=event_id,
@@ -169,8 +173,8 @@ class VendorOutcomeService:
             reported_availability=avail_norm,
             organizer_notes=organizer_notes.strip() if organizer_notes else None,
             vendor_response=vendor_response or None,
-            # Provenance: Always explicitly marked as ORGANIZER_REPORTED and UNVERIFIED
-            source="ORGANIZER_REPORTED",
+            # Provenance: Explicitly marked as ORGANIZER_REPORTED or AI_VOICE_CALL, and UNVERIFIED
+            source=source_norm,
             verification_status="UNVERIFIED",
             submitted_by=sub_by,
         )
@@ -194,7 +198,7 @@ class VendorOutcomeService:
                 "quoted_price": normalized_price,
                 "currency": currency_norm,
                 "reported_availability": avail_norm,
-                "source": "ORGANIZER_REPORTED",
+                "source": source_norm,
                 "verification_status": "UNVERIFIED",
             },
         )

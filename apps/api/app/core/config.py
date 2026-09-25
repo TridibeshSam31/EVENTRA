@@ -83,20 +83,41 @@ class Settings(BaseSettings):
     OPENWA_WEBHOOK_SECRET: Union[str, None] = None  # HMAC webhook signing secret
     OPENWA_TIMEOUT_SECONDS: int = 10
 
+    # Exotel telephony configuration (Phase: Voice Integration)
+    EXOTEL_ENABLED: bool = False
+    EXOTEL_API_KEY: Union[str, None] = None
+    EXOTEL_API_TOKEN: Union[str, None] = None
+    EXOTEL_SUBDOMAIN: str = "api.exotel.com"
+    EXOTEL_ACCOUNT_SID: Union[str, None] = None
+    EXOTEL_CALLER_ID: Union[str, None] = None
+    EXOTEL_APP_ID: Union[str, None] = None
+    EXOTEL_STREAM_URL: Union[str, None] = None  # WSS endpoint for Exotel AgentStream
+    EXOTEL_CALLBACK_URL: Union[str, None] = None
+    EXOTEL_TIMEOUT_SECONDS: int = 10
+
     LLM_PROVIDER: str = "mock"  # "mock", "gemini"
     LLM_MODEL: str = "gemini-3.6-flash"
     LLM_API_KEY: Union[str, None] = None
     GEMINI_API_KEY: Union[str, None] = None
     LLM_TIMEOUT_SECONDS: int = 30
 
+    # Gemini Live Voice Configuration (Task 3 & 4)
+    GEMINI_LIVE_MODEL: str = "gemini-3.8-live"
+    GEMINI_LIVE_VOICE: str = "Aoede"
+
     @model_validator(mode="after")
     def sync_llm_credentials(self) -> "Settings":
-        """Ensures single authoritative LLM_API_KEY path, syncing from GEMINI_API_KEY if needed."""
+        """Ensures single authoritative LLM_API_KEY path, syncing with GEMINI_API_KEY if needed."""
         if not self.LLM_API_KEY:
             if self.GEMINI_API_KEY:
                 self.LLM_API_KEY = self.GEMINI_API_KEY
             elif os.environ.get("GEMINI_API_KEY"):
                 self.LLM_API_KEY = os.environ.get("GEMINI_API_KEY")
+        if not self.GEMINI_API_KEY:
+            if self.LLM_API_KEY:
+                self.GEMINI_API_KEY = self.LLM_API_KEY
+            elif os.environ.get("LLM_API_KEY"):
+                self.GEMINI_API_KEY = os.environ.get("LLM_API_KEY")
         return self
 
     # Phase 13: Google Maps Scraper Integration

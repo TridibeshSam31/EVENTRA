@@ -37,6 +37,8 @@ from app.agent.tools.schemas import (
     ValidateRecoveryOptionOutput,
     ExecuteRecoveryInput,
     ExecuteRecoveryOutput,
+    CallVendorInput,
+    CallVendorOutput,
 )
 from app.agent.tools.permissions import ToolPermissionGuard
 
@@ -357,6 +359,49 @@ class ExecuteRecoveryTool(AgentTool):
         return ToolResult.success_result(self.name, data)
 
 
+class CallVendorTool(AgentTool):
+    """Initiates an authorized, deterministic voice call to a vendor for operational recovery."""
+
+    name = "call_vendor"
+    description = "Initiates an authorized, deterministic voice call to a vendor for operational recovery or engagement."
+    category = ToolCategory.RECOVERY
+    access_mode = ToolAccessMode.WRITE
+    input_schema = CallVendorInput
+    output_schema = CallVendorOutput
+    availability = ToolAvailabilityStatus.AVAILABLE
+
+    def execute(self, context: ToolContext, args: CallVendorInput) -> ToolResult:
+        ToolPermissionGuard.verify_read_permission(context.db, args.event_id, context.user_id, self.name)
+        from app.services.voice_recovery_service import VoiceRecoveryService
+        service = VoiceRecoveryService(context.db)
+        try:
+            res = service.initiate_recovery_call(
+                event_id=args.event_id,
+                task_id=args.task_id,
+                provider_id=args.provider_id,
+                reason=args.reason or "P3_RECOVERY",
+                recovery_option_id=args.recovery_option_id,
+                call_objective=args.call_objective,
+                user_id=context.user_id,
+            )
+            output = CallVendorOutput(
+                event_id=res["event_id"],
+                task_id=res["task_id"],
+                provider_id=res["provider_id"],
+                session_id=res["session_id"],
+                call_sid=res.get("call_sid"),
+                recovery_option_id=res.get("recovery_option_id"),
+                status=res["status"],
+                channel=res.get("channel", "PHONE"),
+                message=res["message"],
+                success=res.get("success", True),
+            )
+            return ToolResult.success_result(self.name, output)
+        except Exception as e:
+            return ToolResult.failure_result(self.name, f"Failed to initiate call to vendor: {str(e)}")
+
+
 def recovery_tools_run(**kwargs) -> Dict[str, Any]:
     """Legacy helper for backward compatibility."""
     return {"status": "success"}
+
