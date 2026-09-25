@@ -5,8 +5,8 @@ import { useVenueStore } from '../../stores/venueStore';
 import { Users, DollarSign, MapPin, Star } from 'lucide-react';
 
 interface VenueCardProps {
-  venue: Venue;
-  onViewDetails: (venue: Venue) => void;
+  venue: any;
+  onViewDetails: (venue: any) => void;
 }
 
 export default function VenueCard({ venue, onViewDetails }: VenueCardProps) {
@@ -57,7 +57,7 @@ export default function VenueCard({ venue, onViewDetails }: VenueCardProps) {
         </div>
 
         <div className="flex flex-wrap gap-1.5 mb-6">
-          {venue.facilities.slice(0, 3).map(f => (
+          {venue.facilities?.slice(0, 3).map((f: string) => (
             <span key={f} className="text-[10px] px-2 py-1 rounded-full bg-white/5 border border-white/10 text-gray-400">
               {f}
             </span>

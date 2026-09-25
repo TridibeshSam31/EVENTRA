@@ -2,10 +2,10 @@
 
 import { Venue } from '../../types/venue';
 import { X, MapPin, Users, DollarSign, Star, Calendar } from 'lucide-react';
-import VenueBooking from './VenueBooking';
+import { VenueBooking } from './VenueBooking';
 
 interface VenueDetailsProps {
-  venue: Venue;
+  venue: any;
   onClose: () => void;
 }
 
@@ -45,7 +45,7 @@ export default function VenueDetails({ venue, onClose }: VenueDetailsProps) {
               <section>
                 <h3 className="text-lg font-semibold text-white mb-3">Facilities</h3>
                 <div className="flex flex-wrap gap-2">
-                  {venue.facilities.map(f => (
+                  {venue.facilities?.map((f: string) => (
                     <span key={f} className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm text-gray-300">
                       {f}
                     </span>
@@ -81,7 +81,7 @@ export default function VenueDetails({ venue, onClose }: VenueDetailsProps) {
           <section>
             <h3 className="text-lg font-semibold text-white mb-3">Availability Highlights</h3>
             <div className="flex flex-wrap gap-3">
-              {venue.availability.map((avail, i) => (
+              {venue.availability?.map((avail: any, i: number) => (
                 <div key={i} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm ${avail.available ? 'bg-success/10 border-success/20 text-success' : 'bg-emergency/10 border-emergency/20 text-emergency'}`}>
                   <Calendar size={14} />
                   <span>{avail.date}</span>

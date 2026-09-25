@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, AlertOctagon, CheckCircle2, Clock, Users, DollarSign, ArrowRight, Zap, ShieldCheck, Truck, Video, LayoutList } from 'lucide-react';
+import { AlertTriangle, AlertOctagon, CheckCircle2, Clock, Users, DollarSign, ArrowRight, Zap, ShieldCheck, Truck, Video, LayoutList, Activity } from 'lucide-react';
 
 const DISRUPTIONS = [
   {

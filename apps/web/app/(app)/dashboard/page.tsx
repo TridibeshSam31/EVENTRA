@@ -60,17 +60,19 @@ export default function DashboardHome() {
   }
 
   // Mocked Tasks for the UI
-  const sortedTasks = [
-    { id: "1", title: "Finalize A/V Contract", completed: false, assignee: "Alex M.", dueDate: new Date(Date.now() + 86400000).toISOString() },
-    { id: "2", title: "Approve Catering Menu", completed: true, assignee: "Sarah J.", dueDate: new Date(Date.now() - 86400000).toISOString() },
-    { id: "3", title: "Confirm Keynote Speaker", completed: false, assignee: "David L.", dueDate: new Date(Date.now() + 172800000).toISOString() },
+  type DashboardTask = { id: string; title: string; completed: boolean; assignee: string; dueDate: string; urgent?: boolean; };
+  const sortedTasks: DashboardTask[] = [
+    { id: "1", title: "Finalize A/V Contract", completed: false, assignee: "Alex M.", dueDate: new Date(Date.now() + 86400000).toISOString(), urgent: true },
+    { id: "2", title: "Approve Catering Menu", completed: true, assignee: "Sarah J.", dueDate: new Date(Date.now() - 86400000).toISOString(), urgent: false },
+    { id: "3", title: "Confirm Keynote Speaker", completed: false, assignee: "David L.", dueDate: new Date(Date.now() + 172800000).toISOString(), urgent: false },
   ].sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1));
 
   // Mocked Activity for the UI
-  const activity = [
-    { id: "a1", type: "UPDATE", message: "Budget increased by $5,000 for A/V.", timestamp: new Date(Date.now() - 3600000).toISOString() },
-    { id: "a2", type: "TASK", message: "Catering Menu approved by Sarah J.", timestamp: new Date(Date.now() - 7200000).toISOString() },
-    { id: "a3", type: "ALERT", message: "Keynote flight delayed by 2 hours.", timestamp: new Date(Date.now() - 14400000).toISOString() },
+  type DashboardActivity = { id: string; type: string; message: string; timestamp: string; actor?: string; action?: string; };
+  const activity: DashboardActivity[] = [
+    { id: "a1", type: "UPDATE", message: "Budget increased by $5,000 for A/V.", timestamp: new Date(Date.now() - 3600000).toISOString(), actor: "Sarah Chen", action: "approved the catering budget" },
+    { id: "a2", type: "TASK", message: "Catering Menu approved by Sarah J.", timestamp: new Date(Date.now() - 7200000).toISOString(), actor: "Mike Johnson", action: "uploaded the updated floor plan" },
+    { id: "a3", type: "ALERT", message: "Keynote flight delayed by 2 hours.", timestamp: new Date(Date.now() - 14400000).toISOString(), actor: "System", action: "sent automated speaker reminders" },
   ];
 
   return (

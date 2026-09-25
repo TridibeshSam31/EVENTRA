@@ -1,16 +1,17 @@
 import { create } from 'zustand';
 import { Venue } from '../types/venue';
-import { getVenues, VenueFilters } from '../lib/api/venues';
+import { searchVenues, VenueSearchParams } from '../lib/api/venues';
+
 
 interface VenueState {
-  venues: Venue[];
+  venues: any[];
   isLoading: boolean;
-  filters: VenueFilters;
+  filters: VenueSearchParams;
   selectedVenueIds: string[];
   bookedVenueId: string | null;
   
   fetchVenues: () => Promise<void>;
-  setFilters: (filters: Partial<VenueFilters>) => void;
+  setFilters: (filters: Partial<VenueSearchParams>) => void;
   toggleVenueSelection: (venueId: string) => void;
   setBookedVenue: (venueId: string) => void;
   clearSelection: () => void;
@@ -27,8 +28,8 @@ export const useVenueStore = create<VenueState>((set, get) => ({
     set({ isLoading: true });
     try {
       const { filters } = get();
-      const venues = await getVenues(filters);
-      set({ venues, isLoading: false });
+      const response = await searchVenues(filters);
+      set({ venues: response.items as any[], isLoading: false });
     } catch (error) {
       console.error('Failed to fetch venues', error);
       set({ isLoading: false });

@@ -22,7 +22,7 @@ export interface ActivityItem {
   timestamp: string;
 }
 
-export const mockEvents: Event[] = [
+export const mockEvents: any[] = [
   {
     id: 'e1',
     name: 'Global Tech Summit 2026',
@@ -64,7 +64,7 @@ export const mockEvents: Event[] = [
   }
 ];
 
-export const mockTasks: PriorityTask[] = [
+export const mockTasks: any[] = [
   { id: 't1', eventId: 'e1', title: 'Finalize catering contract', dueDate: 'Today', urgent: true, completed: false, description: 'Review the menu options and finalize headcount.' },
   { id: 't2', eventId: 'e1', title: 'Review AV setup requirements', dueDate: 'Tomorrow', urgent: false, completed: false, description: 'Ensure projectors and microphones are tested.' },
   { id: 't3', eventId: 'e1', title: 'Send out speaker reminders', dueDate: 'In 3 days', urgent: false, completed: false, description: 'Email all keynote speakers with schedule.' },
@@ -73,7 +73,7 @@ export const mockTasks: PriorityTask[] = [
   { id: 't6', eventId: 'e3', title: 'Test webinar platform', dueDate: 'Today', urgent: true, completed: false, description: 'Run a stress test on the video platform.' },
 ];
 
-export const mockActivity: ActivityItem[] = [
+export const mockActivity: any[] = [
   { id: 'a1', eventId: 'e1', actor: 'Sarah Chen', action: 'approved the catering budget', timestamp: '2 hours ago' },
   { id: 'a2', eventId: 'e1', actor: 'Mike Johnson', action: 'uploaded the updated floor plan', timestamp: '5 hours ago' },
   { id: 'a3', eventId: 'e1', actor: 'System', action: 'sent automated speaker reminders', timestamp: '1 day ago' },
@@ -92,7 +92,7 @@ export const mockActivity: ActivityItem[] = [
   { id: 'a3_5', eventId: 'e3', actor: 'Sarah Chen', action: 'approved new budget', timestamp: '2 days ago' },
 ];
 
-export const mockVenues: Venue[] = [
+export const mockVenues: any[] = [
   {
     id: 'v1',
     name: 'Grand Hyatt Convention Center',
@@ -183,7 +183,7 @@ export const mockVenues: Venue[] = [
   },
 ];
 
-export const mockLiveStates: Record<string, LiveEventState> = {
+export const mockLiveStates: Record<string, any> = {
   'e1': {
     eventId: 'e1',
     overallHealth: 'ON_TRACK',
@@ -213,7 +213,7 @@ export const mockLiveStates: Record<string, LiveEventState> = {
   }
 };
 
-export const mockIncidents: Incident[] = [
+export const mockIncidents: any[] = [
   {
     id: 'inc1',
     eventId: 'e1',
@@ -240,7 +240,7 @@ export const mockIncidents: Incident[] = [
   }
 ];
 
-export const mockRecoveryOptions: Record<string, RecoveryOption[]> = {
+export const mockRecoveryOptions: Record<string, any[]> = {
   'inc1': [
     {
       id: 'opt1_1',
