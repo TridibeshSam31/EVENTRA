@@ -15,9 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 # Ensure test environment
 os.environ["ENVIRONMENT"] = "test"
+os.environ["LLM_PROVIDER"] = "mock"
 
 from app.main import app
 from app.core.config import settings
+settings.LLM_PROVIDER = "mock"
 from app.db.base import Base
 from app.db.session import get_db
 from app.api.dependencies import get_db_session

@@ -30,10 +30,12 @@ class Task(Base):
     planned_end = Column(DateTime, nullable=True)
     actual_start = Column(DateTime, nullable=True)
     actual_end = Column(DateTime, nullable=True)
+    provider_id = Column(String(36), ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 
     event = relationship("Event", back_populates="tasks")
+    provider = relationship("Vendor", foreign_keys=[provider_id])
 
     outgoing_dependencies = relationship(
         "TaskDependency",

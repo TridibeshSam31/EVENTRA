@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy import Column, String, Integer, Text, Numeric, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.db.base import Base
-from app.models.enums import EventType, EventState, EventLifecycleState
+from app.models.enums import EventType, EventState, EventLifecycleState, EventExecutionState
 
 
 def utc_now():
@@ -26,6 +26,7 @@ class Event(Base):
     guest_count = Column(Integer, nullable=False, default=0)
     state = Column(String(50), nullable=False, default=EventState.NORMAL.value, index=True)
     lifecycle_state = Column(String(50), nullable=False, default=EventLifecycleState.DRAFT.value, index=True)
+    execution_state = Column(String(50), nullable=False, default=EventExecutionState.RUNNING.value, index=True)
     total_budget = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
     currency = Column(String(10), nullable=False, default="USD")
     created_at = Column(DateTime, default=utc_now, nullable=False)

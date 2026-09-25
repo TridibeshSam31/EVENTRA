@@ -1,6 +1,6 @@
-"""Application Configuration Settings"""
+import os
 from typing import List, Union
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -83,10 +83,42 @@ class Settings(BaseSettings):
     OPENWA_WEBHOOK_SECRET: Union[str, None] = None  # HMAC webhook signing secret
     OPENWA_TIMEOUT_SECONDS: int = 10
 
-    LLM_PROVIDER: str = "mock"  # "mock", "gemini", "openai"
-    LLM_MODEL: str = "gemini-1.5-pro"
+    # Exotel telephony configuration (Phase: Voice Integration)
+    EXOTEL_ENABLED: bool = False
+    EXOTEL_API_KEY: Union[str, None] = None
+    EXOTEL_API_TOKEN: Union[str, None] = None
+    EXOTEL_SUBDOMAIN: str = "api.exotel.com"
+    EXOTEL_ACCOUNT_SID: Union[str, None] = None
+    EXOTEL_CALLER_ID: Union[str, None] = None
+    EXOTEL_APP_ID: Union[str, None] = None
+    EXOTEL_STREAM_URL: Union[str, None] = None  # WSS endpoint for Exotel AgentStream
+    EXOTEL_CALLBACK_URL: Union[str, None] = None
+    EXOTEL_TIMEOUT_SECONDS: int = 10
+
+    LLM_PROVIDER: str = "mock"  # "mock", "gemini"
+    LLM_MODEL: str = "gemini-3.6-flash"
     LLM_API_KEY: Union[str, None] = None
+    GEMINI_API_KEY: Union[str, None] = None
     LLM_TIMEOUT_SECONDS: int = 30
+
+    # Gemini Live Voice Configuration (Task 3 & 4)
+    GEMINI_LIVE_MODEL: str = "gemini-3.8-live"
+    GEMINI_LIVE_VOICE: str = "Aoede"
+
+    @model_validator(mode="after")
+    def sync_llm_credentials(self) -> "Settings":
+        """Ensures single authoritative LLM_API_KEY path, syncing with GEMINI_API_KEY if needed."""
+        if not self.LLM_API_KEY:
+            if self.GEMINI_API_KEY:
+                self.LLM_API_KEY = self.GEMINI_API_KEY
+            elif os.environ.get("GEMINI_API_KEY"):
+                self.LLM_API_KEY = os.environ.get("GEMINI_API_KEY")
+        if not self.GEMINI_API_KEY:
+            if self.LLM_API_KEY:
+                self.GEMINI_API_KEY = self.LLM_API_KEY
+            elif os.environ.get("LLM_API_KEY"):
+                self.GEMINI_API_KEY = os.environ.get("LLM_API_KEY")
+        return self
 
     # Phase 13: Google Maps Scraper Integration
     GOOGLE_MAPS_SCRAPER_URL: str = "http://localhost:8080"
@@ -95,7 +127,7 @@ class Settings(BaseSettings):
     GOOGLE_MAPS_SCRAPER_FALLBACK_TO_MOCK: bool = True
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../../.env", "../.env"),
         env_file_encoding="utf-8",
         case_sensitive=True,
         extra="ignore",

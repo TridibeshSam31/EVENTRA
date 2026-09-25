@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import (
@@ -19,6 +19,7 @@ from app.models.budget import BudgetItem
 from app.models.recovery import Recovery
 from app.models.action import ActionExecution
 from app.models.state_transition import StateTransition
+from app.models.enums import EventExecutionState
 from app.engines.auth.snapshot import compute_event_state_snapshot
 
 
@@ -56,6 +57,14 @@ class ActionService:
         event = self.db.query(Event).filter(Event.id == event_id).first()
         if not event:
             raise NotFoundException(f"Event with id '{event_id}' not found.")
+
+        # Central Execution Pause Guard (Task 11)
+        execution_state = getattr(event, "execution_state", None) or EventExecutionState.RUNNING.value
+        if execution_state in (EventExecutionState.PAUSED.value, EventExecutionState.PAUSING.value):
+            raise ConflictException(
+                f"EXECUTION_PAUSED: Event execution is currently '{execution_state}'. "
+                "Consequential mutations are blocked until the event is resumed."
+            )
 
         # 1. Idempotency Check
         action_id = action_id or str(uuid.uuid4())
@@ -150,6 +159,18 @@ class ActionService:
         action_id: Optional[str] = None,
     ) -> ActionExecution:
         """Executes a Phase 8 recovery option with strict optimistic concurrency revalidation."""
+        event = self.db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            raise NotFoundException(f"Event with id '{event_id}' not found.")
+
+        # Central Execution Pause Guard (Task 11)
+        execution_state = getattr(event, "execution_state", None) or EventExecutionState.RUNNING.value
+        if execution_state in (EventExecutionState.PAUSED.value, EventExecutionState.PAUSING.value):
+            raise ConflictException(
+                f"EXECUTION_PAUSED: Event execution is currently '{execution_state}'. "
+                "Recovery mutations are blocked until the event is resumed."
+            )
+
         recovery = (
             self.db.query(Recovery)
             .filter(Recovery.id == recovery_option_id, Recovery.event_id == event_id)
@@ -157,6 +178,17 @@ class ActionService:
         )
         if not recovery:
             raise NotFoundException(f"Recovery option '{recovery_option_id}' not found for event '{event_id}'.")
+
+        # Recovery options are derived from Task 9's authoritative plan version.
+        # Reject a request that was reasoned against an older operational plan.
+        expected_plan_version = (recovery.feasibility_result or {}).get("plan_version")
+        current_plan_version = 1 + self.db.query(StateTransition).filter(
+            StateTransition.event_id == event_id
+        ).count()
+        if expected_plan_version is not None and expected_plan_version != current_plan_version:
+            raise ConflictException(
+                "STALE_PLAN: The authoritative execution-plan version changed since this recovery option was generated."
+            )
 
         # Optimistic Concurrency Check: Verify state hasn't mutated since option was generated
         current_snapshot = compute_event_state_snapshot(self.db, event_id)
@@ -185,12 +217,21 @@ class ActionService:
 
         try:
             # Apply vendor reassignment if present
-            if "vendor_id" in changes or "replacement_vendor_id" in changes or "vendor_reassignment" in changes:
-                new_vid = changes.get("vendor_id") or changes.get("replacement_vendor_id") or changes.get("vendor_reassignment", {}).get("vendor_id")
+            if "vendor_id" in changes or "provider_id" in changes or "replacement_vendor_id" in changes or "vendor_reassignment" in changes:
+                new_vid = (
+                    changes.get("vendor_id")
+                    or changes.get("provider_id")
+                    or changes.get("replacement_vendor_id")
+                    or changes.get("vendor_reassignment", {}).get("vendor_id")
+                )
                 task_id = changes.get("task_id") or changes.get("vendor_reassignment", {}).get("task_id")
                 if not task_id and recovery.affected_tasks:
                     task_id = recovery.affected_tasks[0]
-                cost = changes.get("agreed_cost") or changes.get("vendor_reassignment", {}).get("cost", 0.0)
+                cost = (
+                    changes.get("agreed_cost")
+                    or changes.get("provider_cost")
+                    or changes.get("vendor_reassignment", {}).get("cost", 0.0)
+                )
 
                 if new_vid and task_id:
                     sub_entities, sub_res = self._execute_reassign_vendor(
@@ -210,7 +251,49 @@ class ActionService:
                     affected_entities.extend(sub_entities)
                     result_data.update(sub_res)
 
+            # Apply resource reassignment if present
+            if "resource_id" in changes:
+                res_id = changes["resource_id"]
+                target_task_id = changes.get("task_id") or (recovery.affected_tasks[0] if recovery.affected_tasks else None)
+                sub_entities, sub_res = self._execute_allocate_resource(
+                    event_id, res_id, {"task_id": target_task_id}
+                )
+                affected_entities.extend(sub_entities)
+                result_data.update(sub_res)
+
+            # Apply task compression if present
+            if "compression_minutes" in changes:
+                comp = int(changes["compression_minutes"])
+                for tid in (recovery.affected_tasks or []):
+                    t = self.db.query(Task).filter(Task.id == tid, Task.event_id == event_id).first()
+                    if t and t.duration_minutes:
+                        t.duration_minutes = max(1, t.duration_minutes - comp)
+                        if t.planned_start:
+                            t.planned_end = t.planned_start + timedelta(minutes=t.duration_minutes)
+                        affected_entities.append({"entity_type": "TASK", "id": t.id})
+                result_data["compression_minutes"] = comp
+
+            # Apply scope shedding (task cancellation) if present
+            if "cancelled_task_ids" in changes or changes.get("operation") == "propose_scope_shedding":
+                cancel_ids = changes.get("cancelled_task_ids") or recovery.affected_tasks or []
+                for cid in cancel_ids:
+                    t = self.db.query(Task).filter(Task.id == cid, Task.event_id == event_id).first()
+                    if t:
+                        t.status = "CANCELLED"
+                        affected_entities.append({"entity_type": "TASK", "id": t.id})
+                result_data["cancelled_task_ids"] = cancel_ids
+
+            # Apply capacity adjustment if present
+            if "target_capacity" in changes or changes.get("operation") == "propose_capacity_adjustment":
+                target_cap = int(changes.get("target_capacity", 100))
+                event = self.db.query(Event).filter(Event.id == event_id).first()
+                if event:
+                    event.guest_count = target_cap
+                    affected_entities.append({"entity_type": "EVENT", "id": event.id})
+                result_data["target_capacity"] = target_cap
+
             # Mark recovery option executed
+            previous_recovery_status = recovery.status
             recovery.status = "EXECUTED"
             self.db.flush()
 
@@ -221,7 +304,7 @@ class ActionService:
                 event_id=event_id,
                 entity_type="RECOVERY_OPTION",
                 entity_id=recovery.id,
-                previous_state=recovery.status,
+                previous_state=previous_recovery_status,
                 new_state="EXECUTED",
                 reason=f"Executed recovery strategy: {recovery.strategy_type}",
             ))
@@ -262,7 +345,7 @@ class ActionService:
         if not task:
             raise NotFoundException(f"Task '{task_id}' not found for event '{event_id}'.")
 
-        new_vendor_id = payload.get("new_vendor_id") or payload.get("vendor_id")
+        new_vendor_id = payload.get("new_vendor_id") or payload.get("vendor_id") or payload.get("provider_id")
         if not new_vendor_id:
             raise BadRequestException("New vendor ID is required.")
 
@@ -270,7 +353,7 @@ class ActionService:
         if not vendor:
             raise NotFoundException(f"Vendor '{new_vendor_id}' not found.")
 
-        cost = Decimal(str(payload.get("agreed_cost", 0.0) or 0.0))
+        cost = Decimal(str(payload.get("agreed_cost") or payload.get("provider_cost") or 0.0))
         category = task.required_provider_category or vendor.category or "general"
 
         # Update or create vendor assignment
@@ -296,6 +379,8 @@ class ActionService:
             self.db.flush()
 
         task.required_provider_category = category
+        task.provider_id = vendor.id
+        task.status = "ASSIGNED"
 
         # Update corresponding budget item if available
         budget_item = (
@@ -305,6 +390,7 @@ class ActionService:
         )
         if budget_item and cost > 0:
             budget_item.actual_amount = cost
+            budget_item.status = "COMMITTED"
 
         affected = [
             {"entity_type": "TASK", "id": task.id},

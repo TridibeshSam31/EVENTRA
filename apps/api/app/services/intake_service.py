@@ -1,11 +1,13 @@
 """Domain Service: IntakeService
 
-Handles conversational event intake, natural language intent extraction,
-missing information detection, deterministic plan generation, and conversational plan edits.
+Coordinates conversational event intake using real Gemini structured event understanding,
+deterministic normalization, missing information detection, canonical plan generation,
+and conversational plan updates.
 """
 from datetime import datetime, timezone, timedelta
 import re
-from typing import Any, Dict, List, Optional, Tuple
+import logging
+from typing import Any, Dict, List, Optional, Tuple, Set
 from sqlalchemy.orm import Session
 
 from app.models.event import Event
@@ -15,274 +17,176 @@ from app.models.objective import Objective
 from app.models.enums import EventType, EventState, EventLifecycleState, ProviderCategory
 from app.services.specification_service import SpecificationService
 from app.services.planning_service import PlanningService
+from app.services.event_understanding_service import EventUnderstandingService
+from app.services.normalization_utils import (
+    parse_indian_number_words,
+    normalize_budget,
+    normalize_guest_count,
+    normalize_service_category,
+    SERVICE_CATEGORY_MAP,
+)
+from app.schemas.event_intent import (
+    EventIntent,
+    EventChangeProposal,
+    SingleChangeProposal,
+    ServiceRequirementIntent,
+)
 from app.schemas.planning import EventPlan
 from app.observability.audit import AuditRecorder
+from app.agent.provider import LLMProvider
+from app.integrations.llm.base import get_configured_llm_provider
 
-
-# Taxonomy mapping of common words to ProviderCategory enum values
-CATEGORY_KEYWORDS: Dict[str, str] = {
-    "venue": "VENUE",
-    "hall": "VENUE",
-    "location": "VENUE",
-    "auditorium": "VENUE",
-    "ground": "VENUE",
-    "convention": "VENUE",
-    "resort": "VENUE",
-    "hotel": "VENUE",
-    "cater": "CATERING",
-    "catering": "CATERING",
-    "food": "CATERING",
-    "meal": "CATERING",
-    "lunch": "CATERING",
-    "dinner": "CATERING",
-    "breakfast": "CATERING",
-    "snack": "CATERING",
-    "buffet": "CATERING",
-    "av": "AV_TECH",
-    "audio": "AV_TECH",
-    "sound": "AV_TECH",
-    "speaker": "AV_TECH",
-    "mic": "AV_TECH",
-    "microphone": "AV_TECH",
-    "screen": "AV_TECH",
-    "screens": "AV_TECH",
-    "projector": "AV_TECH",
-    "live stream": "AV_TECH",
-    "live streaming": "AV_TECH",
-    "streaming": "AV_TECH",
-    "stream": "AV_TECH",
-    "photo": "PHOTOGRAPHY",
-    "photography": "PHOTOGRAPHY",
-    "photographer": "PHOTOGRAPHY",
-    "video": "VIDEOGRAPHY",
-    "videography": "VIDEOGRAPHY",
-    "videographer": "VIDEOGRAPHY",
-    "decor": "DECOR",
-    "decoration": "DECOR",
-    "stage": "DECOR",
-    "florist": "FLORIST",
-    "flower": "FLORIST",
-    "transport": "TRANSPORT",
-    "transportation": "TRANSPORT",
-    "cab": "TRANSPORT",
-    "cabs": "TRANSPORT",
-    "bus": "TRANSPORT",
-    "buses": "TRANSPORT",
-    "shuttle": "TRANSPORT",
-    "security": "SECURITY",
-    "guard": "SECURITY",
-    "guards": "SECURITY",
-    "bouncers": "SECURITY",
-    "bouncer": "SECURITY",
-    "staff": "STAFFING",
-    "staffing": "STAFFING",
-    "host": "STAFFING",
-    "volunteer": "STAFFING",
-    "dj": "DJ_MUSIC",
-    "music": "DJ_MUSIC",
-    "band": "DJ_MUSIC",
-    "light": "LIGHTING",
-    "lighting": "LIGHTING",
-    "print": "PRINTING",
-    "printing": "PRINTING",
-    "badge": "PRINTING",
-    "badges": "PRINTING",
-    "banner": "PRINTING",
-    "banners": "PRINTING",
-    "clean": "CLEANING",
-    "cleaning": "CLEANING",
-}
-
-# Number words mapping for robust NL extraction
-NUMBER_WORDS: Dict[str, float] = {
-    "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
-    "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
-    "sixteen": 16, "seventeen": 17, "eighteen": 18, "nineteen": 19, "twenty": 20,
-    "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
-    "eighty": 80, "ninety": 90, "hundred": 100,
-}
-
-
-def parse_indian_number_words(text: str) -> Optional[float]:
-    """Parses phrases like 'one crore twenty lakh', 'eight lakh', 'ten lakh', '1.2 crore'."""
-    text_lower = text.lower()
-    total = 0.0
-    matched = False
-
-    # Check crore with words: e.g. "one crore", "two crore", "1.2 crore"
-    cr_words_match = re.search(r"(\b[a-z]+\b|\d+(?:\.\d+)?)\s*(?:crore|crores|cr)\b", text_lower)
-    if cr_words_match:
-        val_str = cr_words_match.group(1)
-        if val_str in NUMBER_WORDS:
-            total += NUMBER_WORDS[val_str] * 10000000.0
-            matched = True
-        else:
-            try:
-                total += float(val_str) * 10000000.0
-                matched = True
-            except ValueError:
-                pass
-
-    # Check lakh with words: e.g. "twenty lakh", "eight lakh", "10 lakh", "8.5 lakhs"
-    lakh_words_match = re.search(r"(\b[a-z]+(?:\s+[a-z]+)?\b|\d+(?:\.\d+)?)\s*(?:lakh|lakhs|lac|lacs|l)\b", text_lower)
-    if lakh_words_match:
-        val_str = lakh_words_match.group(1).strip()
-        # Parse compound words like "twenty" or "twenty five"
-        words = val_str.split()
-        subtotal = 0.0
-        word_found = False
-        for w in words:
-            if w in NUMBER_WORDS:
-                subtotal += NUMBER_WORDS[w]
-                word_found = True
-        if word_found:
-            total += subtotal * 100000.0
-            matched = True
-        else:
-            try:
-                total += float(val_str) * 100000.0
-                matched = True
-            except ValueError:
-                pass
-
-    return total if matched else None
+logger = logging.getLogger(__name__)
 
 
 class IntakeService:
-    """Coordinates conversational event intake, intent understanding, and plan refinement."""
+    """Coordinates real LLM event understanding, deterministic validation/normalization, and plan management."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, llm_provider: Optional[LLMProvider] = None):
         self.db = db
+        self.llm_provider = llm_provider or get_configured_llm_provider()
+        self._understanding_service = EventUnderstandingService(self.llm_provider)
         self._spec_service = SpecificationService(db)
         self._planning_service = PlanningService(db)
         self._audit = AuditRecorder(db)
 
-    def extract_intent(self, text: str) -> Dict[str, Any]:
-        """Extracts structured event intent from natural language input.
-        
-        Deterministic regex/keyword extraction with support for Indian (Lakh/Crore)
-        and Western (K/M) budget notations, attendee counts, cities, and dates.
-        """
-        text_lower = text.lower()
+    def extract_intent(
+        self,
+        text: str,
+        current_event_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Extracts structured EventIntent using Gemini LLM followed by deterministic normalization."""
+        # 1. Real LLM Extraction via EventUnderstandingService
+        intent_model: EventIntent = self._understanding_service.understand_input(
+            user_message=text,
+            current_event_context=current_event_context,
+        )
 
-        # 1. Event Type
+        # 2. Deterministic Normalization & Domain Validation
+        # A. Event Type
         event_type = None
-        if any(k in text_lower for k in ["wedding", "marriage", "shaadi", "reception", "anniversary"]):
-            event_type = EventType.WEDDING.value
-        elif any(k in text_lower for k in ["hackathon", "fest", "college fest", "cultural", "campus"]):
-            event_type = EventType.COLLEGE_FEST.value
-        elif any(k in text_lower for k in ["conference", "summit", "keynote", "symposium", "corporate", "offsite", "meetup", "tech", "annual meet", "seminar"]):
-            event_type = EventType.CONFERENCE.value
+        if intent_model.event_type:
+            raw_type = intent_model.event_type.upper()
+            if raw_type in [e.value for e in EventType]:
+                event_type = raw_type
+            elif "WEDDING" in raw_type or "MARRIAGE" in raw_type or "SHAADI" in raw_type:
+                event_type = EventType.WEDDING.value
+            elif "COLLEGE_FEST" in raw_type or "HACKATHON" in raw_type or raw_type == "FEST":
+                event_type = EventType.COLLEGE_FEST.value
+            elif "CONF" in raw_type or "CORPORATE" in raw_type or "SUMMIT" in raw_type:
+                event_type = EventType.CONFERENCE.value
+            elif "FESTIVAL" in raw_type or "BIRTHDAY" in raw_type:
+                event_type = EventType.OTHER.value
 
-        # 2. Location / City
-        city = None
-        known_cities = [
-            "delhi", "new delhi", "gurgaon", "gurugram", "noida", "greater noida",
-            "mumbai", "bangalore", "bengaluru", "hyderabad", "pune", "chennai",
-            "kolkata", "jaipur", "goa", "chandigarh", "ahmedabad", "faridabad",
-            "san francisco", "seattle", "boston", "austin", "new york", "london", "singapore"
-        ]
-        for c in known_cities:
-            if re.search(rf"\b{re.escape(c)}\b", text_lower):
-                city = "Gurgaon" if c in ("gurgaon", "gurugram") else ("Delhi" if c in ("delhi", "new delhi") else c.title())
-                break
+        # Fallback event_type detection if Gemini output string was custom or unsupported domain
+        if not event_type or event_type not in (EventType.WEDDING.value, EventType.COLLEGE_FEST.value, EventType.CONFERENCE.value):
+            text_lower = text.lower()
+            if any(k in text_lower for k in ["wedding", "marriage", "shaadi", "reception"]):
+                event_type = EventType.WEDDING.value
+            elif any(k in text_lower for k in ["hackathon", "fest", "college fest"]):
+                event_type = EventType.COLLEGE_FEST.value
+            else:
+                event_type = EventType.CONFERENCE.value
 
-        # 3. Guest Count / Attendance
-        guest_count = None
-        pax_match = re.search(r"(\d+)\s*[-]?\s*(?:person|people|attendee|attendees|guest|guests|pax|members)", text_lower)
-        if pax_match:
-            guest_count = int(pax_match.group(1))
-        else:
-            # Check standalone numbers, ensuring it is not a date (e.g. 15 Nov, 2026), time, or unit
-            months_pattern = r"(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|january|february|march|april|may|june|july|august|september|october|november|december)"
-            units_pattern = r"(?:lakh|lakhs|l|k|cr|crore|usd|inr|rs|rupees|percent|%|hours|hr|pm|am)"
-            for m in re.finditer(r"\b(\d{2,4})\b", text):
-                val = int(m.group(1))
-                if 2020 <= val <= 2035:
-                    continue
-                post_text = text_lower[m.end():m.end()+25]
-                pre_text = text_lower[max(0, m.start()-15):m.start()]
-                if re.search(rf"^\s*(?:st|nd|rd|th)?\s*{months_pattern}\b", post_text):
-                    continue
-                if re.search(rf"\b{months_pattern}\s*$", pre_text):
-                    continue
-                if re.search(rf"^\s*{units_pattern}\b", post_text):
-                    continue
-                if val >= 20:
-                    guest_count = val
-                    break
+        # B. Location / City
+        city = intent_model.city or intent_model.location
+        if city:
+            city = city.strip().title()
+            if "Gurgaon" in city or "Gurugram" in city:
+                city = "Gurgaon"
+            elif "Delhi" in city:
+                city = "Delhi"
 
-        # 4. Budget Extraction
-        total_budget = None
-        currency = "INR" if any(k in text_lower for k in ["lakh", "lakhs", "lac", "lacs", "crore", "cr", "₹", "inr", "rs", "rupee", "rupees"]) else "USD"
+        # C. Guest Count Normalization & Domain Rule Check (guest_count > 0)
+        raw_guest = intent_model.guest_count
+        raw_guest_expr = intent_model.guest_count_expression
+        guest_count = normalize_guest_count(count=raw_guest, expression=raw_guest_expr)
 
-        # Try Indian number words first (e.g. "one crore twenty lakh", "1.2 crore", "8 lakh", "₹8L")
-        word_budget = parse_indian_number_words(text_lower)
-        if word_budget and word_budget > 0:
-            total_budget = word_budget
-            currency = "INR"
+        # D. Budget Normalization & Currency Resolution (budget >= 0)
+        b_amount = intent_model.budget_amount or (intent_model.budget.amount if intent_model.budget else None)
+        b_expr = intent_model.budget_expression or (intent_model.budget.expression if intent_model.budget else None)
+        b_curr = intent_model.budget_currency or (intent_model.budget.currency if intent_model.budget else "INR")
 
-        if total_budget is None:
-            # Check Western K notation: e.g. "$50k", "50 thousand"
-            k_match = re.search(r"(?:\$|usd)?\s*(\d+(?:\.\d+)?)\s*(?:k|thousand)\b", text_lower)
-            if k_match:
-                total_budget = float(k_match.group(1)) * 1000.0
+        total_budget, currency = normalize_budget(amount=b_amount, expression=b_expr or text, currency=b_curr)
 
-        if total_budget is None:
-            raw_budget = re.search(r"(?:budget|around|of|cost)\s*(?:is|of|around)?\s*(?:rs\.?|inr|₹|\$|usd)?\s*([\d,]+(?:\.\d+)?)", text_lower)
-            if raw_budget:
-                cleaned = raw_budget.group(1).replace(",", "")
-                try:
-                    val = float(cleaned)
-                    if val > 100:  # avoid picking up small counts as budget
-                        total_budget = val
-                except ValueError:
-                    pass
-
-        # 5. Requirements Extraction
+        # E. Services Needed Categorization into ProviderCategory Enums
         requirements: List[str] = []
-        for kw, cat in CATEGORY_KEYWORDS.items():
-            if re.search(rf"\b{re.escape(kw)}\b", text_lower):
+        if intent_model.services_needed:
+            for srv in intent_model.services_needed:
+                cat = normalize_service_category(srv.service_type)
                 if cat not in requirements:
                     requirements.append(cat)
 
-        # 6. Date / Duration Extraction
+        # Also check general requirement strings
+        for req_str in intent_model.requirements:
+            cat = normalize_service_category(req_str)
+            if cat not in requirements:
+                requirements.append(cat)
+
+        # F. Date / Time Resolution (Preserve Ambiguity where exact date is missing)
         start_time = None
         end_time = None
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        has_exact_date = False
+        date_expr = intent_model.date_expression or (intent_model.date.date_expression if intent_model.date else None)
+        date_prec = intent_model.date_precision or (intent_model.date.date_precision if intent_model.date else "unknown")
+        exact_date_str = intent_model.date.exact_date if (intent_model.date and intent_model.date.exact_date) else None
 
-        if "tomorrow" in text_lower:
-            start_time = (now + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
-            end_time = start_time + timedelta(hours=8)
-        elif "next week" in text_lower:
-            start_time = (now + timedelta(days=7)).replace(hour=9, minute=0, second=0, microsecond=0)
-            end_time = start_time + timedelta(hours=8)
-        else:
-            date_match = re.search(
-                r"(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*(\d{4})?",
-                text_lower,
-            )
-            if date_match:
-                day = int(date_match.group(1))
-                month_str = date_match.group(2)[:3]
-                year = int(date_match.group(3)) if date_match.group(3) else (now.year if now.month < 11 else now.year + 1)
-                months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
-                month = months.index(month_str) + 1
-                try:
-                    start_time = datetime(year, month, day, 9, 0, 0)
-                    end_time = start_time + timedelta(hours=8)
-                except ValueError:
-                    pass
+        # Try parsing explicit exact date if present
+        if exact_date_str:
+            try:
+                start_time = datetime.strptime(exact_date_str, "%Y-%m-%d").replace(hour=9, minute=0, second=0)
+                end_time = start_time + timedelta(hours=8)
+                has_exact_date = True
+            except ValueError:
+                pass
 
-        # 7. Generate Descriptive Event Name if possible
+        if not start_time:
+            text_lower = text.lower()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            if "tomorrow" in text_lower:
+                start_time = (now + timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+                end_time = start_time + timedelta(hours=8)
+                has_exact_date = True
+                date_expr = date_expr or "tomorrow"
+                date_prec = "day"
+            elif "next week" in text_lower:
+                start_time = (now + timedelta(days=7)).replace(hour=9, minute=0, second=0, microsecond=0)
+                end_time = start_time + timedelta(hours=8)
+                has_exact_date = True
+                date_expr = date_expr or "next week"
+                date_prec = "week"
+            else:
+                date_match = re.search(
+                    r"(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*(\d{4})?",
+                    text_lower,
+                )
+                if date_match:
+                    day = int(date_match.group(1))
+                    month_str = date_match.group(2)[:3]
+                    year = int(date_match.group(3)) if date_match.group(3) else (now.year if now.month < 11 else now.year + 1)
+                    months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
+                    month = months.index(month_str) + 1
+                    try:
+                        start_time = datetime(year, month, day, 9, 0, 0)
+                        end_time = start_time + timedelta(hours=8)
+                        has_exact_date = True
+                        date_expr = date_expr or f"{day} {month_str.title()} {year}"
+                        date_prec = "day"
+                    except ValueError:
+                        pass
+
+        # G. Generate Event Title
         effective_type = event_type or EventType.CONFERENCE.value
         type_title = effective_type.replace("_", " ").title()
         city_title = city or "Metro"
         pax_str = f"{guest_count}-Person " if guest_count else ""
-        name = f"{pax_str}{city_title} {type_title} 2026"
+        name = intent_model.event_title or f"{pax_str}{city_title} {type_title} 2026"
+
+        preferences_list = [p.preference_text for p in intent_model.preferences]
+        constraints_list = [c.description for c in intent_model.constraints]
 
         return {
+            "intent_model": intent_model,
             "name": name,
             "event_type": event_type,
             "location": city,
@@ -291,49 +195,72 @@ class IntakeService:
             "total_budget": total_budget,
             "currency": currency,
             "requirements": requirements,
+            "preferences": preferences_list,
+            "constraints": constraints_list,
+            "special_requests": intent_model.special_requests,
+            "venue_preferences": intent_model.venue_preferences,
+            "date_expression": date_expr,
+            "date_precision": date_prec,
             "start_time": start_time,
             "end_time": end_time,
-            "has_date": start_time is not None,
+            "has_date": has_exact_date,
             "has_location": city is not None,
             "has_guest_count": guest_count is not None,
             "has_budget": total_budget is not None,
             "has_event_type": event_type is not None,
+            "missing_information": intent_model.missing_information,
+            "ambiguities": intent_model.ambiguities,
+            "summary": intent_model.summary,
         }
 
     def detect_missing_info(self, intent: Dict[str, Any]) -> List[str]:
-        """Determines which mandatory pieces of information are missing before planning."""
+        """Deterministically evaluates which mandatory fields block plan generation."""
         missing = []
         if not intent.get("has_date"):
-            missing.append("Event date (e.g. 15 November 2026)")
+            date_expr = intent.get("date_expression")
+            if date_expr:
+                missing.append(f"Exact event date (provided: '{date_expr}', please specify day)")
+            else:
+                missing.append("Event date (e.g. 15 November 2026)")
         if not intent.get("has_location") or not intent.get("location"):
-            missing.append("Target city or venue location (e.g. Delhi, Mumbai, Bangalore)")
+            missing.append("Target city or venue location (e.g. Delhi, Dholakpur, Gurgaon)")
         if not intent.get("has_guest_count") or not intent.get("guest_count"):
             missing.append("Expected guest/attendee count (e.g. 500 attendees)")
         if not intent.get("has_budget") or not intent.get("total_budget"):
-            missing.append("Approximate budget (e.g. 8 lakh or 10 lakh)")
+            missing.append("Approximate total budget (e.g. 8 lakh or 12 lakh)")
         return missing
 
     def format_missing_info_response(self, intent: Dict[str, Any], missing: List[str]) -> str:
-        """Formats a natural, concise conversational reply acknowledging captured data and asking for missing info."""
+        """Formats a clear conversational summary displaying captured attributes, preferences, and missing info."""
         reqs_str = ", ".join(r.replace("_", " ").title() for r in intent.get("requirements", [])) or "Standard operational categories"
+        prefs_str = ", ".join(intent.get("preferences", [])) or "None specified"
         currency_sym = "₹" if intent.get("currency") == "INR" else "$"
         budget_str = f"{currency_sym}{intent.get('total_budget', 0):,.0f}" if intent.get("total_budget") else "Not specified"
         guest_str = f"{intent.get('guest_count')} attendees" if intent.get("guest_count") else "Not specified"
         loc_str = intent.get("location") or "Not specified"
         type_str = (intent.get("event_type") or "Conference").title()
-        
+        date_str = intent.get("date_expression") or ("Exact Date Needed" if not intent.get("has_date") else "Set")
+
         lines = [
-            f"Understood! Here is what I have captured so far for your {type_str}:",
-            f"• Location: {loc_str}",
-            f"• Attendees: {guest_str}",
-            f"• Budget: {budget_str}",
-            f"• Sourcing Requirements: {reqs_str}",
-            "",
-            "To generate your authoritative operational plan, please provide:",
+            f"Understood! Here is what EVENTRA has captured for your **{type_str}**:",
+            f"• **Location:** {loc_str}",
+            f"• **Attendees:** {guest_str}",
+            f"• **Target Budget:** {budget_str}",
+            f"• **Date / Timing:** {date_str}",
+            f"• **Sourcing Slices:** {reqs_str}",
+            f"• **Preferences:** {prefs_str}",
         ]
+
+        if intent.get("ambiguities"):
+            lines.append(f"• **Ambiguities Noted:** {', '.join(intent['ambiguities'])}")
+
+        lines.extend([
+            "",
+            "To complete your canonical Event Specification draft and build the plan, please provide:",
+        ])
         for i, m in enumerate(missing, 1):
             lines.append(f"{i}. {m}")
-        
+
         return "\n".join(lines)
 
     def process_intake(
@@ -344,14 +271,26 @@ class IntakeService:
         force_plan: bool = False,
     ) -> Dict[str, Any]:
         """Main entry point for natural language event intake with multi-turn context preservation."""
-        turn_intent = self.extract_intent(message)
-
         # 1. Load existing event context if event_id is supplied
         event: Optional[Event] = None
+        existing_context: Optional[Dict[str, Any]] = None
         if event_id:
             event = self.db.query(Event).filter(Event.id == event_id).first()
+            if event:
+                existing_reqs = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
+                existing_context = {
+                    "event_type": event.event_type,
+                    "location": event.location,
+                    "guest_count": event.guest_count,
+                    "total_budget": float(event.total_budget or 0),
+                    "currency": event.currency,
+                    "requirements": [r.type for r in existing_reqs],
+                }
 
-        # 2. Merge existing event state with newly extracted intent
+        # 2. Extract structured intent via Gemini LLM & Deterministic Normalization
+        turn_intent = self.extract_intent(message, current_event_context=existing_context)
+
+        # 3. Merge existing event state with newly extracted intent
         merged_intent = dict(turn_intent)
         if event:
             if not merged_intent["has_event_type"] and event.event_type:
@@ -381,12 +320,12 @@ class IntakeService:
                 if combined:
                     merged_intent["requirements"] = combined
 
-        # Ensure default event type is CONFERENCE if unspecified
+        # Default event type if unspecified
         if not merged_intent.get("event_type"):
             merged_intent["event_type"] = EventType.CONFERENCE.value
             merged_intent["has_event_type"] = True
 
-        # Default requirements based on event type if still empty
+        # Default category slices based on event_type if still empty
         if not merged_intent["requirements"]:
             if merged_intent["event_type"] == EventType.CONFERENCE.value:
                 merged_intent["requirements"] = ["VENUE", "CATERING", "AV_TECH", "PHOTOGRAPHY", "TRANSPORT"]
@@ -400,14 +339,13 @@ class IntakeService:
         # Check missing information
         missing = self.detect_missing_info(merged_intent)
 
-        # 3. If critical info is missing and not forced, persist DRAFT event and prompt user
+        # 4. If critical info is missing and not forced, persist DRAFT event and prompt user
         if missing and not force_plan:
-            # Persist or update draft event so subsequent turns preserve context
             if not event:
                 event = Event(
                     owner_id=user_id,
                     name=merged_intent["name"],
-                    description=f"Draft conversational intake from: '{message[:200]}'",
+                    description=f"Draft intake from: '{message[:200]}'",
                     event_type=merged_intent["event_type"],
                     location=merged_intent.get("location") or "Pending Location",
                     start_datetime=merged_intent.get("start_time"),
@@ -434,7 +372,7 @@ class IntakeService:
                 self.db.commit()
                 self.db.refresh(event)
 
-            # Persist any requirements captured so far
+            # Persist requirements captured so far
             if merged_intent["requirements"]:
                 self.db.query(Requirement).filter(Requirement.event_id == event.id).delete()
                 for cat in merged_intent["requirements"]:
@@ -452,7 +390,18 @@ class IntakeService:
             return {
                 "status": "MISSING_INFO",
                 "message": self.format_missing_info_response(merged_intent, missing),
-                "intent": merged_intent,
+                "intent": {
+                    "event_type": merged_intent["event_type"],
+                    "location": merged_intent["location"],
+                    "guest_count": merged_intent["guest_count"],
+                    "total_budget": merged_intent["total_budget"],
+                    "currency": merged_intent["currency"],
+                    "requirements": merged_intent["requirements"],
+                    "preferences": merged_intent.get("preferences", []),
+                    "constraints": merged_intent.get("constraints", []),
+                    "date_expression": merged_intent.get("date_expression"),
+                    "date_precision": merged_intent.get("date_precision"),
+                },
                 "missing_fields": missing,
                 "event_id": event.id,
                 "event": {
@@ -471,7 +420,7 @@ class IntakeService:
                 "plan": None,
             }
 
-        # 4. All critical info is present (or forced): Generate authoritative Event Specification
+        # 5. All critical info is present (or force_plan): Generate canonical Event Specification & Plan
         if not merged_intent.get("start_time"):
             default_start = (datetime.now(timezone.utc) + timedelta(days=30)).replace(
                 hour=9, minute=0, second=0, microsecond=0, tzinfo=None
@@ -506,7 +455,7 @@ class IntakeService:
             event.total_budget = merged_intent["total_budget"] or event.total_budget
             event.currency = merged_intent["currency"]
 
-        # Persist authoritative requirements
+        # Persist requirements
         self.db.query(Requirement).filter(Requirement.event_id == event.id).delete()
         for cat in merged_intent["requirements"]:
             req = Requirement(
@@ -519,11 +468,27 @@ class IntakeService:
             )
             self.db.add(req)
 
+        # Persist constraints
+        self.db.query(Constraint).filter(Constraint.event_id == event.id).delete()
+        for c_desc in merged_intent.get("constraints", []):
+            c_obj = Constraint(
+                event_id=event.id,
+                name=c_desc[:100],
+                type="GENERAL",
+                severity="HARD",
+                description=c_desc,
+                value={"description": c_desc},
+            )
+            self.db.add(c_obj)
+
         event.lifecycle_state = EventLifecycleState.DRAFT.value
         self.db.commit()
         self.db.refresh(event)
 
-        # 5. Generate Authoritative Plan via PlanningService
+        # Build canonical Event Specification via SpecificationService
+        spec = self._spec_service.build_specification(event=event)
+
+        # Generate Authoritative Plan via PlanningService
         plan = self._planning_service.generate_plan(event.id)
 
         self._audit.record(
@@ -558,7 +523,18 @@ class IntakeService:
         return {
             "status": "PLAN_READY",
             "message": resp_msg,
-            "intent": merged_intent,
+            "intent": {
+                "event_type": merged_intent["event_type"],
+                "location": merged_intent["location"],
+                "guest_count": merged_intent["guest_count"],
+                "total_budget": merged_intent["total_budget"],
+                "currency": merged_intent["currency"],
+                "requirements": merged_intent["requirements"],
+                "preferences": merged_intent.get("preferences", []),
+                "constraints": merged_intent.get("constraints", []),
+                "date_expression": merged_intent.get("date_expression"),
+            },
+            "specification": spec.model_dump(),
             "event_id": event.id,
             "event": {
                 "id": event.id,
@@ -582,107 +558,109 @@ class IntakeService:
         modification_text: str,
         user_id: str = "anonymous_operator",
     ) -> Dict[str, Any]:
-        """Modifies the event specification and regenerates the operational plan.
-        
-        Handles:
-        - Budget updates: 'Increase budget to 12 lakh', 'Increase the budget to 10 lakh', 'budget 15 lakh'
-        - Attendance updates: 'Change attendance to 800', '800 attendees'
-        - Location shifts: 'Move the event to Gurgaon', 'Change location to Gurgaon'
-        - Date shifts: 'Change event date to 20 December 2026'
-        - Requirement additions: 'Add security', 'Add live streaming'
-        - Requirement removals: 'Remove photography', 'Remove transportation'
-        """
+        """Modifies the event specification via context-aware LLM change proposal and regenerates the operational plan."""
         event = self.db.query(Event).filter(Event.id == event_id).first()
         if not event:
             raise ValueError(f"Event '{event_id}' not found.")
 
-        mod_lower = modification_text.lower()
-        changes_made = []
-
-        # 1. Budget update check
-        word_budget = parse_indian_number_words(mod_lower)
-        if word_budget and word_budget > 0 and any(k in mod_lower for k in ["budget", "increase", "set", "update", "cost", "to"]):
-            event.total_budget = word_budget
-            changes_made.append(f"Updated total budget to ₹{word_budget:,.0f}")
-        else:
-            budget_match = re.search(r"(?:budget|cost)\s*(?:to|is)?\s*(\d+(?:\.\d+)?)\s*(?:lakh|lakhs|l|cr|crore)\b", mod_lower)
-            if budget_match:
-                mult = 10000000.0 if "cr" in mod_lower else 100000.0
-                new_budget = float(budget_match.group(1)) * mult
-                event.total_budget = new_budget
-                changes_made.append(f"Updated total budget to ₹{new_budget:,.0f}")
-
-        # 2. Guest count / attendance update check
-        guest_match = re.search(r"(?:attendance|guests?|attendees?|people|pax)\s*(?:to|is)?\s*(\d+)", mod_lower)
-        if not guest_match:
-            guest_match = re.search(r"(?:change|set|update|increase)\s+(?:attendance|guests?|attendees?)\s*(?:to)?\s*(\d+)", mod_lower)
-        if guest_match:
-            new_guests = int(guest_match.group(1))
-            event.guest_count = new_guests
-            changes_made.append(f"Updated guest count to {new_guests}")
-
-        # 3. Location / City shift check
-        loc_match = re.search(r"(?:move|change|relocate|shift)\s+(?:the\s+)?(?:event\s+)?(?:to\s+|location\s+to\s+)([a-zA-Z\s]+)", mod_lower)
-        if loc_match:
-            raw_city = loc_match.group(1).strip()
-            # Clean trailing words
-            clean_city = re.split(r"\s+(?:and|with|on|at|for|also)\b", raw_city)[0].strip()
-            if clean_city:
-                event.location = "Gurgaon" if "gurgaon" in clean_city.lower() or "gurugram" in clean_city.lower() else clean_city.title()
-                changes_made.append(f"Moved event location to {event.location}")
-
-        # 4. Date shift check
-        date_match = re.search(
-            r"(?:date|to|on)\s*(?:to|is)?\s*(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*(\d{4})?",
-            mod_lower,
-        )
-        if date_match:
-            day = int(date_match.group(1))
-            month_str = date_match.group(2)[:3]
-            year = int(date_match.group(3)) if date_match.group(3) else (event.start_datetime.year if event.start_datetime else 2026)
-            months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"]
-            month = months.index(month_str) + 1
-            try:
-                new_start = datetime(year, month, day, 9, 0, 0)
-                event.start_datetime = new_start
-                event.end_datetime = new_start + timedelta(hours=8)
-                changes_made.append(f"Changed event date to {day} {month_str.title()} {year}")
-            except ValueError:
-                pass
-
-        # 5. Requirement additions and removals
         existing_reqs = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
         current_cats = {r.type for r in existing_reqs}
 
-        # Check removals
-        for kw, cat in CATEGORY_KEYWORDS.items():
-            remove_patterns = [
-                rf"remove\s+(?:the\s+)?{re.escape(kw)}",
-                rf"delete\s+(?:the\s+)?{re.escape(kw)}",
-                rf"drop\s+(?:the\s+)?{re.escape(kw)}",
-                rf"no\s+{re.escape(kw)}",
-                rf"without\s+{re.escape(kw)}",
-            ]
-            if any(re.search(p, mod_lower) for p in remove_patterns):
-                if cat in current_cats:
-                    current_cats.remove(cat)
-                    changes_made.append(f"Removed {cat.replace('_', ' ').title()}")
+        event_context = {
+            "event_id": event.id,
+            "name": event.name,
+            "event_type": event.event_type,
+            "location": event.location,
+            "guest_count": event.guest_count,
+            "total_budget": float(event.total_budget or 0),
+            "currency": event.currency,
+            "requirements": list(current_cats),
+        }
 
-        # Check additions
-        for kw, cat in CATEGORY_KEYWORDS.items():
-            add_patterns = [
-                rf"add\s+(?:the\s+)?{re.escape(kw)}",
-                rf"include\s+(?:the\s+)?{re.escape(kw)}",
-                rf"need\s+(?:the\s+)?{re.escape(kw)}",
-                rf"require\s+(?:the\s+)?{re.escape(kw)}",
-                rf"with\s+{re.escape(kw)}",
-            ]
-            if any(re.search(p, mod_lower) for p in add_patterns):
-                if cat not in current_cats:
-                    current_cats.add(cat)
-                    changes_made.append(f"Added {cat.replace('_', ' ').title()}")
+        # 1. Obtain structured ChangeProposal via LLM
+        change_proposal: EventChangeProposal = self._understanding_service.understand_modification(
+            user_message=modification_text,
+            current_event_context=event_context,
+        )
 
-        # Update event name to match new params
+        changes_made = []
+
+        # 2. Process structured changes proposed by LLM
+        if change_proposal.changes:
+            for ch in change_proposal.changes:
+                if ch.field == "guest_count" and ch.new_value:
+                    try:
+                        new_g = int(ch.new_value)
+                        if new_g > 0:
+                            event.guest_count = new_g
+                            changes_made.append(f"Updated guest count to {new_g}")
+                    except (ValueError, TypeError):
+                        pass
+
+                elif ch.field == "budget" and ch.new_value:
+                    try:
+                        new_b, _ = normalize_budget(amount=float(ch.new_value) if isinstance(ch.new_value, (int, float)) else None, expression=str(ch.new_value))
+                        if new_b and new_b > 0:
+                            event.total_budget = new_b
+                            changes_made.append(f"Updated total budget to ₹{new_b:,.0f}")
+                    except (ValueError, TypeError):
+                        pass
+
+                elif ch.field == "location" and ch.new_value:
+                    loc_str = str(ch.new_value).strip().title()
+                    if loc_str:
+                        event.location = "Gurgaon" if "Gurgaon" in loc_str or "Gurugram" in loc_str else loc_str
+                        changes_made.append(f"Moved event location to {event.location}")
+
+                elif ch.operation == "REMOVE_SERVICE" or (ch.field == "service" and ch.operation in ("REMOVE", "DELETE")):
+                    srv_cat = normalize_service_category(ch.target_service or str(ch.new_value or ch.old_value))
+                    if srv_cat in current_cats:
+                        current_cats.remove(srv_cat)
+                        changes_made.append(f"Removed {srv_cat.replace('_', ' ').title()}")
+
+                elif ch.operation == "ADD_SERVICE" or (ch.field == "service" and ch.operation in ("ADD", "INCLUDE")):
+                    srv_cat = normalize_service_category(ch.target_service or str(ch.new_value))
+                    if srv_cat not in current_cats:
+                        current_cats.add(srv_cat)
+                        changes_made.append(f"Added {srv_cat.replace('_', ' ').title()}")
+
+        # Deterministic fallback check if LLM proposal had no changes recognized
+        if not changes_made:
+            mod_lower = modification_text.lower()
+            word_budget = parse_indian_number_words(mod_lower)
+            if word_budget and word_budget > 0 and any(k in mod_lower for k in ["budget", "increase", "set", "update", "cost"]):
+                event.total_budget = word_budget
+                changes_made.append(f"Updated total budget to ₹{word_budget:,.0f}")
+
+            guest_match = re.search(r"(?:attendance|guests?|attendees?|people|pax)\s*(?:to|is)?\s*(\d+)", mod_lower)
+            if guest_match:
+                new_guests = int(guest_match.group(1))
+                if new_guests > 0:
+                    event.guest_count = new_guests
+                    changes_made.append(f"Updated guest count to {new_guests}")
+
+            loc_match = re.search(r"(?:move|change|relocate|shift)\s+(?:the\s+)?(?:event\s+)?(?:to\s+|location\s+to\s+)([a-zA-Z\s]+)", mod_lower)
+            if loc_match:
+                clean_city = re.split(r"\s+(?:and|with|on|at|for|also)\b", loc_match.group(1).strip())[0].strip()
+                if clean_city:
+                    event.location = "Gurgaon" if "gurgaon" in clean_city.lower() or "gurugram" in clean_city.lower() else clean_city.title()
+                    changes_made.append(f"Moved event location to {event.location}")
+
+            # Removals
+            for kw, cat in SERVICE_CATEGORY_MAP.items():
+                if re.search(rf"(?:remove|delete|drop|no|without)\s+(?:the\s+)?{re.escape(kw)}", mod_lower):
+                    if cat in current_cats:
+                        current_cats.remove(cat)
+                        changes_made.append(f"Removed {cat.replace('_', ' ').title()}")
+
+            # Additions
+            for kw, cat in SERVICE_CATEGORY_MAP.items():
+                if re.search(rf"(?:add|include|need|require|with)\s+(?:the\s+)?{re.escape(kw)}", mod_lower):
+                    if cat not in current_cats:
+                        current_cats.add(cat)
+                        changes_made.append(f"Added {cat.replace('_', ' ').title()}")
+
+        # Update event title to match new params
         pax_str = f"{event.guest_count}-Person " if event.guest_count else ""
         event.name = f"{pax_str}{event.location} {event.event_type.replace('_', ' ').title()} 2026"
 
@@ -703,6 +681,9 @@ class IntakeService:
         event.lifecycle_state = EventLifecycleState.DRAFT.value
         self.db.commit()
         self.db.refresh(event)
+
+        # Recompile canonical Event Specification
+        spec = self._spec_service.build_specification(event=event)
 
         # Regenerate plan
         updated_plan = self._planning_service.generate_plan(event.id)
@@ -740,6 +721,7 @@ class IntakeService:
             "status": "PLAN_UPDATED",
             "message": resp_msg,
             "changes": changes_made,
+            "specification": spec.model_dump(),
             "event_id": event.id,
             "event": {
                 "id": event.id,
@@ -757,4 +739,3 @@ class IntakeService:
             "plan": updated_plan.model_dump(),
             "requirements": list(current_cats),
         }
-

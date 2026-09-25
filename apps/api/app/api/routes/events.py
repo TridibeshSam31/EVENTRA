@@ -1,13 +1,32 @@
 """API Route: Events (Phase 1 Foundational Endpoints + Phase 2 Specification Preview)"""
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db_session, get_current_user_id
 from app.services.event_service import EventService
 from app.services.collaboration_service import CollaborationService
 from app.services.vendor_service import VendorService
+from app.schemas.vendor_outcome import (
+    VendorOutcomeCreate,
+    VendorOutcomeResponse,
+)
+from app.schemas.vendor_outcome_validation import (
+    VendorOutcomeValidationResponse,
+)
+from app.schemas.vendor_binding import (
+    VendorTaskBindingInput,
+    BindingDecision,
+    VendorTaskBindingResponse,
+)
+from app.schemas.execution_plan import FinalExecutionPlan
+from app.schemas.pause_resume import (
+    PauseEventRequest,
+    ResumeEventRequest,
+    EventExecutionStateResponse,
+    PauseResumeRecordResponse,
+)
 from app.services.specification_service import (
     SpecificationService,
     SpecificationValidationError,
@@ -271,4 +290,291 @@ def discover_venues_for_event(
         source=source,
         items=[VenueResponse.model_validate(v) for v in venues],
     )
+
+
+# --- Phase 6: Vendor Outcome Endpoints (Task 6) ---
+
+@router.post("/{event_id}/vendor-outcomes", response_model=VendorOutcomeResponse, status_code=status.HTTP_201_CREATED)
+def record_vendor_outcome(
+    event_id: str,
+    payload: VendorOutcomeCreate,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Records the organizer-reported outcome of an external vendor interaction.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    The outcome is strictly recorded with source='ORGANIZER_REPORTED' and verification_status='UNVERIFIED'.
+    Task 6 never mutates task provider assignments or booking confirmations.
+    """
+    from app.services.vendor_outcome_service import VendorOutcomeService
+    from app.models.vendor import Vendor
+    from app.models.task import Task
+
+    service = VendorOutcomeService(db)
+    outcome = service.record_outcome(event_id, payload, submitted_by=current_user_id)
+
+    vendor = db.query(Vendor).filter(Vendor.id == outcome.provider_id).first()
+    task = db.query(Task).filter(Task.id == outcome.task_id).first() if outcome.task_id else None
+
+    resp = VendorOutcomeResponse.model_validate(outcome)
+    resp.provider_name = vendor.name if vendor else None
+    resp.task_name = task.name if task else None
+    return resp
+
+
+@router.get("/{event_id}/vendor-outcomes", response_model=List[VendorOutcomeResponse], status_code=status.HTTP_200_OK)
+def list_vendor_outcomes(
+    event_id: str,
+    provider_id: Optional[str] = Query(None, description="Optional vendor ID filter"),
+    task_id: Optional[str] = Query(None, description="Optional task ID filter"),
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Lists historical organizer-reported vendor outcomes for an event in reverse chronological order."""
+    from app.services.vendor_outcome_service import VendorOutcomeService
+    from app.models.vendor import Vendor
+    from app.models.task import Task
+
+    service = VendorOutcomeService(db)
+    outcomes = service.get_outcomes_for_event(event_id, provider_id=provider_id, task_id=task_id)
+
+    results: List[VendorOutcomeResponse] = []
+    for o in outcomes:
+        vendor = db.query(Vendor).filter(Vendor.id == o.provider_id).first()
+        task = db.query(Task).filter(Task.id == o.task_id).first() if o.task_id else None
+        item = VendorOutcomeResponse.model_validate(o)
+        item.provider_name = vendor.name if vendor else None
+        item.task_name = task.name if task else None
+        results.append(item)
+    return results
+
+
+# --- Phase 7: Vendor Outcome Parsing & Validation Endpoints (Task 7) ---
+
+@router.post(
+    "/{event_id}/vendor-outcomes/{outcome_id}/validate",
+    response_model=VendorOutcomeValidationResponse,
+    status_code=status.HTTP_200_OK,
+)
+def validate_vendor_outcome_endpoint(
+    event_id: str,
+    outcome_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Parses and deterministically validates an organizer-reported vendor outcome against system state.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    Evaluates claims deterministically into PASS, FAIL, UNKNOWN, or CONFLICT.
+    Does NOT assign or bind the vendor to the task, does NOT mutate task status or provider_id,
+    and does NOT recalculate the event plan or DAG.
+    """
+    from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
+    from app.models.vendor import Vendor
+
+    service = VendorOutcomeValidationService(db)
+    validation = service.validate_outcome(outcome_id=outcome_id, event_id=event_id)
+    return VendorOutcomeValidationResponse.model_validate(validation)
+
+
+@router.get(
+    "/{event_id}/vendor-outcomes/{outcome_id}/validation",
+    response_model=VendorOutcomeValidationResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_vendor_outcome_validation_endpoint(
+    event_id: str,
+    outcome_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Retrieves the latest deterministic validation result for a vendor outcome."""
+    from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
+
+    service = VendorOutcomeValidationService(db)
+    validation = service.get_validation(outcome_id=outcome_id)
+    if not validation:
+        raise NotFoundException(f"No validation found for vendor outcome '{outcome_id}'.")
+    return VendorOutcomeValidationResponse.model_validate(validation)
+
+
+# --- Phase 8: Vendor -> Task Binding & Plan Recalculation (Task 8) ---
+
+@router.post(
+    "/{event_id}/tasks/{task_id}/bind-vendor",
+    response_model=VendorTaskBindingResponse,
+    status_code=status.HTTP_200_OK,
+)
+def bind_vendor_to_task_endpoint(
+    event_id: str,
+    task_id: str,
+    payload: VendorTaskBindingInput,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Deterministically evaluates and binds a qualified, validated provider to a task.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    1. Consumes Task 7 validated evidence.
+    2. Rejects bindings if hard requirements fail, conflicts exist, or mandatory availability is missing.
+    3. Atomically mutates task.provider_id and sets task.status = ASSIGNED.
+    4. Deterministically recalculates the execution plan (DAG verification, CPM critical path, schedule, and budget commitments).
+    5. Persists an immutable audit log.
+    """
+    from app.services.vendor_task_binding_service import VendorTaskBindingService
+
+    service = VendorTaskBindingService(db)
+    return service.bind_vendor_to_task(
+        event_id=event_id,
+        task_id=task_id,
+        provider_id=payload.provider_id,
+        validation_id=payload.validation_id,
+        user_id=current_user_id,
+        allow_reassignment=payload.allow_reassignment,
+        force_override_unknown=payload.force_override_unknown,
+    )
+
+
+@router.get(
+    "/{event_id}/tasks/{task_id}/binding-feasibility",
+    response_model=BindingDecision,
+    status_code=status.HTTP_200_OK,
+)
+def get_binding_feasibility_endpoint(
+    event_id: str,
+    task_id: str,
+    provider_id: str = Query(..., description="Provider UUID to evaluate"),
+    validation_id: Optional[str] = Query(None, description="Optional Task 7 validation UUID"),
+    force_override_unknown: bool = Query(False, description="Whether to permit override for non-critical unknowns"),
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Evaluates binding feasibility for a vendor without making any database mutations."""
+    from app.services.vendor_task_binding_service import VendorTaskBindingService
+
+    service = VendorTaskBindingService(db)
+    return service.evaluate_feasibility(
+        event_id=event_id,
+        task_id=task_id,
+        provider_id=provider_id,
+        validation_id=validation_id,
+        force_override_unknown=force_override_unknown,
+    )
+
+
+# --- Phase 9: Real Final Execution Plan Endpoints (Task 9) ---
+
+@router.get(
+    "/{event_id}/execution-plan",
+    response_model=FinalExecutionPlan,
+    status_code=status.HTTP_200_OK,
+)
+def get_final_execution_plan_endpoint(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Deterministically compiles the authoritative post-Task-8 execution plan.
+
+    CRITICAL ARCHITECTURAL BOUNDARY:
+    1. Consumes authoritative state (Task, VendorAssignment, Dependencies, CPM, Schedule, Budget).
+    2. Topological sequence ordering according to the DAG.
+    3. Exposes vendor assignments, timing, slack, critical path, budget, checkpoints, blockers, and warnings.
+    4. Deterministic consistency verification (DAG acyclicity, schedule precedence, deadline violations, budget overrun).
+    5. Pure read/compute: strictly idempotent, does not mutate state or increment plan version.
+    """
+    from app.services.final_execution_plan_service import FinalExecutionPlanService
+
+    service = FinalExecutionPlanService(db)
+    return service.compile_plan(event_id=event_id, user_id=current_user_id)
+
+
+@router.post(
+    "/{event_id}/execution-plan/generate",
+    response_model=FinalExecutionPlan,
+    status_code=status.HTTP_200_OK,
+)
+def generate_final_execution_plan_endpoint(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Alias/trigger endpoint to compile and return the authoritative final execution plan."""
+    from app.services.final_execution_plan_service import FinalExecutionPlanService
+
+    service = FinalExecutionPlanService(db)
+    return service.compile_plan(event_id=event_id, user_id=current_user_id)
+
+
+# --- Phase 11: Real Pause / Resume Execution Endpoints (Task 11) ---
+
+@router.post(
+    "/{event_id}/pause",
+    response_model=PauseResumeRecordResponse,
+    status_code=status.HTTP_200_OK,
+)
+def pause_event_endpoint(
+    event_id: str,
+    payload: PauseEventRequest,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Explicitly, transactionally, and safely pauses live event execution."""
+    from app.services.pause_resume_service import PauseResumeService
+
+    service = PauseResumeService(db)
+    return service.pause_event(event_id=event_id, user_id=current_user_id, request=payload)
+
+
+@router.post(
+    "/{event_id}/resume",
+    response_model=PauseResumeRecordResponse,
+    status_code=status.HTTP_200_OK,
+)
+def resume_event_endpoint(
+    event_id: str,
+    payload: ResumeEventRequest,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Safely resumes live event execution following state integrity validation."""
+    from app.services.pause_resume_service import PauseResumeService
+
+    service = PauseResumeService(db)
+    return service.resume_event(event_id=event_id, user_id=current_user_id, request=payload)
+
+
+@router.get(
+    "/{event_id}/execution-state",
+    response_model=EventExecutionStateResponse,
+    status_code=status.HTTP_200_OK,
+)
+def get_execution_state_endpoint(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Retrieves authoritative current execution state, plan version, and pause/resume flags."""
+    from app.services.pause_resume_service import PauseResumeService
+
+    service = PauseResumeService(db)
+    return service.get_execution_state(event_id=event_id, user_id=current_user_id)
+
+
+@router.get(
+    "/{event_id}/pause-history",
+    response_model=List[PauseResumeRecordResponse],
+    status_code=status.HTTP_200_OK,
+)
+def get_pause_history_endpoint(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Retrieves chronological audit history of all pause and resume operations."""
+    from app.services.pause_resume_service import PauseResumeService
+
+    service = PauseResumeService(db)
+    return service.get_pause_history(event_id=event_id, user_id=current_user_id)
 

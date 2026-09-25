@@ -16,6 +16,7 @@ from app.integrations.notifications.providers import (
     MockNotificationProvider,
 )
 from app.integrations.communication.mock import MockCommunicationProvider
+from app.integrations.communication.exotel import ExotelVoiceAdapter
 from app.integrations.whatsapp.client import OpenWACommunicationAdapter, WhatsAppAdapter
 from app.integrations.venues.discovery import ExternalVenueAdapter
 from app.integrations.providers.directory import ExternalProviderAdapter
@@ -71,6 +72,18 @@ class IntegrationRegistry:
                     webhook_secret=settings.OPENWA_WEBHOOK_SECRET,
                     timeout_seconds=settings.OPENWA_TIMEOUT_SECONDS,
                 )
+            elif comm_type == "exotel" or settings.EXOTEL_ENABLED:
+                self._communication_provider = ExotelVoiceAdapter(
+                    api_key=settings.EXOTEL_API_KEY,
+                    api_token=settings.EXOTEL_API_TOKEN,
+                    account_sid=settings.EXOTEL_ACCOUNT_SID,
+                    subdomain=settings.EXOTEL_SUBDOMAIN,
+                    caller_id=settings.EXOTEL_CALLER_ID,
+                    app_id=settings.EXOTEL_APP_ID,
+                    stream_url=settings.EXOTEL_STREAM_URL,
+                    callback_url=settings.EXOTEL_CALLBACK_URL,
+                    timeout_seconds=settings.EXOTEL_TIMEOUT_SECONDS,
+                )
             else:
                 self._communication_provider = MockCommunicationProvider()
         return self._communication_provider
@@ -103,21 +116,30 @@ class IntegrationRegistry:
         scraper_prov = self.get_google_maps_scraper()
 
         comm_is_real = (
-            isinstance(comm_prov, OpenWACommunicationAdapter)
-            and settings.OPENWA_ENABLED
-            and bool(settings.OPENWA_SESSION_ID)
+            (isinstance(comm_prov, OpenWACommunicationAdapter) and settings.OPENWA_ENABLED and bool(settings.OPENWA_SESSION_ID))
+            or (isinstance(comm_prov, ExotelVoiceAdapter) and settings.EXOTEL_ENABLED and comm_prov.is_configured)
+        )
+        exotel_configured = bool(
+            settings.EXOTEL_API_KEY
+            and settings.EXOTEL_API_TOKEN
+            and settings.EXOTEL_ACCOUNT_SID
+            and settings.EXOTEL_CALLER_ID
         )
         comm_status: Dict[str, Any] = {
             "provider": settings.COMMUNICATION_PROVIDER,
             "mode": "REAL" if comm_is_real else "MOCK",
             "openwa_enabled": settings.OPENWA_ENABLED,
             "whatsapp_enabled": settings.WHATSAPP_ENABLED or settings.OPENWA_ENABLED,
-            "is_configured": bool(settings.OPENWA_SESSION_ID),
+            "exotel_enabled": settings.EXOTEL_ENABLED,
+            "exotel_configured": exotel_configured,
+            "is_configured": bool(settings.OPENWA_SESSION_ID) or exotel_configured,
             "session_id": settings.OPENWA_SESSION_ID if settings.OPENWA_ENABLED else None,
             "base_url": settings.OPENWA_BASE_URL if settings.OPENWA_ENABLED else None,
         }
         if isinstance(comm_prov, OpenWACommunicationAdapter) and settings.OPENWA_ENABLED:
             comm_status["gateway_health"] = comm_prov.check_health()
+        elif isinstance(comm_prov, ExotelVoiceAdapter) and settings.EXOTEL_ENABLED:
+            comm_status["exotel_health"] = comm_prov.check_health()
 
         return {
             "maps": {

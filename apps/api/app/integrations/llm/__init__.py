@@ -4,6 +4,15 @@ from app.integrations.llm.base import (
     RealLLMProvider,
     MockLLMProvider,
     get_configured_llm_provider,
+    LLMError,
+    MissingAPIKeyError,
+    UnsupportedProviderError,
+    GeminiAuthError,
+    GeminiAPIError,
+    ModelInvocationError,
+    LLMTimeoutError,
+    MalformedOutputError,
+    StructuredValidationError,
 )
 
 __all__ = [
@@ -11,4 +20,13 @@ __all__ = [
     "RealLLMProvider",
     "MockLLMProvider",
     "get_configured_llm_provider",
+    "LLMError",
+    "MissingAPIKeyError",
+    "UnsupportedProviderError",
+    "GeminiAuthError",
+    "GeminiAPIError",
+    "ModelInvocationError",
+    "LLMTimeoutError",
+    "MalformedOutputError",
+    "StructuredValidationError",
 ]

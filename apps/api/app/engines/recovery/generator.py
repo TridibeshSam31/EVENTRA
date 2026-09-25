@@ -19,8 +19,8 @@ class RecoveryGenerator:
                     context.impact_result.get("schedule_impact", {}).get("delay_minutes", 0) or 0)
         candidates: List[RecoveryCandidate] = []
 
-        # Waiting has a concrete meaning only when the incident reports a delay/no-show.
-        if incident_type in {"VENDOR_DELAY", "VENDOR_NO_SHOW", "SCHEDULE_DEVIATION"} and delay > 0:
+        # Waiting has a concrete meaning only when the incident reports a delay/no-show/slip.
+        if incident_type in {"VENDOR_DELAY", "VENDOR_NO_SHOW", "VENDOR_FAILURE", "SCHEDULE_DEVIATION", "TASK_DELAY", "SCHEDULE_SLIP"} and delay > 0:
             candidates.append(RecoveryCandidate(
                 strategy_type=RecoveryStrategy.WAIT,
                 affected_task_ids=task_ids,
@@ -80,7 +80,7 @@ class RecoveryGenerator:
             ))
 
         # Resource substitutions use only existing available, compatible resources.
-        if incident_type == "RESOURCE_SHORTAGE":
+        if incident_type in {"RESOURCE_SHORTAGE", "RESOURCE_UNAVAILABLE", "EQUIPMENT_FAILURE"}:
             related = getattr(incident, "related_resource_id", None)
             source = next((r for r in context.resources if getattr(r, "id", None) == related), None)
             if source:
@@ -95,6 +95,30 @@ class RecoveryGenerator:
                             affected_resource_ids=[getattr(resource, "id")],
                             proposed_changes={"resource_id": getattr(resource, "id"), "operation": "propose_resource_reassignment"},
                         ))
+
+        # Scope shedding candidates (for non-critical tasks)
+        sheddable = metadata.get("sheddable_task_ids", [])
+        if not sheddable:
+            by_id = {getattr(t, "id"): t for t in context.tasks}
+            sheddable = [tid for tid in task_ids if tid in by_id and str(getattr(by_id[tid], "priority", "")).upper() == "LOW"]
+        if sheddable:
+            candidates.append(RecoveryCandidate(
+                strategy_type=RecoveryStrategy.SCOPE_SHED,
+                affected_task_ids=sorted(sheddable),
+                proposed_changes={"operation": "propose_scope_shedding", "cancelled_task_ids": sorted(sheddable)},
+            ))
+
+        # Capacity adjustment candidates
+        target_cap = metadata.get("target_capacity") or metadata.get("adjusted_capacity")
+        if incident_type in {"CAPACITY_PROBLEM", "CAPACITY_CHANGE"} or target_cap:
+            candidates.append(RecoveryCandidate(
+                strategy_type=RecoveryStrategy.CAPACITY_ADJUST,
+                affected_task_ids=task_ids,
+                proposed_changes={
+                    "operation": "propose_capacity_adjustment",
+                    "target_capacity": target_cap or 100,
+                },
+            ))
 
         # Stable ordering is part of determinism.
         return sorted(candidates, key=lambda c: (c.strategy_type, tuple(c.affected_provider_ids), tuple(c.affected_resource_ids)))

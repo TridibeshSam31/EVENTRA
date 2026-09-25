@@ -25,6 +25,7 @@ from app.models.vendor import Vendor
 from app.models.vendor_assignment import VendorAssignment
 from app.models.venue import Venue
 from app.services.live_state_service import LiveStateService
+from app.services.final_execution_plan_service import FinalExecutionPlanService
 
 
 class RecoveryService:
@@ -39,6 +40,11 @@ class RecoveryService:
 
     def generate_recovery_options(self, event_id: str, incident_id: str, current_user_id: str = "anonymous_operator") -> List[Recovery]:
         context = self._build_context(event_id, incident_id, current_user_id)
+        # Task 9 owns the authoritative operational version.  A recovery option is
+        # bound to that version so it cannot be applied to a newer execution plan.
+        execution_plan = FinalExecutionPlanService(self.db).compile_plan(
+            event_id=event_id, user_id=current_user_id
+        )
         self.db.query(Recovery).filter(Recovery.event_id == event_id, Recovery.incident_id == incident_id, Recovery.status != "STALE").update({Recovery.status: "STALE"}, synchronize_session=False)
         pending: List[Recovery] = []
         for candidate in self._generator.generate_candidates(context):
@@ -56,6 +62,7 @@ class RecoveryService:
                 risk_after=simulation.risk_after,
                 feasibility_result={"feasible": validation.feasible, "violations": validation.violations,
                                     "warnings": validation.warnings,
+                                    "plan_version": execution_plan.plan_version,
                                     "validation_timestamp": validation.validation_timestamp.isoformat()},
             )
             if validation.feasible:

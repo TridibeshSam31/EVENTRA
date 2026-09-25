@@ -20,8 +20,17 @@ class EventState(str, Enum):
     RECOVERY = "RECOVERY"
 
 
+class EventExecutionState(str, Enum):
+    """Authoritative execution lifecycle states for Task 11 Pause / Resume."""
+    RUNNING = "RUNNING"
+    PAUSING = "PAUSING"
+    PAUSED = "PAUSED"
+    RESUMING = "RESUMING"
+
+
 class TaskStatus(str, Enum):
     PENDING = "PENDING"
+    ASSIGNED = "ASSIGNED"
     READY = "READY"
     IN_PROGRESS = "IN_PROGRESS"
     BLOCKED = "BLOCKED"
@@ -105,10 +114,16 @@ class IncidentType(str, Enum):
     VENDOR_DELAY = "VENDOR_DELAY"
     VENDOR_NO_SHOW = "VENDOR_NO_SHOW"
     VENDOR_CANCELLATION = "VENDOR_CANCELLATION"
+    VENDOR_FAILURE = "VENDOR_FAILURE"
     VENUE_ISSUE = "VENUE_ISSUE"
     RESOURCE_SHORTAGE = "RESOURCE_SHORTAGE"
+    RESOURCE_UNAVAILABLE = "RESOURCE_UNAVAILABLE"
     CAPACITY_PROBLEM = "CAPACITY_PROBLEM"
+    CAPACITY_CHANGE = "CAPACITY_CHANGE"
     SCHEDULE_DEVIATION = "SCHEDULE_DEVIATION"
+    SCHEDULE_SLIP = "SCHEDULE_SLIP"
+    TASK_DELAY = "TASK_DELAY"
+    EQUIPMENT_FAILURE = "EQUIPMENT_FAILURE"
     DEPENDENCY_FAILURE = "DEPENDENCY_FAILURE"
 
 
@@ -180,3 +195,97 @@ class NegotiationStatus(str, Enum):
     DECLINED = "DECLINED"
     EXPIRED = "EXPIRED"
     CANCELLED = "CANCELLED"
+
+
+class CommunicationChannel(str, Enum):
+    """External channel used by the organizer to communicate with the vendor outside EVENTRA."""
+    PHONE = "PHONE"
+    EMAIL = "EMAIL"
+    WHATSAPP_EXTERNAL = "WHATSAPP_EXTERNAL"
+    IN_PERSON = "IN_PERSON"
+    OTHER = "OTHER"
+
+
+class VendorOutcomeStatus(str, Enum):
+    """Status of an organizer-reported external vendor interaction."""
+    PENDING = "PENDING"
+    CONTACTED = "CONTACTED"
+    INTERESTED = "INTERESTED"
+    AVAILABLE = "AVAILABLE"
+    UNAVAILABLE = "UNAVAILABLE"
+    QUOTE_RECEIVED = "QUOTE_RECEIVED"
+    ACCEPTED = "ACCEPTED"
+    DECLINED = "DECLINED"
+    NO_RESPONSE = "NO_RESPONSE"
+    UNKNOWN = "UNKNOWN"
+
+
+class ReportedAvailability(str, Enum):
+    """Availability state reported by the vendor during external communication."""
+    AVAILABLE = "AVAILABLE"
+    UNAVAILABLE = "UNAVAILABLE"
+    CONDITIONAL = "CONDITIONAL"
+    UNKNOWN = "UNKNOWN"
+
+
+class ClaimValidationStatus(str, Enum):
+    """Deterministic validation evaluation of an organizer-reported claim."""
+    PASS = "PASS"
+    FAIL = "FAIL"
+    UNKNOWN = "UNKNOWN"
+    CONFLICT = "CONFLICT"
+
+
+class OverallValidationStatus(str, Enum):
+    """Overall validation status for a parsed and validated vendor outcome."""
+    VALIDATED = "VALIDATED"
+    PARTIALLY_VALIDATED = "PARTIALLY_VALIDATED"
+    FAILED = "FAILED"
+    CONFLICT = "CONFLICT"
+    INSUFFICIENT_INFORMATION = "INSUFFICIENT_INFORMATION"
+
+
+class ClaimType(str, Enum):
+    """Categorization of facts extracted from organizer-reported vendor outcomes."""
+    CAPACITY = "CAPACITY"
+    PRICE = "PRICE"
+    CURRENCY = "CURRENCY"
+    AVAILABILITY = "AVAILABILITY"
+    DATE = "DATE"
+    VEGETARIAN = "VEGETARIAN"
+    LOCATION = "LOCATION"
+    CATEGORY = "CATEGORY"
+    REQUIREMENT = "REQUIREMENT"
+    PREFERENCE = "PREFERENCE"
+    TERMS = "TERMS"
+
+
+class BindingStatus(str, Enum):
+    """Authoritative outcome of a vendor-to-task binding evaluation or execution."""
+    BOUND = "BOUND"
+    BLOCKED = "BLOCKED"
+    ALREADY_BOUND = "ALREADY_BOUND"
+
+
+class BlockingReason(str, Enum):
+    """Controlled deterministic reason codes when a vendor cannot be bound to a task."""
+    CAPACITY_REQUIREMENT_FAILED = "CAPACITY_REQUIREMENT_FAILED"
+    BUDGET_EXCEEDED = "BUDGET_EXCEEDED"
+    AVAILABILITY_NOT_VALIDATED = "AVAILABILITY_NOT_VALIDATED"
+    AVAILABILITY_UNAVAILABLE = "AVAILABILITY_UNAVAILABLE"
+    HARD_REQUIREMENT_FAILED = "HARD_REQUIREMENT_FAILED"
+    VALIDATION_CONFLICT = "VALIDATION_CONFLICT"
+    VALIDATION_STALE = "VALIDATION_STALE"
+    VALIDATION_NOT_FOUND = "VALIDATION_NOT_FOUND"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
+    TASK_NOT_FOUND = "TASK_NOT_FOUND"
+    PROVIDER_NOT_FOUND = "PROVIDER_NOT_FOUND"
+    EVENT_MISMATCH = "EVENT_MISMATCH"
+    CATEGORY_MISMATCH = "CATEGORY_MISMATCH"
+    REASSIGNMENT_BLOCKED = "REASSIGNMENT_BLOCKED"
+    UNAUTHORIZED = "UNAUTHORIZED"
+    APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
+    INCONSISTENT_PLAN = "INCONSISTENT_PLAN"
+
+
+

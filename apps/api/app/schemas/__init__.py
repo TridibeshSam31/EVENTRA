@@ -55,6 +55,27 @@ from app.schemas.observability import (
     StateTransitionEntryResponse,
     StateHistoryResponse,
 )
+from app.schemas.event_intent import (
+    BudgetIntent,
+    DateIntent,
+    ServiceRequirementIntent,
+    EventPreferenceIntent,
+    EventConstraintIntent,
+    EventIntent,
+    SingleChangeProposal,
+    EventChangeProposal,
+)
+from app.schemas.vendor_outcome import (
+    VendorOutcomeCreate,
+    VendorOutcomeResponse,
+    PaginatedVendorOutcomesResponse,
+)
+from app.schemas.vendor_outcome_validation import (
+    ExtractedClaim,
+    VendorOutcomeClaims,
+    ClaimValidationDetail,
+    VendorOutcomeValidationResponse,
+)
 
 __all__ = [
     "UserCreate",
@@ -114,4 +135,66 @@ __all__ = [
     "DecisionTraceResponse",
     "StateTransitionEntryResponse",
     "StateHistoryResponse",
+    "BudgetIntent",
+    "DateIntent",
+    "ServiceRequirementIntent",
+    "EventPreferenceIntent",
+    "EventConstraintIntent",
+    "EventIntent",
+    "SingleChangeProposal",
+    "EventChangeProposal",
+    "VendorOutcomeCreate",
+    "VendorOutcomeResponse",
+    "PaginatedVendorOutcomesResponse",
+    "ExtractedClaim",
+    "VendorOutcomeClaims",
+    "ClaimValidationDetail",
+    "VendorOutcomeValidationResponse",
+    "VendorTaskBindingInput",
+    "BindingDecision",
+    "PlanRecalculationResult",
+    "VendorTaskBindingResponse",
 ]
+
+from app.schemas.vendor_binding import (
+    VendorTaskBindingInput,
+    BindingDecision,
+    PlanRecalculationResult,
+    VendorTaskBindingResponse,
+)
+from app.schemas.execution_plan import (
+    PlanReadiness,
+    PlanBlocker,
+    PlanWarning,
+    UnresolvedUnknown,
+    TaskPredecessorInfo,
+    TaskSuccessorInfo,
+    ExecutionPlanTask,
+    CriticalPathEntry,
+    ExecutionCheckpoint,
+    BudgetSummaryPlan,
+    ResourceSummaryPlan,
+    EventSummary,
+    CurrentAndNextTasks,
+    FinalExecutionPlan,
+    GenerateFinalExecutionPlanInput,
+)
+
+__all__.extend([
+    "PlanReadiness",
+    "PlanBlocker",
+    "PlanWarning",
+    "UnresolvedUnknown",
+    "TaskPredecessorInfo",
+    "TaskSuccessorInfo",
+    "ExecutionPlanTask",
+    "CriticalPathEntry",
+    "ExecutionCheckpoint",
+    "BudgetSummaryPlan",
+    "ResourceSummaryPlan",
+    "EventSummary",
+    "CurrentAndNextTasks",
+    "FinalExecutionPlan",
+    "GenerateFinalExecutionPlanInput",
+])
+

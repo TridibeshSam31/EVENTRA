@@ -108,6 +108,19 @@ class ProviderCommunicationProvider(ABC):
         """Parses and normalizes incoming message from provider webhook."""
         pass
 
+    def make_call(
+        self,
+        event_id: str,
+        provider_id: str,
+        recipient_phone: str,
+        task_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        custom_field: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> IntegrationResult[Dict[str, Any]]:
+        """Initiates an outbound telephony call to a provider/vendor."""
+        raise NotImplementedError("Telephony voice calls not supported by this provider.")
+
 
 class VenueDirectoryProvider(ABC):
     """Abstract interface for external venue discovery directories."""

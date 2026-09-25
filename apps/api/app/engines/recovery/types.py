@@ -10,6 +10,8 @@ class RecoveryStrategy:
     REASSIGN = "REASSIGN"
     RESCHEDULE = "RESCHEDULE"
     COMPRESS = "COMPRESS"
+    SCOPE_SHED = "SCOPE_SHED"
+    CAPACITY_ADJUST = "CAPACITY_ADJUST"
 
 
 @dataclass

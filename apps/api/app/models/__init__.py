@@ -3,6 +3,7 @@ from app.models.enums import (
     EventType,
     EventState,
     EventLifecycleState,
+    EventExecutionState,
     TaskStatus,
     TaskPriority,
     VendorStatus,
@@ -15,12 +16,20 @@ from app.models.enums import (
     BudgetItemStatus,
     ResourceStatus,
     NegotiationStatus,
+    CommunicationChannel,
+    VendorOutcomeStatus,
+    ReportedAvailability,
+    ClaimValidationStatus,
+    OverallValidationStatus,
+    ClaimType,
 )
 from app.models.venue import Venue
 from app.models.venue_availability import VenueAvailability
 from app.models.vendor import Vendor
 from app.models.provider_availability import ProviderAvailability
 from app.models.vendor_assignment import VendorAssignment
+from app.models.vendor_outcome import VendorOutcome
+from app.models.vendor_outcome_validation import VendorOutcomeValidation
 from app.models.event import Event
 from app.models.event_member import EventMember
 from app.models.user import User
@@ -39,6 +48,7 @@ from app.models.audit import Audit, AuditRecord
 from app.models.verification import VerificationResult
 from app.models.notification import Notification
 from app.models.recovery import Recovery
+from app.models.pause_record import EventPauseRecord
 from app.models.requirement import Requirement
 from app.models.objective import Objective
 from app.models.constraint import Constraint
@@ -58,11 +68,20 @@ __all__ = [
     "PermissionCategory",
     "BudgetItemStatus",
     "ResourceStatus",
+    "NegotiationStatus",
+    "CommunicationChannel",
+    "VendorOutcomeStatus",
+    "ReportedAvailability",
+    "ClaimValidationStatus",
+    "OverallValidationStatus",
+    "ClaimType",
     "Venue",
     "VenueAvailability",
     "Vendor",
     "ProviderAvailability",
     "VendorAssignment",
+    "VendorOutcome",
+    "VendorOutcomeValidation",
     "Event",
     "EventMember",
     "User",
@@ -76,6 +95,7 @@ __all__ = [
     "Budget",
     "Incident",
     "Recovery",
+    "EventPauseRecord",
     "Approval",
     "ApprovalRequest",
     "ActionExecution",

@@ -108,4 +108,194 @@ export async function discoverProvidersForEvent(
   return apiClient.post<ProviderDiscoveryResponse>(`/events/${eventId}/providers/discover`, payload);
 }
 
+export interface VendorOutcomePayload {
+  provider_id: string;
+  task_id?: string | null;
+  communication_channel?: string;
+  outcome_status?: string;
+  quoted_price?: number | null;
+  currency?: string;
+  reported_availability?: string;
+  organizer_notes?: string | null;
+  vendor_response?: Record<string, any> | null;
+}
+
+export interface VendorOutcomeItem {
+  id: string;
+  event_id: string;
+  task_id?: string | null;
+  provider_id: string;
+  provider_name?: string | null;
+  task_name?: string | null;
+  communication_channel: string;
+  outcome_status: string;
+  quoted_price?: number | null;
+  currency: string;
+  reported_availability: string;
+  organizer_notes?: string | null;
+  vendor_response?: Record<string, any> | null;
+  source: string;
+  verification_status: string;
+  submitted_by?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function recordVendorOutcome(
+  eventId: string,
+  payload: VendorOutcomePayload
+): Promise<VendorOutcomeItem> {
+  return apiClient.post<VendorOutcomeItem>(`/events/${eventId}/vendor-outcomes`, payload);
+}
+
+export async function getVendorOutcomes(
+  eventId: string,
+  params?: { provider_id?: string; task_id?: string }
+): Promise<VendorOutcomeItem[]> {
+  return apiClient.get<VendorOutcomeItem[]>(`/events/${eventId}/vendor-outcomes`, { params });
+}
+
+export interface ExtractedClaim {
+  claim_type: string;
+  field: string;
+  raw_value: any;
+  normalized_value?: any;
+  unit?: string | null;
+  source_text?: string | null;
+  confidence: number;
+  precision: string;
+}
+
+export interface ClaimValidationDetail {
+  claim_type: string;
+  field: string;
+  status: "PASS" | "FAIL" | "UNKNOWN" | "CONFLICT";
+  is_hard_requirement: boolean;
+  reported_value?: any;
+  authoritative_value?: any;
+  explanation: string;
+  source_evidence?: string | null;
+}
+
+export interface VendorOutcomeValidation {
+  id: string;
+  vendor_outcome_id: string;
+  event_id: string;
+  task_id?: string | null;
+  provider_id: string;
+  overall_status: "VALIDATED" | "PARTIALLY_VALIDATED" | "FAILED" | "CONFLICT" | "INSUFFICIENT_INFORMATION";
+  extracted_claims: ExtractedClaim[];
+  claim_results: ClaimValidationDetail[];
+  hard_requirements_passed: string[];
+  hard_requirements_failed: string[];
+  preferences_matched: string[];
+  conflicts: string[];
+  unknown_facts: string[];
+  validator_version: string;
+  summary?: string | null;
+  created_at: string;
+}
+
+export async function validateVendorOutcome(
+  eventId: string,
+  outcomeId: string
+): Promise<VendorOutcomeValidation> {
+  return apiClient.post<VendorOutcomeValidation>(`/events/${eventId}/vendor-outcomes/${outcomeId}/validate`, {});
+}
+
+export async function getVendorOutcomeValidation(
+  eventId: string,
+  outcomeId: string
+): Promise<VendorOutcomeValidation> {
+  return apiClient.get<VendorOutcomeValidation>(`/events/${eventId}/vendor-outcomes/${outcomeId}/validation`);
+}
+
+// ==============================================================================
+// TASK 8: VENDOR TO TASK BINDING & PLAN RECALCULATION
+// ==============================================================================
+
+export interface BindingDecision {
+  decision: "BIND" | "BLOCK";
+  can_bind: boolean;
+  reason: string;
+  reason_code?: string | null;
+  blocking_factors: string[];
+  validation_id?: string | null;
+  provider_id: string;
+  task_id: string;
+  event_id: string;
+}
+
+export interface PlanRecalculationResult {
+  schedule_recalculated: boolean;
+  critical_path_recalculated: boolean;
+  budget_recalculated: boolean;
+  is_dag_acyclic: boolean;
+  total_duration_minutes: number;
+  critical_path_task_ids: string[];
+  task_slack_minutes?: number | null;
+  task_is_critical_path: boolean;
+  budget_committed_amount?: number | null;
+  plan_version_before: number;
+  plan_version_after: number;
+}
+
+export interface VendorTaskBindingResponse {
+  binding_status: "BOUND" | "BLOCKED" | "ALREADY_BOUND";
+  event_id: string;
+  task_id: string;
+  provider_id: string;
+  validation_id?: string | null;
+  previous_provider_id?: string | null;
+  decision: BindingDecision;
+  plan_recalculation?: PlanRecalculationResult | null;
+  plan_version_before?: number | null;
+  plan_version_after?: number | null;
+  schedule_recalculated: boolean;
+  critical_path_recalculated: boolean;
+  budget_recalculated: boolean;
+  audit_id?: string | null;
+  message: string;
+}
+
+export interface VendorTaskBindingPayload {
+  event_id: string;
+  task_id: string;
+  provider_id: string;
+  validation_id?: string | null;
+  allow_reassignment?: boolean;
+  force_override_unknown?: boolean;
+}
+
+export async function bindVendorToTask(
+  eventId: string,
+  taskId: string,
+  payload: VendorTaskBindingPayload
+): Promise<VendorTaskBindingResponse> {
+  return apiClient.post<VendorTaskBindingResponse>(
+    `/events/${eventId}/tasks/${taskId}/bind-vendor`,
+    payload
+  );
+}
+
+export async function getBindingFeasibility(
+  eventId: string,
+  taskId: string,
+  providerId: string,
+  validationId?: string
+): Promise<BindingDecision> {
+  return apiClient.get<BindingDecision>(
+    `/events/${eventId}/tasks/${taskId}/binding-feasibility`,
+    {
+      params: {
+        provider_id: providerId,
+        validation_id: validationId,
+      },
+    }
+  );
+}
+
+
+
+
 
