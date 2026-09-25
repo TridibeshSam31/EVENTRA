@@ -37,7 +37,8 @@ class VendorOutcomeBase(BaseModel):
 
 class VendorOutcomeCreate(VendorOutcomeBase):
     """Input payload for recording a vendor outcome."""
-    submitted_by: Optional[str] = Field(default=None, description="User ID of the organizer recording the outcome")
+    source: Optional[str] = Field(default="ORGANIZER_REPORTED", description="Data provenance: ORGANIZER_REPORTED, AI_VOICE_CALL")
+    submitted_by: Optional[str] = Field(default=None, description="User ID of the organizer or agent recording the outcome")
 
 
 class VendorOutcomeResponse(VendorOutcomeBase):

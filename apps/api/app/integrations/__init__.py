@@ -8,7 +8,12 @@ from app.integrations.base import (
     VenueDirectoryProvider,
     ProviderDirectoryProvider,
 )
-from app.integrations.registry import IntegrationRegistry, registry
+def __getattr__(name: str):
+    if name in ("IntegrationRegistry", "registry"):
+        from app.integrations import registry as reg_module
+        return getattr(reg_module, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "IntegrationResult",

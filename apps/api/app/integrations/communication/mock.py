@@ -80,5 +80,39 @@ class MockCommunicationProvider(ProviderCommunicationProvider):
             latency_ms=1.0,
         )
 
+    def make_call(
+        self,
+        event_id: str,
+        provider_id: str,
+        recipient_phone: str,
+        task_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        custom_field: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> IntegrationResult[Dict[str, Any]]:
+        call_id = f"call-mock-{uuid.uuid4()}"
+        sid = session_id or f"sess-{uuid.uuid4()}"
+        record = {
+            "call_sid": call_id,
+            "session_id": sid,
+            "event_id": event_id,
+            "task_id": task_id,
+            "provider_id": provider_id,
+            "recipient_phone": recipient_phone,
+            "status": "QUEUED",
+            "direction": "OUTBOUND_CALL",
+            "channel": "EXOTEL_VOICE_MOCK",
+            "custom_field": custom_field,
+            "metadata": metadata or {},
+            "timestamp": time.time(),
+        }
+        self._history.append(record)
+        return IntegrationResult(
+            data=record,
+            source=IntegrationSource.MOCK,
+            success=True,
+            latency_ms=2.0,
+        )
+
     def clear(self):
         self._history.clear()

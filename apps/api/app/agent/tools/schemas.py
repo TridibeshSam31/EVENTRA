@@ -656,3 +656,26 @@ from app.schemas.execution_plan import (
     ResourceSummaryPlan,
     EventSummary,
 )
+
+
+class CallVendorInput(BaseModel):
+    event_id: str = Field(..., description="Unique event identifier")
+    task_id: str = Field(..., description="Target task requiring vendor engagement/recovery")
+    provider_id: str = Field(..., description="Vendor/provider to contact via voice call")
+    reason: Optional[str] = Field("P3_RECOVERY", description="Operational reason for outbound call")
+    recovery_option_id: Optional[str] = Field(None, description="Optional recovery option ID if executing P3 recovery")
+    call_objective: Optional[str] = Field(None, description="Deterministic objective for the call")
+
+
+class CallVendorOutput(BaseModel):
+    event_id: str = Field(..., description="Event identifier")
+    task_id: str = Field(..., description="Task identifier")
+    provider_id: str = Field(..., description="Provider identifier")
+    session_id: str = Field(..., description="Unique voice session identifier")
+    call_sid: Optional[str] = Field(None, description="Telephony call identifier")
+    recovery_option_id: Optional[str] = Field(None, description="Associated recovery option ID")
+    status: str = Field(..., description="Call initiation status: INITIATED, ALREADY_ACTIVE, BLOCKED, FAILED")
+    channel: str = Field("PHONE", description="Telephony channel")
+    message: str = Field(..., description="Human-readable status summary")
+    success: bool = Field(True, description="True if call initiation succeeded")
+
