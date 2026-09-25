@@ -50,8 +50,8 @@ class ImpactSeverityCalculator:
             if obj.get("priority") == "CRITICAL" and obj.get("status") == "AT_RISK":
                 return IncidentSeverity.CRITICAL.value
 
-        # Vendor no-show on any high/critical task
-        if incident_type == "VENDOR_NO_SHOW":
+        # Vendor no-show/failure on any high/critical task
+        if incident_type in ("VENDOR_NO_SHOW", "VENDOR_FAILURE", "VENDOR_CANCELLATION"):
             for task in direct_tasks:
                 if task.get("priority") in (TaskPriority.CRITICAL.value, TaskPriority.HIGH.value):
                     return IncidentSeverity.CRITICAL.value
@@ -69,7 +69,7 @@ class ImpactSeverityCalculator:
         if schedule_impact.get("delay_minutes", 0) >= 60:
             return IncidentSeverity.HIGH.value
 
-        if incident_type in ("VENDOR_NO_SHOW", "VENUE_ISSUE", "DEPENDENCY_FAILURE"):
+        if incident_type in ("VENDOR_NO_SHOW", "VENDOR_FAILURE", "VENDOR_CANCELLATION", "VENUE_ISSUE", "DEPENDENCY_FAILURE", "RESOURCE_UNAVAILABLE", "EQUIPMENT_FAILURE"):
             return IncidentSeverity.HIGH.value
 
         # 3. MEDIUM checks

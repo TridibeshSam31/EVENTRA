@@ -96,13 +96,36 @@ def observe_node(state: AgentState, config: Optional[RunnableConfig] = None) -> 
                 "affected_tasks": rec.affected_tasks,
             }
 
+    execution_result = state.get("execution_result")
+    if approval_id and not execution_result:
+        from app.models.action import ActionExecution
+        existing_exec = (
+            db.query(ActionExecution)
+            .filter(ActionExecution.approval_request_id == approval_id)
+            .order_by(ActionExecution.executed_at.desc())
+            .first()
+        )
+        if existing_exec:
+            execution_result = {
+                "id": existing_exec.id,
+                "action_id": existing_exec.action_id,
+                "status": existing_exec.status,
+                "action_type": existing_exec.action_type,
+                "recovery_option_id": existing_exec.recovery_option_id,
+                "executed_at": existing_exec.executed_at.isoformat() if existing_exec.executed_at else None,
+            }
+
     return {
         "current_event_state": event_state,
         "current_incidents": incidents,
         "active_incident_id": active_incident_id,
         "selected_option": selected_option,
         "approval_result": approval_record,
+        "execution_result": execution_result,
         "pending_approval": not approval_granted if approval_id else state.get("pending_approval", False),
+        "recovery_attempts": state.get("recovery_attempts") or [],
+        "attempt_count": state.get("attempt_count") or 0,
+        "max_recovery_attempts": state.get("max_recovery_attempts") or 3,
         "current_phase": "OBSERVE",
         "status": "OBSERVING",
     }
@@ -201,6 +224,25 @@ def decide_next_step_node(state: AgentState, config: Optional[RunnableConfig] = 
             "current_phase": "TERMINATED",
         }
 
+    # Bounded recovery attempts safeguard
+    attempt_count = state.get("attempt_count") or 0
+    max_recovery_attempts = state.get("max_recovery_attempts") or 3
+    if attempt_count >= max_recovery_attempts:
+        decision = AgentDecision(
+            decision_type=DecisionType.FAIL,
+            reason_code=ReasonCode.UNRECOVERABLE_STATE.value,
+            rationale=f"Agent exceeded maximum recovery attempts ({max_recovery_attempts}) without achieving verified recovery.",
+            terminate=True,
+            termination_status="RECOVERY_FAILED",
+        )
+        return {
+            "last_decision": decision.model_dump(),
+            "status": "RECOVERY_FAILED",
+            "termination_status": "RECOVERY_FAILED",
+            "error": "MAX_RECOVERY_ATTEMPTS_EXCEEDED",
+            "current_phase": "TERMINATED",
+        }
+
     # Loop ping-pong safeguard: detect 3 identical consecutive tool calls
     if len(tool_history) >= 3:
         last_three = tool_history[-3:]
@@ -264,6 +306,9 @@ def decide_next_step_node(state: AgentState, config: Optional[RunnableConfig] = 
         "approval_id": state.get("approval_id"),
         "execution_result": state.get("execution_result"),
         "verification_result": state.get("verification_result"),
+        "recovery_attempts": state.get("recovery_attempts") or [],
+        "attempt_count": state.get("attempt_count") or 0,
+        "max_recovery_attempts": state.get("max_recovery_attempts") or 3,
     }
 
     available_tools = default_registry.get_tool_schemas()
@@ -610,6 +655,9 @@ def verify_node(state: AgentState, config: Optional[RunnableConfig] = None) -> D
     exec_result = state.get("execution_result") or {}
     action_execution_id = exec_result.get("id") or exec_result.get("action_id") or ""
     step_count = state.get("step_count", 0) + 1
+    selected = state.get("selected_option") or {}
+    attempt_count = (state.get("attempt_count") or 0) + 1
+    max_recovery_attempts = state.get("max_recovery_attempts") or 3
 
     verification = verify_action(
         db=db,
@@ -620,7 +668,7 @@ def verify_node(state: AgentState, config: Optional[RunnableConfig] = None) -> D
 
     decision_trace = get_decision_trace(db, event_id, verification.get("id"))
     ver_status = verification.get("status", "FAILED")
-    is_verified = ver_status in ("VERIFIED", "PARTIALLY_VERIFIED")
+    is_verified = (ver_status == "VERIFIED")
 
     tool_history = list(state.get("tool_history", []))
     tool_history.append({
@@ -632,15 +680,61 @@ def verify_node(state: AgentState, config: Optional[RunnableConfig] = None) -> D
         "result_summary": f"Verification outcome: {ver_status}",
     })
 
-    return {
+    recovery_attempts = list(state.get("recovery_attempts") or [])
+    if not is_verified:
+        recovery_attempts.append({
+            "attempt": attempt_count,
+            "recovery_option_id": selected.get("id") or exec_result.get("recovery_option_id"),
+            "status": "RECOVERY_FAILED",
+            "failure_reasons": verification.get("failure_reasons") or [],
+            "verification_status": ver_status,
+            "verification_id": verification.get("id"),
+        })
+
+    updates: Dict[str, Any] = {
         "verification_result": verification,
         "decision_trace": decision_trace,
         "verification_status": ver_status,
         "step_count": step_count,
         "tool_history": tool_history,
-        "status": "VERIFIED" if is_verified else "FAILED",
+        "recovery_attempts": recovery_attempts,
+        "attempt_count": attempt_count,
+        "max_recovery_attempts": max_recovery_attempts,
         "current_phase": "VERIFY",
     }
+
+    if is_verified:
+        updates["status"] = "VERIFIED"
+    else:
+        updates["status"] = "RECOVERY_FAILED"
+        if attempt_count < max_recovery_attempts:
+            updates["execution_result"] = None
+            updates["selected_option"] = None
+            updates["action_status"] = "RECOVERY_FAILED"
+        else:
+            updates["termination_status"] = "RECOVERY_FAILED"
+            fail_reasons = verification.get("failure_reasons") or []
+            updates["error"] = f"Recovery failed after {attempt_count} attempts: {'; '.join(fail_reasons)}"
+
+    return updates
+
+
+def route_after_verify(state: AgentState) -> str:
+    """Routes after post-action verification.
+    
+    If verified -> end_completed.
+    If recovery failed and under max attempts -> observe (re-observes and triggers retry loop).
+    If attempts exhausted -> end_failed.
+    """
+    if state.get("status") == "VERIFIED" or state.get("verification_status") == "VERIFIED":
+        return "end_completed"
+
+    attempt_count = state.get("attempt_count") or 0
+    max_attempts = state.get("max_recovery_attempts") or 3
+    if attempt_count < max_attempts:
+        return "observe"
+
+    return "end_failed"
 
 
 def end_completed_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
@@ -678,9 +772,12 @@ def end_failed_node(state: AgentState, config: Optional[RunnableConfig] = None) 
     context = {"error": err, "status": "FAILED"}
     final_resp = llm.format_operational_response("FAILED", context)
 
+    status = "RECOVERY_FAILED" if state.get("status") == "RECOVERY_FAILED" or state.get("termination_status") == "RECOVERY_FAILED" else "FAILED"
+    term_status = state.get("termination_status") or "FAILED"
+
     return {
-        "status": "FAILED",
-        "termination_status": state.get("termination_status") or "FAILED",
+        "status": status,
+        "termination_status": term_status,
         "final_response": f"Operational action halted: {err}",
         "error": err,
         "current_phase": "TERMINATED",
@@ -771,9 +868,10 @@ class EventOperationsAgentGraph:
         # Verify routing
         builder.add_conditional_edges(
             "verify",
-            lambda s: "end_completed" if s.get("status") in ("VERIFIED", "COMPLETED") else "end_failed",
+            route_after_verify,
             {
                 "end_completed": "end_completed",
+                "observe": "observe",
                 "end_failed": "end_failed",
             },
         )

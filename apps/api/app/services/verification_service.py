@@ -182,6 +182,16 @@ class VerificationService:
         self.db.add(ver)
         self.db.flush()
 
+        # If fully verified and there was an associated incident, resolve the incident
+        if final_status == VerificationStatus.VERIFIED and incident and incident.status != "RESOLVED":
+            from app.services.incident_service import IncidentService
+            IncidentService(self.db).resolve_incident(
+                event_id=event_id,
+                incident_id=incident.id,
+                resolution_notes=f"Resolved via verified recovery action: {action.action_type}",
+                current_user_id=current_user_id,
+            )
+
         # 8. Record Audit Trail
         self._audit.record(
             event_id=event_id,

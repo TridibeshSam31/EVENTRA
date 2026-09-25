@@ -40,3 +40,12 @@ export async function getRecoveryOption(
     `/events/${eventId}/incidents/${incidentId}/recovery/options/${optionId}`
   );
 }
+
+export async function getRecoveryDecisionTrace(
+  eventId: string,
+  incidentId: string
+): Promise<any> {
+  return apiClient.get<any>(
+    `/events/${eventId}/incidents/${incidentId}/recovery/trace`
+  );
+}

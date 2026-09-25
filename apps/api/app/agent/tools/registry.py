@@ -157,6 +157,17 @@ class GetDecisionTraceInput(BaseModel):
     verification_id: Optional[str] = Field(None, description="Optional verification ID")
 
 
+class GetRecoveryStatusInput(BaseModel):
+    event_id: str = Field(..., description="Event UUID")
+    incident_id: Optional[str] = Field(None, description="Optional incident UUID")
+
+
+InspectIncidentInput = GetIncidentDetailsInput
+RunImpactAnalysisInput = AnalyzeImpactInput
+ExecuteRecoveryInput = ExecuteActionInput
+VerifyRecoveryInput = VerifyActionInput
+
+
 # --- Central Tool Registry for Task 4 ---
 
 class ToolRegistry:
@@ -632,6 +643,38 @@ def _handle_get_decision_trace(db: Session, user_id: str, event_id: str, verific
     return get_decision_trace(db, event_id, verification_id)
 
 
+def _handle_get_recovery_status(db: Session, user_id: str, event_id: str, incident_id: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    """Inspects authoritative status of recovery pipeline for an incident or event."""
+    from app.models.incident import Incident
+    from app.models.recovery import Recovery
+    from app.models.action import ActionExecution
+    from app.models.verification import VerificationResult
+
+    inc_q = db.query(Incident).filter(Incident.event_id == event_id)
+    if incident_id:
+        inc = inc_q.filter(Incident.id == incident_id).first()
+    else:
+        inc = inc_q.filter(Incident.status != "RESOLVED").order_by(Incident.detected_at.desc()).first()
+
+    inc_id = inc.id if inc else incident_id
+    options = db.query(Recovery).filter(Recovery.event_id == event_id, Recovery.incident_id == inc_id).all() if inc_id else []
+    latest_exec = db.query(ActionExecution).filter(ActionExecution.event_id == event_id).order_by(ActionExecution.executed_at.desc()).first()
+    latest_ver = db.query(VerificationResult).filter(VerificationResult.event_id == event_id).order_by(VerificationResult.verified_at.desc()).first()
+
+    return {
+        "event_id": event_id,
+        "incident_id": inc_id,
+        "incident_status": inc.status if inc else None,
+        "incident_severity": inc.severity if inc else None,
+        "options_count": len(options),
+        "feasible_options_count": sum(1 for o in options if o.is_feasible),
+        "latest_execution_id": latest_exec.id if latest_exec else None,
+        "latest_action_status": latest_exec.status if latest_exec else None,
+        "is_verified": (latest_ver.status == "VERIFIED") if latest_ver else False,
+        "verification_status": latest_ver.status if latest_ver else None,
+    }
+
+
 def create_default_functional_tool_registry() -> ToolRegistry:
     """Builds and populates the default central ToolRegistry for Task 4 agent loop."""
     registry = ToolRegistry()
@@ -846,6 +889,44 @@ def create_default_functional_tool_registry() -> ToolRegistry:
         category=ToolCategory.READ,
         parameters_schema=GetDecisionTraceInput,
         handler=_handle_get_decision_trace,
+    )
+    registry.register(
+        name="inspect_incident",
+        description="Retrieves full details, evidence, and affected entities for a specific incident.",
+        category=ToolCategory.READ,
+        parameters_schema=InspectIncidentInput,
+        handler=_handle_get_incident_details,
+    )
+    registry.register(
+        name="run_impact_analysis",
+        description="Runs deterministic graph traversal to compute downstream affected tasks and critical path impact.",
+        category=ToolCategory.READ,
+        parameters_schema=RunImpactAnalysisInput,
+        handler=_handle_analyze_impact,
+    )
+    registry.register(
+        name="execute_recovery",
+        description="Executes an authorized/approved operational recovery option through ActionService. Requires approval.",
+        category=ToolCategory.WRITE,
+        parameters_schema=ExecuteRecoveryInput,
+        handler=_handle_execute_action,
+        requires_approval=True,
+        permission_action="EXECUTE_RECOVERY",
+    )
+    registry.register(
+        name="verify_recovery",
+        description="Executes authoritative multi-domain verification to confirm whether operational recovery succeeded.",
+        category=ToolCategory.WRITE,
+        parameters_schema=VerifyRecoveryInput,
+        handler=_handle_verify_action,
+        requires_approval=False,
+    )
+    registry.register(
+        name="get_recovery_status",
+        description="Inspects authoritative status of recovery pipeline for an incident or event.",
+        category=ToolCategory.READ,
+        parameters_schema=GetRecoveryStatusInput,
+        handler=_handle_get_recovery_status,
     )
 
     return registry

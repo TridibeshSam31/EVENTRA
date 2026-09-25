@@ -48,6 +48,33 @@ class DecisionTraceService:
             return None
         return self._build_trace(ver)
 
+    def get_trace_by_incident_id(self, event_id: str, incident_id: str) -> Optional[Dict[str, Any]]:
+        """Builds a decision trace for an incident by finding its recovery option and verification."""
+        recovery_opts = (
+            self.db.query(Recovery)
+            .filter(Recovery.event_id == event_id, Recovery.incident_id == incident_id)
+            .all()
+        )
+        rec_ids = [r.id for r in recovery_opts]
+        ver = None
+        if rec_ids:
+            ver = (
+                self.db.query(VerificationResult)
+                .filter(VerificationResult.event_id == event_id, VerificationResult.recovery_option_id.in_(rec_ids))
+                .order_by(VerificationResult.verified_at.desc())
+                .first()
+            )
+        if not ver:
+            ver = (
+                self.db.query(VerificationResult)
+                .filter(VerificationResult.event_id == event_id)
+                .order_by(VerificationResult.verified_at.desc())
+                .first()
+            )
+        if not ver:
+            return None
+        return self._build_trace(ver)
+
     def _build_trace(self, ver: VerificationResult) -> Dict[str, Any]:
         """Constructs a deterministic factual trace linking the recovery pipeline."""
         act_exec = None

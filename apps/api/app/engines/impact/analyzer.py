@@ -122,7 +122,7 @@ class ImpactAnalyzer:
                         direct_task_ids.add(task_id)
 
         # If related_venue_id is provided, all setup/facility tasks are affected
-        if related_venue_id and incident_type in ("VENUE_ISSUE", "CAPACITY_PROBLEM"):
+        if related_venue_id and incident_type in ("VENUE_ISSUE", "CAPACITY_PROBLEM", "CAPACITY_CHANGE"):
             for tid, t in tasks_by_id.items():
                 phase = t.get("phase") if isinstance(t, dict) else getattr(t, "phase", "")
                 cat = t.get("required_provider_category") if isinstance(t, dict) else getattr(t, "required_provider_category", "")
@@ -165,14 +165,14 @@ class ImpactAnalyzer:
         # 3. Schedule Impact
         delay_minutes = metadata.get("delay_minutes", 0)
         if not delay_minutes:
-            if incident_type == "VENDOR_DELAY":
+            if incident_type in ("VENDOR_DELAY", "SCHEDULE_SLIP"):
                 delay_minutes = 60
-            elif incident_type == "VENDOR_NO_SHOW":
+            elif incident_type in ("VENDOR_NO_SHOW", "VENDOR_FAILURE", "VENDOR_CANCELLATION"):
                 # Default delay is duration of direct task or 120
                 delay_minutes = max((t.get("duration_minutes", 60) for t in direct_tasks_data), default=120)
-            elif incident_type == "SCHEDULE_DEVIATION":
+            elif incident_type in ("SCHEDULE_DEVIATION", "TASK_DELAY"):
                 delay_minutes = metadata.get("deviation_minutes", 30)
-            elif incident_type in ("RESOURCE_SHORTAGE", "VENUE_ISSUE", "DEPENDENCY_FAILURE"):
+            elif incident_type in ("RESOURCE_SHORTAGE", "RESOURCE_UNAVAILABLE", "EQUIPMENT_FAILURE", "VENUE_ISSUE", "DEPENDENCY_FAILURE", "CAPACITY_CHANGE"):
                 delay_minutes = 45
 
         # Slack evaluation

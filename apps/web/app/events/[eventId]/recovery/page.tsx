@@ -21,6 +21,7 @@ import {
   listRecoveryOptions,
   generateRecoveryOptions,
   recalculateRecoveryOptions,
+  getRecoveryDecisionTrace,
 } from "../../../../lib/api/recovery";
 import { executeRecoveryOption } from "../../../../lib/api/actions";
 import { listIncidents } from "../../../../lib/api/incidents";
@@ -48,6 +49,8 @@ export default function RecoveryPage() {
   const [executingId, setExecutingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [executionResult, setExecutionResult] = useState<ActionSubmissionResponse | null>(null);
+  const [decisionTrace, setDecisionTrace] = useState<any | null>(null);
+  const [verificationOutcome, setVerificationOutcome] = useState<any | null>(null);
 
   // Load incidents to populate incident selector
   useEffect(() => {
@@ -67,9 +70,9 @@ export default function RecoveryPage() {
     }
   }, [eventId, selectedIncidentId]);
 
-  // Load recovery options when selectedIncidentId changes
+  // Load recovery options and decision trace when selectedIncidentId changes
   useEffect(() => {
-    async function fetchOptions() {
+    async function fetchOptionsAndTrace() {
       if (!selectedIncidentId) return;
       try {
         setLoading(true);
@@ -78,14 +81,23 @@ export default function RecoveryPage() {
         const res = await listRecoveryOptions(eventId, selectedIncidentId);
         setOptions(res.items || []);
         setStateSnapshot(res.state_snapshot || "");
+        
+        try {
+          const trace = await getRecoveryDecisionTrace(eventId, selectedIncidentId);
+          setDecisionTrace(trace && Object.keys(trace).length > 0 ? trace : null);
+          if (trace?.verification) {
+            setVerificationOutcome(trace.verification);
+          }
+        } catch {
+          setDecisionTrace(null);
+        }
       } catch (err: unknown) {
-        // If not generated yet, options list might be empty or 404
         setOptions([]);
       } finally {
         setLoading(false);
       }
     }
-    fetchOptions();
+    fetchOptionsAndTrace();
   }, [eventId, selectedIncidentId]);
 
   async function handleGenerate() {
@@ -131,7 +143,13 @@ export default function RecoveryPage() {
       if (res.decision?.requires_approval) {
         // Governance gate triggered
       } else if (res.execution?.status === "SUCCESS") {
-        // State updated, refresh options
+        try {
+          const trace = await getRecoveryDecisionTrace(eventId, selectedIncidentId);
+          setDecisionTrace(trace && Object.keys(trace).length > 0 ? trace : null);
+          if (trace?.verification) {
+            setVerificationOutcome(trace.verification);
+          }
+        } catch {}
         await handleRecalculate();
       }
     } catch (err: unknown) {
@@ -280,6 +298,101 @@ export default function RecoveryPage() {
                 <ArrowRight className="w-3.5 h-3.5" />
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Verification Status Banner */}
+      {verificationOutcome && (
+        <div
+          className={`p-4 rounded-xl border ${
+            verificationOutcome.status === "VERIFIED"
+              ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+              : "border-rose-500/40 bg-rose-500/10 text-rose-200"
+          } space-y-2`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 font-bold text-xs">
+              {verificationOutcome.status === "VERIFIED" ? (
+                <>
+                  <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  Deterministic Multi-Domain Verification: RECOVERY VERIFIED
+                </>
+              ) : (
+                <>
+                  <AlertTriangle className="w-4 h-4 text-rose-400" />
+                  Deterministic Multi-Domain Verification: RECOVERY FAILED
+                </>
+              )}
+            </div>
+            <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-black/40 border border-white/10 uppercase">
+              {verificationOutcome.status}
+            </span>
+          </div>
+
+          {verificationOutcome.failure_reasons?.length > 0 && (
+            <div className="text-[11px] opacity-90 pl-6 space-y-1">
+              <span className="font-semibold text-rose-300">Failure Diagnostics:</span>
+              <ul className="list-disc pl-4 space-y-0.5">
+                {verificationOutcome.failure_reasons.map((reason: string, rIdx: number) => (
+                  <li key={rIdx}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {verificationOutcome.status !== "VERIFIED" && (
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={handleRecalculate}
+                className="px-3 py-1 rounded-lg bg-rose-500 text-white font-bold text-xs hover:bg-rose-400 transition-colors shadow-sm"
+              >
+                Attempt Alternative Strategy
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Decision Trace Stream (when available) */}
+      {decisionTrace && (
+        <div className="p-4 rounded-xl border border-primary/30 bg-card/60 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-primary" />
+              <span className="text-xs font-bold text-foreground">
+                Authoritative Decision Trace
+              </span>
+              <span className="font-mono text-[10px] text-muted-foreground">
+                ({decisionTrace.trace_id})
+              </span>
+            </div>
+            <span className="text-[10px] text-muted-foreground font-mono">
+              Verified: {decisionTrace.verification?.status}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+            <div className="p-2.5 rounded-lg bg-background/50 border border-border/40">
+              <div className="text-muted-foreground uppercase text-[9px] font-semibold">1. Incident</div>
+              <div className="font-bold text-foreground truncate">{decisionTrace.incident?.title || "Active Incident"}</div>
+              <div className="text-[10px] text-muted-foreground">{decisionTrace.incident?.type}</div>
+            </div>
+            <div className="p-2.5 rounded-lg bg-background/50 border border-border/40">
+              <div className="text-muted-foreground uppercase text-[9px] font-semibold">2. Strategy</div>
+              <div className="font-bold text-foreground">{decisionTrace.recovery_option?.strategy_type || "N/A"}</div>
+              <div className="text-[10px] text-muted-foreground">Score: {decisionTrace.recovery_option?.score ?? "N/A"}</div>
+            </div>
+            <div className="p-2.5 rounded-lg bg-background/50 border border-border/40">
+              <div className="text-muted-foreground uppercase text-[9px] font-semibold">3. Governance</div>
+              <div className="font-bold text-foreground">{decisionTrace.approval?.status || "DIRECT"}</div>
+              <div className="text-[10px] text-muted-foreground">Level: {decisionTrace.approval?.impact_level || "STANDARD"}</div>
+            </div>
+            <div className="p-2.5 rounded-lg bg-background/50 border border-border/40">
+              <div className="text-muted-foreground uppercase text-[9px] font-semibold">4. Verification</div>
+              <div className="font-bold text-emerald-400">{decisionTrace.verification?.status}</div>
+              <div className="text-[10px] text-muted-foreground">State: {decisionTrace.event_state?.state_after}</div>
+            </div>
           </div>
         </div>
       )}

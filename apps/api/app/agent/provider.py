@@ -753,22 +753,37 @@ class MockLLMProvider(LLMProvider):
                     rationale="Invoking deterministic RecoveryEngine to compute feasible candidate options",
                 )
             
-            # Step 6: Propose action (Option B: Backup / Reassign)
+            # Step 6: Propose action with retry and alternative candidate selection
+            recovery_attempts = operational_context.get("recovery_attempts") or []
+            failed_opt_ids = {att.get("recovery_option_id") for att in recovery_attempts if att.get("status") == "RECOVERY_FAILED"}
+            
             recovery_options = operational_context.get("recovery_options") or []
-            feasible_options = [o for o in recovery_options if o.get("is_feasible")]
+            feasible_options = [o for o in recovery_options if o.get("is_feasible") and o.get("id") not in failed_opt_ids]
+
+            if not feasible_options and failed_opt_ids:
+                return AgentDecision(
+                    decision_type=DecisionType.FAIL,
+                    reason_code=ReasonCode.VERIFICATION_FAILED.value,
+                    rationale=f"All feasible recovery options exhausted across {len(recovery_attempts)} attempts without successful verification.",
+                    terminate=True,
+                    termination_status="RECOVERY_FAILED",
+                )
+
             backup_opts = [o for o in feasible_options if str(o.get("strategy_type", "")).upper() in ("BACKUP", "REASSIGN", "REASSIGN_VENDOR")]
             selected = backup_opts[0] if backup_opts else (feasible_options[0] if feasible_options else (recovery_options[0] if recovery_options else None))
             selected_id = selected.get("id") if selected else "rec-1"
+            strat_name = str(selected.get("strategy_type", "REASSIGN_VENDOR")).upper() if selected else "REASSIGN_VENDOR"
             
-            # Check if action already executed
-            if "execute_action" not in hist_tools:
+            # Check if action already executed for the current attempt
+            has_executed_current = bool(operational_context.get("execution_result"))
+            if not has_executed_current:
                 if operational_context.get("approval_granted") or operational_context.get("approval_id"):
                     return AgentDecision(
                         decision_type=DecisionType.TOOL_CALL,
                         tool_name="execute_action",
                         tool_arguments={"recovery_option_id": selected_id},
                         reason_code=ReasonCode.APPROVAL_GRANTED.value,
-                        rationale="Executing approved recovery action through ActionService",
+                        rationale=f"Executing approved recovery action ({strat_name}) through ActionService",
                     )
                 return AgentDecision(
                     decision_type=DecisionType.PROPOSE_ACTION,
@@ -776,14 +791,16 @@ class MockLLMProvider(LLMProvider):
                     tool_arguments={"recovery_option_id": selected_id},
                     reason_code=ReasonCode.RECOVERY_OPTION_FEASIBLE.value,
                     action_intent="REASSIGN_VENDOR",
-                    rationale=f"Recommending feasible recovery strategy ({selected.get('strategy_type', 'REASSIGN_VENDOR') if selected else 'REASSIGN_VENDOR'}); requires operator approval",
+                    rationale=f"Recommending feasible recovery strategy ({strat_name}); requires operator approval",
                     requires_approval=True,
                 )
                 
             # Step 7: Post-mutation verification
-            if "verify_action" not in hist_tools:
-                exec_res = operational_context.get("execution_result") or {}
-                exec_id = exec_res.get("id") or exec_res.get("action_id") or "exec-1"
+            exec_res = operational_context.get("execution_result") or {}
+            exec_id = exec_res.get("id") or exec_res.get("action_id") or "exec-1"
+            ver_res = operational_context.get("verification_result") or {}
+
+            if not ver_res or ver_res.get("action_execution_id") != exec_id:
                 return AgentDecision(
                     decision_type=DecisionType.TOOL_CALL,
                     tool_name="verify_action",
@@ -793,7 +810,6 @@ class MockLLMProvider(LLMProvider):
                 )
             
             # Step 8: Verify result
-            ver_res = operational_context.get("verification_result") or {}
             ver_status = ver_res.get("status")
             if ver_status in ("VERIFIED", "PARTIALLY_VERIFIED", "SUCCESS") or last_status in ("SUCCESS", "VERIFIED"):
                 return AgentDecision(

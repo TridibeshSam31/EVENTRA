@@ -44,6 +44,9 @@ class AgentState(TypedDict, total=False):
     action_status: Optional[str]  # PROPOSED, AUTHORIZED, PENDING_APPROVAL, EXECUTED, FAILED
     verification_status: Optional[str]  # PENDING, VERIFIED, PARTIALLY_VERIFIED, VERIFICATION_FAILED
     pending_approval: bool
+    recovery_attempts: Optional[List[Dict[str, Any]]]
+    attempt_count: Optional[int]
+    max_recovery_attempts: Optional[int]
     
     # Provider Operations (communication, negotiation, confirmation)
     operational_intent: Optional[str]
