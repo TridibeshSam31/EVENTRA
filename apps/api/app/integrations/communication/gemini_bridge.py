@@ -33,8 +33,11 @@ from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.integrations.communication.audio_converter import AudioConverter
-from app.integrations.communication.exotel_gateway import (
+from app.integrations.communication.voice_session import (
+    VoiceSession,
     AudioStreamListener,
+)
+from app.integrations.communication.exotel_gateway import (
     ExotelVoiceSession,
     SessionState,
 )
@@ -70,7 +73,7 @@ class TranscriptEntry(BaseModel):
 # 2. Context Sanitization (Backward compatible wrapper)
 # ---------------------------------------------------------------------------
 
-def sanitize_voice_context(session: ExotelVoiceSession) -> SanitizedVoiceContext:
+def sanitize_voice_context(session: VoiceSession) -> SanitizedVoiceContext:
     """Backward-compatible helper invoking VoiceContextBuilder."""
     builder = VoiceContextBuilder()
     return builder.build_from_session(session)

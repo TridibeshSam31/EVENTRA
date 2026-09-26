@@ -95,6 +95,15 @@ class Settings(BaseSettings):
     EXOTEL_CALLBACK_URL: Union[str, None] = None
     EXOTEL_TIMEOUT_SECONDS: int = 10
 
+    # Twilio telephony configuration (Primary voice provider unblocked for student accounts)
+    TWILIO_ENABLED: bool = False
+    TWILIO_ACCOUNT_SID: Union[str, None] = None
+    TWILIO_AUTH_TOKEN: Union[str, None] = None
+    TWILIO_CALLER_NUMBER: Union[str, None] = None
+    TWILIO_STREAM_URL: Union[str, None] = None  # WSS endpoint for Twilio Media Streams
+    TWILIO_CALLBACK_URL: Union[str, None] = None
+    TWILIO_TIMEOUT_SECONDS: int = 15
+
     LLM_PROVIDER: str = "mock"  # "mock", "gemini"
     LLM_MODEL: str = "gemini-3.6-flash"
     LLM_API_KEY: Union[str, None] = None

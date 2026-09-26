@@ -31,9 +31,29 @@ async def exotel_voice_stream(websocket: WebSocket):
         logger.error("Unhandled error in Exotel voice stream endpoint: %s", exc)
 
 
+from app.integrations.communication.twilio_gateway import twilio_voice_gateway
+from app.integrations.registry import registry
+
+# Register default Gemini Live bridge listener factory for Twilio
+if not twilio_voice_gateway._listener_factory:
+    twilio_voice_gateway.register_listener_factory(create_gemini_bridge_factory())
+
+
+@router.websocket("/voice/twilio/stream")
+@router.websocket("/api/v1/voice/twilio/stream")
+async def twilio_voice_stream(websocket: WebSocket):
+    """Bidirectional WebSocket endpoint for Twilio Media Streams audio streaming."""
+    logger.info("Twilio voice stream WebSocket connection initiated.")
+    try:
+        await twilio_voice_gateway.handle_connection(websocket)
+    except WebSocketDisconnect:
+        logger.info("Twilio voice stream client disconnected normally.")
+    except Exception as exc:
+        logger.error("Unhandled error in Twilio voice stream endpoint: %s", exc)
+
+
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
-from app.integrations.communication.exotel import ExotelVoiceAdapter
 from app.core.config import settings
 
 class InitiateCallRequest(BaseModel):
@@ -47,17 +67,29 @@ class InitiateCallRequest(BaseModel):
 @router.post("/voice/call")
 @router.post("/api/v1/voice/call")
 def initiate_voice_call(payload: InitiateCallRequest):
-    """Initiates an outbound telephony call to a phone number via Exotel."""
-    adapter = ExotelVoiceAdapter()
-    result = adapter.make_call(
-        event_id=payload.event_id or "default-event",
-        provider_id=payload.provider_id or payload.vendor_name or "vendor-1",
-        recipient_phone=payload.recipient_phone,
-        task_id=payload.task_id or "task-briefing",
-    )
+    """Initiates an outbound telephony call to a phone number via configured voice provider (Twilio or Exotel)."""
+    adapter = registry.get_communication_provider()
+    # If resolved provider has make_call, invoke it
+    if hasattr(adapter, "make_call"):
+        result = adapter.make_call(
+            event_id=payload.event_id or "default-event",
+            provider_id=payload.provider_id or payload.vendor_name or "vendor-1",
+            recipient_phone=payload.recipient_phone,
+            task_id=payload.task_id or "task-briefing",
+        )
+    else:
+        # Fall back to Exotel adapter directly if communication provider is OpenWA/mock
+        from app.integrations.communication.exotel import ExotelVoiceAdapter
+        adapter = ExotelVoiceAdapter()
+        result = adapter.make_call(
+            event_id=payload.event_id or "default-event",
+            provider_id=payload.provider_id or payload.vendor_name or "vendor-1",
+            recipient_phone=payload.recipient_phone,
+            task_id=payload.task_id or "task-briefing",
+        )
     return {
         "success": result.success,
-        "source": result.source.value,
+        "source": result.source.value if hasattr(result.source, "value") else result.source,
         "data": result.data,
         "error": result.error,
     }

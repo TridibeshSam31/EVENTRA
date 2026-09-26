@@ -67,8 +67,11 @@ class AudioConverter:
         encoding: str = "audio/l16",
         gemini_input_sample_rate: int = 16000,
         gemini_output_sample_rate: int = 24000,
+        telephony_sample_rate: Optional[int] = None,
     ):
-        self.exotel_sample_rate: int = int(exotel_sample_rate or 8000)
+        eff_rate = telephony_sample_rate if telephony_sample_rate is not None else exotel_sample_rate
+        self.exotel_sample_rate: int = int(eff_rate or 8000)
+        self.telephony_sample_rate: int = self.exotel_sample_rate
         self.encoding: str = (encoding or "").strip().lower()
         self.is_mulaw: bool = "mulaw" in self.encoding or "u-law" in self.encoding
         self.gemini_input_sample_rate: int = int(gemini_input_sample_rate)
@@ -167,6 +170,14 @@ class AudioConverter:
                 return self._linear_to_ulaw(resampled_pcm)
 
         return resampled_pcm
+
+    def telephony_to_gemini(self, audio_bytes: bytes) -> bytes:
+        """Provider-agnostic alias for converting inbound telephony audio to Gemini input (16 kHz PCM16)."""
+        return self.exotel_to_gemini(audio_bytes)
+
+    def gemini_to_telephony(self, pcm_bytes: bytes) -> bytes:
+        """Provider-agnostic alias for converting Gemini output (24 kHz PCM16) to outbound telephony audio."""
+        return self.gemini_to_exotel(pcm_bytes)
 
     @staticmethod
     def _ulaw_to_linear(ulaw_bytes: bytes) -> bytes:

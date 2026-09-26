@@ -64,7 +64,17 @@ class IntegrationRegistry:
     def get_communication_provider(self) -> ProviderCommunicationProvider:
         if not self._communication_provider:
             comm_type = (settings.COMMUNICATION_PROVIDER or "mock").lower()
-            if comm_type == "exotel":
+            if comm_type == "twilio":
+                from app.integrations.communication.twilio import TwilioVoiceAdapter
+                self._communication_provider = TwilioVoiceAdapter(
+                    account_sid=settings.TWILIO_ACCOUNT_SID,
+                    auth_token=settings.TWILIO_AUTH_TOKEN,
+                    caller_number=settings.TWILIO_CALLER_NUMBER,
+                    stream_url=settings.TWILIO_STREAM_URL,
+                    callback_url=settings.TWILIO_CALLBACK_URL,
+                    timeout_seconds=settings.TWILIO_TIMEOUT_SECONDS,
+                )
+            elif comm_type == "exotel":
                 self._communication_provider = ExotelVoiceAdapter(
                     api_key=settings.EXOTEL_API_KEY,
                     api_token=settings.EXOTEL_API_TOKEN,
@@ -83,6 +93,16 @@ class IntegrationRegistry:
                     session_id=settings.OPENWA_SESSION_ID,
                     webhook_secret=settings.OPENWA_WEBHOOK_SECRET,
                     timeout_seconds=settings.OPENWA_TIMEOUT_SECONDS,
+                )
+            elif settings.TWILIO_ENABLED:
+                from app.integrations.communication.twilio import TwilioVoiceAdapter
+                self._communication_provider = TwilioVoiceAdapter(
+                    account_sid=settings.TWILIO_ACCOUNT_SID,
+                    auth_token=settings.TWILIO_AUTH_TOKEN,
+                    caller_number=settings.TWILIO_CALLER_NUMBER,
+                    stream_url=settings.TWILIO_STREAM_URL,
+                    callback_url=settings.TWILIO_CALLBACK_URL,
+                    timeout_seconds=settings.TWILIO_TIMEOUT_SECONDS,
                 )
             elif settings.EXOTEL_ENABLED:
                 self._communication_provider = ExotelVoiceAdapter(
@@ -124,8 +144,15 @@ class IntegrationRegistry:
         comm_prov = self.get_communication_provider()
         scraper_prov = self.get_google_maps_scraper()
 
+        from app.integrations.communication.twilio import TwilioVoiceAdapter
+        twilio_configured = bool(
+            settings.TWILIO_ACCOUNT_SID
+            and settings.TWILIO_AUTH_TOKEN
+            and settings.TWILIO_CALLER_NUMBER
+        )
         comm_is_real = (
             (isinstance(comm_prov, OpenWACommunicationAdapter) and settings.OPENWA_ENABLED and bool(settings.OPENWA_SESSION_ID))
+            or (isinstance(comm_prov, TwilioVoiceAdapter) and settings.TWILIO_ENABLED and comm_prov.is_configured)
             or (isinstance(comm_prov, ExotelVoiceAdapter) and settings.EXOTEL_ENABLED and comm_prov.is_configured)
         )
         exotel_configured = bool(
@@ -139,14 +166,18 @@ class IntegrationRegistry:
             "mode": "REAL" if comm_is_real else "MOCK",
             "openwa_enabled": settings.OPENWA_ENABLED,
             "whatsapp_enabled": settings.WHATSAPP_ENABLED or settings.OPENWA_ENABLED,
+            "twilio_enabled": settings.TWILIO_ENABLED,
+            "twilio_configured": twilio_configured,
             "exotel_enabled": settings.EXOTEL_ENABLED,
             "exotel_configured": exotel_configured,
-            "is_configured": bool(settings.OPENWA_SESSION_ID) or exotel_configured,
+            "is_configured": bool(settings.OPENWA_SESSION_ID) or twilio_configured or exotel_configured,
             "session_id": settings.OPENWA_SESSION_ID if settings.OPENWA_ENABLED else None,
             "base_url": settings.OPENWA_BASE_URL if settings.OPENWA_ENABLED else None,
         }
         if isinstance(comm_prov, OpenWACommunicationAdapter) and settings.OPENWA_ENABLED:
             comm_status["gateway_health"] = comm_prov.check_health()
+        elif isinstance(comm_prov, TwilioVoiceAdapter) and settings.TWILIO_ENABLED:
+            comm_status["twilio_health"] = comm_prov.check_health()
         elif isinstance(comm_prov, ExotelVoiceAdapter) and settings.EXOTEL_ENABLED:
             comm_status["exotel_health"] = comm_prov.check_health()
 

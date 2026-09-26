@@ -45,9 +45,14 @@ def log_startup_adapter_status():
 
     comm_is_mock = isinstance(comm, MockCommunicationProvider)
     comm_name = comm.__class__.__name__
+    from app.integrations.communication.twilio import TwilioVoiceAdapter
     if isinstance(comm, OpenWACommunicationAdapter):
         comm_detail = f"REAL (OpenWA WhatsApp @ {comm.base_url})" if settings.OPENWA_ENABLED else "FALLBACK TO MOCK (OPENWA_ENABLED=false)"
         if not settings.OPENWA_ENABLED:
+            comm_is_mock = True
+    elif isinstance(comm, TwilioVoiceAdapter):
+        comm_detail = f"REAL (Twilio Voice @ {comm.stream_url or 'NO_STREAM_URL'})" if settings.TWILIO_ENABLED else "FALLBACK TO MOCK (TWILIO_ENABLED=false)"
+        if not settings.TWILIO_ENABLED:
             comm_is_mock = True
     elif isinstance(comm, ExotelVoiceAdapter):
         comm_detail = f"REAL (Exotel Voice @ {comm.stream_url or 'NO_STREAM_URL'})" if settings.EXOTEL_ENABLED else "FALLBACK TO MOCK (EXOTEL_ENABLED=false)"
