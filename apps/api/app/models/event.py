@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
-from sqlalchemy import Column, String, Integer, Text, Numeric, DateTime, ForeignKey
+from sqlalchemy import Column, String, Integer, Text, Numeric, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 from app.models.enums import EventType, EventState, EventLifecycleState, EventExecutionState
@@ -27,6 +27,7 @@ class Event(Base):
     state = Column(String(50), nullable=False, default=EventState.NORMAL.value, index=True)
     lifecycle_state = Column(String(50), nullable=False, default=EventLifecycleState.DRAFT.value, index=True)
     execution_state = Column(String(50), nullable=False, default=EventExecutionState.RUNNING.value, index=True)
+    manual_mode = Column(Boolean, nullable=False, default=False)
     total_budget = Column(Numeric(12, 2), nullable=False, default=Decimal("0.00"))
     currency = Column(String(10), nullable=False, default="USD")
     created_at = Column(DateTime, default=utc_now, nullable=False)

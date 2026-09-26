@@ -1,10 +1,11 @@
 """API Route: Incident Detection, Impact Analysis, and Risk Engine Endpoints"""
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db_session, get_current_user_id
 from app.services.incident_service import IncidentService
+from app.agent.triggers import trigger_agent_run
 from app.schemas.incident import (
     IncidentCreate,
     IncidentResponse,
@@ -25,12 +26,19 @@ router = APIRouter(prefix="/events", tags=["incidents"])
 def create_incident(
     event_id: str,
     payload: IncidentCreate,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
 ) -> IncidentResponse:
     """Ingest, normalize, evaluate deterministic impact and risk, and transition event state."""
     service = IncidentService(db)
     incident = service.create_incident(event_id, payload, current_user_id=current_user_id)
+    background_tasks.add_task(
+        trigger_agent_run,
+        event_id=event_id,
+        message=f"Incident reported: {incident.title}. {incident.description or ''}".strip(),
+        user_id=current_user_id,
+    )
     return IncidentResponse.model_validate(incident)
 
 

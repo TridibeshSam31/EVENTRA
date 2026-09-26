@@ -1,10 +1,11 @@
 """Inspection and recalculation APIs for non-executing recovery options."""
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user_id, get_db_session
 from app.schemas.recovery import RecoveryOptionListResponse, RecoveryOptionResponse
 from app.services.recovery_service import RecoveryService
+from app.agent.triggers import trigger_agent_run
 
 router = APIRouter(prefix="/events", tags=["recovery"])
 
@@ -49,6 +50,7 @@ def execute_incident_recovery(
     event_id: str,
     incident_id: str,
     recovery_option_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
 ):
@@ -67,6 +69,12 @@ def execute_incident_recovery(
         event_id=event_id,
         action_execution_id=execution.id,
         current_user_id=current_user_id,
+    )
+    background_tasks.add_task(
+        trigger_agent_run,
+        event_id=event_id,
+        message=f"Recovery option {recovery_option_id} executed for incident {incident_id}. Verify resolution and continue operational monitoring.",
+        user_id=current_user_id,
     )
     return {
         "execution_id": execution.id,

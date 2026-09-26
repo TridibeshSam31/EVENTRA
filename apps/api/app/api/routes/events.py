@@ -1,11 +1,12 @@
 """API Route: Events (Phase 1 Foundational Endpoints + Phase 2 Specification Preview)"""
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db_session, get_current_user_id
 from app.services.event_service import EventService
+from app.agent.triggers import trigger_agent_run
 from app.services.collaboration_service import CollaborationService
 from app.services.vendor_service import VendorService
 from app.schemas.vendor_outcome import (
@@ -538,6 +539,7 @@ def pause_event_endpoint(
 def resume_event_endpoint(
     event_id: str,
     payload: ResumeEventRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
 ):
@@ -545,7 +547,14 @@ def resume_event_endpoint(
     from app.services.pause_resume_service import PauseResumeService
 
     service = PauseResumeService(db)
-    return service.resume_event(event_id=event_id, user_id=current_user_id, request=payload)
+    record = service.resume_event(event_id=event_id, user_id=current_user_id, request=payload)
+    background_tasks.add_task(
+        trigger_agent_run,
+        event_id=event_id,
+        message="Operational execution resumed from paused state. Re-evaluate live event state and proceed with pending operations.",
+        user_id=current_user_id,
+    )
+    return record
 
 
 @router.get(

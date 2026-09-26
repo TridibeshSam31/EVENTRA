@@ -1,10 +1,10 @@
-"""API Routes: Approvals and Governance"""
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db_session, get_current_user_id
 from app.services.approval_service import ApprovalService
+from app.agent.triggers import trigger_agent_run
 from app.schemas.approval import (
     ApprovalRequestCreate,
     ApprovalDecisionRequest,
@@ -88,6 +88,7 @@ def get_approval_request(
 def approve_request(
     event_id: str,
     approval_id: str,
+    background_tasks: BackgroundTasks,
     payload: ApprovalDecisionRequest = ApprovalDecisionRequest(),
     db: Session = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
@@ -99,6 +100,13 @@ def approve_request(
         approval_id=approval_id,
         approver_id=current_user_id,
         decision_notes=payload.decision_notes,
+    )
+    background_tasks.add_task(
+        trigger_agent_run,
+        event_id=event_id,
+        message=f"Approval granted for request {approval_id}. Resume action execution and verification.",
+        user_id=current_user_id,
+        approval_id=approval_id,
     )
     return ApprovalRequestResponse.model_validate(approval)
 

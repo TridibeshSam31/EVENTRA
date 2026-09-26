@@ -15,6 +15,7 @@ class EventBase(BaseModel):
     end_datetime: Optional[datetime] = None
     guest_count: int = 0
     state: str = EventState.NORMAL.value
+    manual_mode: bool = False
     total_budget: Decimal = Decimal("0.00")
     currency: str = "USD"
 
@@ -32,6 +33,7 @@ class EventUpdate(BaseModel):
     end_datetime: Optional[datetime] = None
     guest_count: Optional[int] = None
     state: Optional[str] = None
+    manual_mode: Optional[bool] = None
     total_budget: Optional[Decimal] = None
     currency: Optional[str] = None
 
