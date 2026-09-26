@@ -43,10 +43,12 @@ class GoogleMapsScraperClient:
         keywords: List[str],
         lat: float,
         lon: float,
+        radius_meters: Optional[int] = None,
         depth: int = 5,
         max_time: int = 60,
     ) -> Optional[str]:
-        """Submits a new scraping job to the scraper API."""
+        """Submits a new scraping job to the scraper API with configurable radius."""
+        radius_val = radius_meters if radius_meters and radius_meters > 0 else 10000
         payload = {
             "name": "eventra-provider-discovery",
             "keywords": keywords,
@@ -55,7 +57,7 @@ class GoogleMapsScraperClient:
             "lat": str(lat),
             "lon": str(lon),
             "fast_mode": False,
-            "radius": 10000,
+            "radius": radius_val,
             "depth": min(depth, settings.GOOGLE_MAPS_SCRAPER_MAX_DEPTH),
             "email": False,
             "max_time": max_time,
@@ -138,10 +140,17 @@ class GoogleMapsScraperClient:
         keywords: List[str],
         lat: float,
         lon: float,
+        radius_meters: Optional[int] = None,
         depth: int = 5,
     ) -> List[RawScraperBusiness]:
         """High-level orchestration: submit job -> poll -> download -> return raw records."""
-        job_id = self.create_job(keywords=keywords, lat=lat, lon=lon, depth=depth)
+        job_id = self.create_job(
+            keywords=keywords,
+            lat=lat,
+            lon=lon,
+            radius_meters=radius_meters,
+            depth=depth,
+        )
         if not job_id:
             return []
 

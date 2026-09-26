@@ -1,5 +1,5 @@
 """API Route: Vendors (Provider Network Discovery, Availability, and Assignment)"""
-from typing import List, Optional
+from typing import Any, List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
@@ -44,6 +44,53 @@ def discover_providers(
         source=source,
         query_used=queries,
         items=[VendorResponse.model_validate(v) for v in vendors],
+    )
+
+
+@router.post("/agentic-discovery", status_code=status.HTTP_200_OK)
+def run_agentic_provider_discovery(
+    request_in: Any,
+    db: Session = Depends(get_db_session),
+):
+    """Executes multi-iteration agentic provider discovery pipeline with qualification,
+
+    ranking, outreach availability confirmation, and tiered shortlist output.
+    """
+    from app.schemas.agentic_discovery import (
+        AgenticDiscoveryRequest,
+        AgenticDiscoveryResponse,
+        map_ranked_candidate_to_card,
+    )
+    from app.services.agentic_discovery_controller import AgenticDiscoveryController
+
+    req = AgenticDiscoveryRequest.model_validate(request_in)
+    controller = AgenticDiscoveryController(
+        db=db,
+        max_iterations=req.max_iterations,
+        target_count=req.target_count,
+    )
+    result = controller.execute_discovery(
+        event_id=None,
+        category=req.category,
+        location=req.location,
+        event_type=req.event_type or "GENERIC",
+        guest_count=req.guest_count,
+        max_budget=req.max_budget,
+        base_radius_km=req.base_radius_km,
+        required_amenities=req.required_amenities,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        simulate_outreach=req.simulate_outreach,
+    )
+
+    return AgenticDiscoveryResponse(
+        top_matches=[map_ranked_candidate_to_card(c) for c in result.top_matches],
+        other_available_options=[map_ranked_candidate_to_card(c) for c in result.other_available_options],
+        backup_waitlist=[map_ranked_candidate_to_card(c) for c in result.backup_waitlist],
+        funnel_stats=result.funnel_stats,
+        target_count_met=result.target_count_met,
+        diagnosis_message=result.diagnosis_message,
+        search_queries_used=result.search_queries_used,
     )
 
 

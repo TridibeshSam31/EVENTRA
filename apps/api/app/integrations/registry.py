@@ -131,6 +131,9 @@ class IntegrationRegistry:
             self._google_maps_scraper = GoogleMapsScraperAdapter()
         return self._google_maps_scraper
 
+    def get_provider_directory(self) -> ProviderDirectoryProvider:
+        return self.get_google_maps_scraper()
+
     def get_llm_provider(self) -> Any:
         if not self._llm_provider:
             from app.integrations.llm.base import get_configured_llm_provider
