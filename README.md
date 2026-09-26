@@ -94,17 +94,46 @@ eventra/
 - Python >= 3.11
 - Docker & Docker Compose (optional, for containerized PostgreSQL)
 
-### 1. Environment Setup
+### 1. Environment Configuration
+
+Copy `.env.example` to `.env` in the root repository and customize for your environment:
 ```bash
 cp .env.example .env
 ```
 
-### 2. Database Setup (Docker)
+#### Real vs. Mock Operation Configuration
+By default, the backend falls back to `MockCommunicationProvider` and logs a prominent warning on startup. To enable real integrations:
+
+| Component | Required Environment Variables | Notes |
+| :--- | :--- | :--- |
+| **WhatsApp (OpenWA)** | `COMMUNICATION_PROVIDER=openwa`<br>`OPENWA_ENABLED=true`<br>`OPENWA_BASE_URL=http://localhost:2785`<br>`OPENWA_API_KEY=your_key`<br>`OPENWA_SESSION_ID=eventra_ops` | Requires running OpenWA container (`docker-compose up -d openwa`) and scanning QR code. |
+| **AI Voice Telephony (Exotel + Gemini)** | `COMMUNICATION_PROVIDER=exotel`<br>`EXOTEL_ENABLED=true`<br>`EXOTEL_ACCOUNT_SID=...`<br>`EXOTEL_API_KEY=...`<br>`EXOTEL_API_TOKEN=...`<br>`EXOTEL_CALLER_ID=...`<br>`EXOTEL_STREAM_URL=wss://<tunnel>/api/v1/voice/exotel/stream`<br>`GEMINI_API_KEY=...` | Must provide a public `wss://` endpoint (e.g. ngrok tunnel) for audio streaming. Requires KYC compliance on Exotel. |
+| **Real Provider Discovery** | Network access to OpenStreetMap Overpass API or `APIFY_API_KEY` for Google Maps | Vendor discovery uses `GoogleMapsScraperAdapter`. |
+
+### 2. Services Setup (Docker)
+
+Start PostgreSQL and the OpenWA WhatsApp Automate container:
 ```bash
-docker-compose up -d postgres
+docker-compose up -d postgres openwa
 ```
 
-### 3. Backend Setup
+#### WhatsApp QR Linking Flow (First-Time Setup)
+1. Ensure the `openwa` container is running: `docker-compose ps openwa`
+2. Navigate to `http://localhost:2785` in your browser (or check container logs: `docker-compose logs -f openwa`).
+3. Scan the generated QR code using WhatsApp on your phone (**Linked Devices → Link a Device**).
+4. Once authenticated, session state is preserved inside the `openwa_sessions` named Docker volume across restarts.
+5. Verify messaging with `python apps/api/scripts/test_whatsapp_send.py --to 919XXXXXXXXX --message "Hello from EVENTRA"`.
+
+### 3. Exotel Voice & Gemini Live Telephony Bridge Setup
+
+For AI phone calls to vendors via Exotel and Gemini Live:
+1. Start local dev tunnel for Exotel to reach your local backend:
+   - On Linux/macOS: `./scripts/dev_tunnel.sh 8000`
+   - On Windows (PowerShell): `.\scripts\dev_tunnel.ps1 -Port 8000`
+2. Copy the printed `wss://.../api/v1/voice/exotel/stream` URL and set it as `EXOTEL_STREAM_URL` in your `.env`.
+3. Note: The Exotel account must be KYC-verified in the Exotel dashboard to dial real PSTN phone numbers.
+
+### 4. Backend Setup
 ```bash
 cd apps/api
 python -m venv .venv
@@ -112,8 +141,9 @@ source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload --port 8000
 ```
+On startup, watch the console banner for **EVENTRA INTEGRATION ADAPTER RESOLUTION** to confirm whether adapters resolved to `REAL` or `MOCK`.
 
-### 4. Frontend Setup
+### 5. Frontend Setup
 ```bash
 # In workspace root
 npm install
