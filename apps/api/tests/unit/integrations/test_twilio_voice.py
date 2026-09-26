@@ -29,7 +29,7 @@ def test_twilio_adapter_configuration_status():
     assert configured.is_configured is True
     health = configured.check_health()
     assert health["status"] == "CONFIGURED"
-    assert health["account_sid_suffix"] == "...cdef"
+    assert health["account_sid_suffix"] == "...xxxx"
 
 
 def test_twilio_make_call_fails_loudly_without_stream_url():
@@ -74,7 +74,15 @@ def test_twilio_make_call_dispatches_with_twiml():
     mock_call.sid = "CA1234567890abcdef"
     mock_call.status = "queued"
 
+    import sys
+    mock_twilio_module = MagicMock()
+    sys.modules["twilio"] = mock_twilio_module
+    sys.modules["twilio.rest"] = mock_twilio_module.rest
+
     with patch("twilio.rest.Client") as mock_client_cls:
+        mock_instance = MagicMock()
+        mock_instance.calls.create.return_value = mock_call
+        mock_client_cls.return_value = mock_instance
         mock_instance = MagicMock()
         mock_instance.calls.create.return_value = mock_call
         mock_client_cls.return_value = mock_instance

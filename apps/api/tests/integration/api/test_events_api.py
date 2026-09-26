@@ -93,10 +93,12 @@ def test_event_membership_endpoints(test_client: TestClient, db_session: Session
 
 
 def test_create_event_with_nonexistent_owner(test_client: TestClient):
-    """Verify creating event with invalid owner_id returns 404."""
+    """Verify creating event auto-creates owner if not already present."""
     payload = {
         "owner_id": "non-existent-user-id",
         "name": "Ghost Event",
     }
     resp = test_client.post("/api/events", json=payload)
-    assert resp.status_code == 404
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["owner_id"] == "non-existent-user-id"
