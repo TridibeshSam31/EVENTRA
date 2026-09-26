@@ -69,25 +69,51 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
 
         start_time = time.time()
         chat_id = self._normalize_chat_id(recipient_contact)
-        url = f"{self.base_url}/sessions/{self.session_id}/messages/send-text"
         headers = {"Content-Type": "application/json"}
         if self.api_key:
+            headers["api_key"] = self.api_key
+            headers["key"] = self.api_key
             headers["X-API-Key"] = self.api_key
 
-        payload = {
-            "chatId": chat_id,
-            "text": message,
+        # OpenWA standard endpoint: POST /sendText with args: {to, content}
+        primary_url = f"{self.base_url}/sendText"
+        primary_payload = {
+            "args": {
+                "to": chat_id,
+                "content": message,
+            }
         }
 
         try:
             with httpx.Client(timeout=self.timeout_seconds) as client:
-                resp = client.post(url, headers=headers, json=payload)
+                resp = client.post(primary_url, headers=headers, json=primary_payload)
+                # Fallback to session-prefixed URL if standard endpoint returned 404
+                if resp.status_code == 404:
+                    alt_url = f"{self.base_url}/sessions/{self.session_id}/messages/send-text"
+                    alt_payload = {"chatId": chat_id, "text": message}
+                    resp = client.post(alt_url, headers=headers, json=alt_payload)
+
                 latency = round((time.time() - start_time) * 1000, 2)
                 if resp.status_code in (200, 201):
-                    data = resp.json()
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = resp.text
+
+                    # Validate that OpenWA did not return an explicit failure boolean
+                    if data is False or data == "false" or (isinstance(data, dict) and data.get("error")):
+                        err_text = data.get("error") if isinstance(data, dict) else "OpenWA rejected dispatch (recipient unreachable or session not ready)."
+                        res = self._fallback.send_message(event_id, provider_id, message, recipient_contact)
+                        res.source = IntegrationSource.REAL
+                        res.success = False
+                        res.error = str(err_text)
+                        return res
+
                     msg_id = None
                     if isinstance(data, dict):
-                        msg_id = data.get("id") or data.get("messageId") or str(uuid.uuid4())
+                        msg_id = data.get("id") or data.get("messageId") or data.get("response") or str(uuid.uuid4())
+                    elif isinstance(data, str) and len(data.strip()) > 4:
+                        msg_id = data.strip().strip('"')
                     else:
                         msg_id = str(uuid.uuid4())
 

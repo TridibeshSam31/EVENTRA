@@ -25,6 +25,20 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
 
+  openwa:
+    build:
+      context: ./tools/openwa
+      dockerfile: Dockerfile
+    container_name: eventra-openwa
+    restart: unless-stopped
+    ports:
+      - "2785:2785"
+    environment:
+      - PORT=2785
+    volumes:
+      - openwa_sessions:/home/node/app
+      - ./tools/openwa/cli.config.json:/home/node/app/cli.config.json:ro
+
   api:
     build:
       context: ./apps/api
@@ -37,9 +51,15 @@ services:
     environment:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-eventra_user}:${POSTGRES_PASSWORD:-eventra_password}@postgres:5432/${POSTGRES_DB:-eventra_db}
       - ENVIRONMENT=development
-      - LLM_PROVIDER=${LLM_PROVIDER:-anthropic}
+      - LLM_PROVIDER=${LLM_PROVIDER:-gemini}
       - LLM_API_KEY=${LLM_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - GOOGLE_MAPS_SCRAPER_URL=${GOOGLE_MAPS_SCRAPER_URL:-http://google-maps-scraper:8080}
+      - COMMUNICATION_PROVIDER=${COMMUNICATION_PROVIDER:-mock}
+      - OPENWA_ENABLED=${OPENWA_ENABLED:-false}
+      - OPENWA_BASE_URL=${OPENWA_BASE_URL:-http://openwa:2785}
+      - OPENWA_API_KEY=${OPENWA_API_KEY}
+      - OPENWA_SESSION_ID=${OPENWA_SESSION_ID:-eventra_ops}
     ports:
       - "8000:8000"
     volumes:
@@ -66,4 +86,6 @@ services:
 
 volumes:
   pgdata:
+    driver: local
+  openwa_sessions:
     driver: local
