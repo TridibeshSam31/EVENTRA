@@ -38,6 +38,7 @@ class DiscoveryOutreachService:
         event_id: str,
         task_id: Optional[str] = None,
         dev_simulate_responses: bool = False,
+        simulate_responses: Optional[bool] = None,
     ) -> RankedCandidate:
         """Contacts a single ranked candidate to confirm availability.
 
@@ -50,6 +51,9 @@ class DiscoveryOutreachService:
         deterministically based on rating to unblock local testing — this must
         NEVER be the default or reachable from a production API call.
         """
+        if simulate_responses is not None:
+            dev_simulate_responses = simulate_responses
+
         cand = item.candidate
         phone = cand.phone or "+919876543210"
 
@@ -103,8 +107,11 @@ class DiscoveryOutreachService:
         task_id: Optional[str] = None,
         batch_size: int = 5,
         dev_simulate_responses: bool = False,
+        simulate_responses: Optional[bool] = None,
     ) -> OutreachContactBatchResult:
         """Contacts a batch of uncontacted qualified candidates and updates their availability states."""
+        if simulate_responses is not None:
+            dev_simulate_responses = simulate_responses
         uncontacted = [c for c in ranked_candidates if c.availability == "unconfirmed"]
         target_batch = uncontacted[:batch_size]
 
