@@ -11,7 +11,6 @@ from app.integrations.registry import registry
 from app.integrations.maps.mock import MockMapsProvider
 from app.integrations.maps.http_maps import HTTPMapsProvider
 from app.integrations.venues.discovery import ExternalVenueAdapter
-from app.integrations.providers.directory import ExternalProviderAdapter
 from app.integrations.communication.mock import MockCommunicationProvider
 from app.integrations.whatsapp.client import WhatsAppAdapter
 from app.integrations.notifications.providers import InAppNotificationProvider, MockNotificationProvider
@@ -118,21 +117,6 @@ def test_external_venue_adapter_search_and_normalize():
     assert "amenities" in venue
     assert venue.get("source") == "EXTERNAL_CATALOG"
 
-
-def test_external_provider_adapter_search_and_normalize():
-    """Verify ExternalProviderAdapter searches and normalizes provider payloads into EVENTRA schema."""
-    adapter = ExternalProviderAdapter()
-    result = adapter.search_providers(category="catering", city="Chicago")
-    assert result.success is True
-    providers = result.data
-    assert len(providers) > 0
-    provider = providers[0]
-    assert "name" in provider
-    assert provider["category"] == "catering"
-    assert provider["city"] == "Chicago"
-    assert "rating" in provider
-    assert "base_cost" in provider
-    assert provider.get("source") == "EXTERNAL_DIRECTORY"
 
 
 # ---------------------------------------------------------------------------

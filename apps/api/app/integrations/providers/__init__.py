@@ -1,5 +1,8 @@
-"""Providers integration package."""
-from app.integrations.base import ProviderDirectoryProvider
-from app.integrations.providers.directory import ExternalProviderAdapter
+"""Providers integration package.
 
-__all__ = ["ProviderDirectoryProvider", "ExternalProviderAdapter"]
+Note: Vendor/provider discovery is driven by GoogleMapsScraperAdapter (apps/api/app/integrations/google_maps_scraper/adapter.py)
+via VendorService, supporting real-world OpenStreetMap Overpass queries and Apify Google Maps scraping.
+"""
+from app.integrations.base import ProviderDirectoryProvider
+
+__all__ = ["ProviderDirectoryProvider"]

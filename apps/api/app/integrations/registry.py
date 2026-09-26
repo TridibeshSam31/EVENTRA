@@ -19,7 +19,6 @@ from app.integrations.communication.mock import MockCommunicationProvider
 from app.integrations.communication.exotel import ExotelVoiceAdapter
 from app.integrations.whatsapp.client import OpenWACommunicationAdapter, WhatsAppAdapter
 from app.integrations.venues.discovery import ExternalVenueAdapter
-from app.integrations.providers.directory import ExternalProviderAdapter
 from app.integrations.google_maps_scraper.adapter import GoogleMapsScraperAdapter
 from app.integrations.llm.base import LLMProvider, get_configured_llm_provider
 
@@ -32,7 +31,6 @@ class IntegrationRegistry:
         self._notification_provider: Optional[NotificationProvider] = None
         self._communication_provider: Optional[ProviderCommunicationProvider] = None
         self._venue_provider: Optional[VenueDirectoryProvider] = None
-        self._provider_directory: Optional[ProviderDirectoryProvider] = None
         self._google_maps_scraper: Optional[GoogleMapsScraperAdapter] = None
         self._llm_provider: Optional[LLMProvider] = None
 
@@ -64,7 +62,19 @@ class IntegrationRegistry:
     def get_communication_provider(self) -> ProviderCommunicationProvider:
         if not self._communication_provider:
             comm_type = (settings.COMMUNICATION_PROVIDER or "mock").lower()
-            if comm_type in ("openwa", "whatsapp") or settings.OPENWA_ENABLED:
+            if comm_type == "exotel":
+                self._communication_provider = ExotelVoiceAdapter(
+                    api_key=settings.EXOTEL_API_KEY,
+                    api_token=settings.EXOTEL_API_TOKEN,
+                    account_sid=settings.EXOTEL_ACCOUNT_SID,
+                    subdomain=settings.EXOTEL_SUBDOMAIN,
+                    caller_id=settings.EXOTEL_CALLER_ID,
+                    app_id=settings.EXOTEL_APP_ID,
+                    stream_url=settings.EXOTEL_STREAM_URL,
+                    callback_url=settings.EXOTEL_CALLBACK_URL,
+                    timeout_seconds=settings.EXOTEL_TIMEOUT_SECONDS,
+                )
+            elif comm_type in ("openwa", "whatsapp") or settings.OPENWA_ENABLED:
                 self._communication_provider = OpenWACommunicationAdapter(
                     base_url=settings.OPENWA_BASE_URL,
                     api_key=settings.OPENWA_API_KEY,
@@ -72,7 +82,7 @@ class IntegrationRegistry:
                     webhook_secret=settings.OPENWA_WEBHOOK_SECRET,
                     timeout_seconds=settings.OPENWA_TIMEOUT_SECONDS,
                 )
-            elif comm_type == "exotel" or settings.EXOTEL_ENABLED:
+            elif settings.EXOTEL_ENABLED:
                 self._communication_provider = ExotelVoiceAdapter(
                     api_key=settings.EXOTEL_API_KEY,
                     api_token=settings.EXOTEL_API_TOKEN,
@@ -92,11 +102,6 @@ class IntegrationRegistry:
         if not self._venue_provider:
             self._venue_provider = ExternalVenueAdapter()
         return self._venue_provider
-
-    def get_provider_directory(self) -> ProviderDirectoryProvider:
-        if not self._provider_directory:
-            self._provider_directory = ExternalProviderAdapter()
-        return self._provider_directory
 
     def get_google_maps_scraper(self) -> GoogleMapsScraperAdapter:
         if not self._google_maps_scraper:
