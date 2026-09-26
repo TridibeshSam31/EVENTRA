@@ -44,13 +44,12 @@ from app.models.enums import (
 from app.models.vendor_outcome import VendorOutcome
 from app.models.vendor_outcome_validation import VendorOutcomeValidation
 from app.schemas.vendor_outcome import VendorOutcomeCreate
-from app.schemas.vendor_binding import (
-    BindingDecision,
-    VendorTaskBindingResponse,
-)
-from app.services.vendor_outcome_service import VendorOutcomeService
-from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
-from app.services.vendor_task_binding_service import VendorTaskBindingService
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.services.vendor_outcome_service import VendorOutcomeService
+    from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
+    from app.services.vendor_task_binding_service import VendorTaskBindingService
+
 from app.integrations.communication.gemini_bridge import (
     GeminiLiveBridge,
     TranscriptEntry,
@@ -361,9 +360,13 @@ class VoiceOutcomePipeline:
     ):
         self.db = db
         self.parser: VoiceOutcomeParser = parser or VoiceOutcomeParser()
-        self.outcome_service: VendorOutcomeService = VendorOutcomeService(db)
-        self.validation_service: VendorOutcomeValidationService = VendorOutcomeValidationService(db)
-        self.binding_service: VendorTaskBindingService = VendorTaskBindingService(db)
+        from app.services.vendor_outcome_service import VendorOutcomeService
+        from app.services.vendor_outcome_validation_service import VendorOutcomeValidationService
+        from app.services.vendor_task_binding_service import VendorTaskBindingService
+
+        self.outcome_service = VendorOutcomeService(db)
+        self.validation_service = VendorOutcomeValidationService(db)
+        self.binding_service = VendorTaskBindingService(db)
 
     def process_call_completion(
         self,

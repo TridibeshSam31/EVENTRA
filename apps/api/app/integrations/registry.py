@@ -18,9 +18,11 @@ from app.integrations.notifications.providers import (
 from app.integrations.communication.mock import MockCommunicationProvider
 from app.integrations.communication.exotel import ExotelVoiceAdapter
 from app.integrations.whatsapp.client import OpenWACommunicationAdapter, WhatsAppAdapter
-from app.integrations.venues.discovery import ExternalVenueAdapter
 from app.integrations.google_maps_scraper.adapter import GoogleMapsScraperAdapter
-from app.integrations.llm.base import LLMProvider, get_configured_llm_provider
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from app.integrations.llm.base import LLMProvider
+
 
 
 class IntegrationRegistry:
@@ -100,6 +102,7 @@ class IntegrationRegistry:
 
     def get_venue_provider(self) -> VenueDirectoryProvider:
         if not self._venue_provider:
+            from app.integrations.venues.discovery import ExternalVenueAdapter
             self._venue_provider = ExternalVenueAdapter()
         return self._venue_provider
 
@@ -108,8 +111,9 @@ class IntegrationRegistry:
             self._google_maps_scraper = GoogleMapsScraperAdapter()
         return self._google_maps_scraper
 
-    def get_llm_provider(self) -> LLMProvider:
+    def get_llm_provider(self) -> Any:
         if not self._llm_provider:
+            from app.integrations.llm.base import get_configured_llm_provider
             self._llm_provider = get_configured_llm_provider()
         return self._llm_provider
 
