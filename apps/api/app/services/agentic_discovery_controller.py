@@ -143,6 +143,7 @@ class AgenticDiscoveryController:
                     latitude=lat,
                     longitude=lon,
                     limit=15,
+                    radius_km=current_radius,  # FIX(4c): thread actual computed radius through
                 )
                 if res.success and res.data:
                     for raw_item in res.data:
@@ -207,7 +208,7 @@ class AgenticDiscoveryController:
                     ranked_candidates=qualified_pool,
                     event_id=event_id or "demo-event",
                     batch_size=outreach_batch_size,
-                    simulate_responses=simulate_outreach,
+                    dev_simulate_responses=simulate_outreach,
                 )
 
                 for item in qualified_pool:

@@ -17,23 +17,24 @@ from app.services.provider_classifier import ProviderClassifier
 
 logger = logging.getLogger(__name__)
 
-# Non-vendor / Institution keywords to reject unconditionally
+# Non-vendor / Institution keywords to reject unconditionally (Priority 4b extended denylist)
 DISQUALIFIED_INSTITUTION_KEYWORDS = [
-    "institute of hotel management",
-    "ihm",
-    "irctc",
-    "railway catering",
-    "government office",
-    "govt office",
-    "police station",
-    "training center",
-    "training institute",
-    "degree college",
-    "university department",
-    "hospital canteen",
-    "municipal corporation",
-    "panchayat",
-    "public health center",
+    # Educational / training institutions
+    "institute of hotel management", "ihm", "hotel management college",
+    "hotel management institute", "catering college", "catering school",
+    "catering institute", "food technology college",
+    "training center", "training institute", "degree college",
+    "university department", "polytechnic",
+    # Government / PSU entities
+    "irctc", "railway catering", "railways", "railway",
+    "government office", "govt office", "government canteen",
+    "police station", "municipal corporation", "nagar nigam",
+    "panchayat", "cantonment board", "public health center",
+    "hospital canteen", "doordarshan", "bsnl", "ntpc", "ongc",
+    "bhel", "sail", "iocl", "gail",
+    # Associations / Federations
+    "association of", "federation of", "council of", "chamber of",
+    "trade union", "welfare society",
 ]
 
 
@@ -54,6 +55,9 @@ class QualificationEngine:
     @classmethod
     def check_institution_disqualification(cls, candidate: NormalizedProvider) -> Tuple[bool, Optional[str]]:
         """Identifies non-vendor entities such as educational institutes or government bodies."""
+        # Check raw_data flag set by ProviderNormalizer (Priority 4b)
+        if candidate.raw_data and candidate.raw_data.get("_non_commercial"):
+            return True, candidate.raw_data.get("_non_commercial_reason", "Flagged as non-commercial entity")
         combined_text = f"{candidate.name} {candidate.raw_category or ''} {' '.join(candidate.categories)} {candidate.description or ''}".lower()
         for kw in DISQUALIFIED_INSTITUTION_KEYWORDS:
             if kw in combined_text:

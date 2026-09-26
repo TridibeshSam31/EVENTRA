@@ -47,6 +47,7 @@ class GoogleMapsScraperAdapter(ProviderDirectoryProvider):
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
         limit: int = 20,
+        radius_km: Optional[float] = None,
     ) -> IntegrationResult[List[Dict[str, Any]]]:
         """Queries Google Maps through scraper API, normalizes, and returns provider dictionaries."""
         start_time = time.time()
@@ -65,6 +66,9 @@ class GoogleMapsScraperAdapter(ProviderDirectoryProvider):
             location=city_target,
         )
 
+        # Convert radius_km to meters for the scraper API (default: 10km)
+        radius_meters: Optional[int] = int(radius_km * 1000) if radius_km and radius_km > 0 else None
+
         is_alive = self.client.is_available()
 
         if is_alive:
@@ -74,6 +78,7 @@ class GoogleMapsScraperAdapter(ProviderDirectoryProvider):
                     lat=lat,
                     lon=lon,
                     depth=min(settings.GOOGLE_MAPS_SCRAPER_MAX_DEPTH, 5),
+                    radius_meters=radius_meters,
                 )
                 if raw_results:
                     normalized: List[NormalizedProvider] = [

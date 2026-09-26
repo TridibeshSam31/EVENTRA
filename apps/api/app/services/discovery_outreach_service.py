@@ -37,52 +37,61 @@ class DiscoveryOutreachService:
         item: RankedCandidate,
         event_id: str,
         task_id: Optional[str] = None,
-        simulate_responses: bool = True,
+        dev_simulate_responses: bool = False,
     ) -> RankedCandidate:
-        """Contacts a single ranked candidate to confirm availability."""
+        """Contacts a single ranked candidate to confirm availability.
+
+        State transitions:
+          unconfirmed -> pending_response  (immediately after dispatch)
+          pending_response -> confirmed    (only after real inbound reply/voice outcome)
+          pending_response -> declined     (only after real inbound reply/voice outcome)
+
+        In dev/test mode (dev_simulate_responses=True), availability is resolved
+        deterministically based on rating to unblock local testing — this must
+        NEVER be the default or reachable from a production API call.
+        """
         cand = item.candidate
         phone = cand.phone or "+919876543210"
 
-        # Update state to pending_response while contact is dispatched
+        # Step 1: Immediately mark as pending — even before we dispatch
         item.availability = "pending_response"
 
         # Attempt communication dispatch via registered communication provider
         try:
             comm_provider = registry.get_communication_provider()
-            res = comm_provider.send_message(
+            comm_provider.send_message(
                 event_id=event_id,
                 provider_id=cand.source_id or cand.name,
                 message=f"Hello {cand.name}, checking availability for {cand.category} event ID {event_id}.",
                 recipient_contact=phone,
             )
 
-            # In development/simulation or mock mode, deterministically resolve availability:
-            # High rating (>= 4.2) and active status -> confirmed availability
-            if simulate_responses or comm_provider.__class__.__name__ == "MockCommunicationProvider":
+            if dev_simulate_responses:
+                # DEV ONLY: deterministically resolve based on rating for local testing
                 rating = cand.rating or 4.5
                 if rating >= 4.0:
                     item.availability = "confirmed"
-                    item.reasons.append("Availability confirmed via provider outreach contact")
+                    item.reasons.append("[DEV_SIMULATE] Availability confirmed via simulated outreach")
                     if "capacity" in item.field_sources:
                         item.field_sources["capacity"] = "verified"
                     if "base_cost" in item.field_sources:
                         item.field_sources["base_cost"] = "verified"
                 else:
                     item.availability = "declined"
-                    item.reasons.append("Vendor declined availability during outreach contact")
+                    item.reasons.append("[DEV_SIMULATE] Vendor declined (simulated)")
             else:
-                # Real transport dispatched; set to pending until webhook or response callback
-                item.availability = "pending_response"
-                item.reasons.append("Outreach contact dispatched via telephony/messaging; awaiting provider response")
+                # REAL PATH: stay pending_response — resolved only by inbound WhatsApp webhook
+                # or VendorOutcomeService.record_outcome() from a completed AI voice call.
+                item.reasons.append(
+                    "Outreach contact dispatched via telephony/messaging; awaiting provider response"
+                )
 
         except Exception as exc:
             logger.warning(f"Outreach contact dispatch failed for {cand.name}: {exc}")
-            # Fallback to simulated confirmation based on candidate quality
-            if (cand.rating or 4.0) >= 4.0:
-                item.availability = "confirmed"
-                item.reasons.append("Availability verified via automated communication channel")
-            else:
-                item.availability = "declined"
+            # On dispatch failure, remain pending (not failed-confirmed!) so the operator
+            # is aware and can manually follow up or retry.
+            item.availability = "pending_response"
+            item.reasons.append(f"Outreach dispatch error: {exc} — manual follow-up required")
 
         return item
 
@@ -93,7 +102,7 @@ class DiscoveryOutreachService:
         event_id: str,
         task_id: Optional[str] = None,
         batch_size: int = 5,
-        simulate_responses: bool = True,
+        dev_simulate_responses: bool = False,
     ) -> OutreachContactBatchResult:
         """Contacts a batch of uncontacted qualified candidates and updates their availability states."""
         uncontacted = [c for c in ranked_candidates if c.availability == "unconfirmed"]
@@ -108,7 +117,7 @@ class DiscoveryOutreachService:
                 item=item,
                 event_id=event_id,
                 task_id=task_id,
-                simulate_responses=simulate_responses,
+                dev_simulate_responses=dev_simulate_responses,
             )
             if updated_item.availability == "confirmed":
                 confirmed.append(updated_item)

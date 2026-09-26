@@ -1,6 +1,6 @@
 """Provider Normalizer: Maps raw Google Maps scraper results into NormalizedProvider."""
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlparse
 
 from app.integrations.google_maps_scraper.models import (
@@ -9,8 +9,58 @@ from app.integrations.google_maps_scraper.models import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Priority 4b — Non-commercial entity denylist
+# ---------------------------------------------------------------------------
+# OSM/Google Maps results for commercial categories (catering, decor, AV, etc.)
+# sometimes return government PSUs, educational institutions, and non-hireable
+# entities whose tags technically match the category but which are NOT bookable
+# for private events.  The keyword denylist below is used to flag and filter
+# these results before they reach the shortlist.
+#
+# Only applied to vendor categories where this matters (NOT applied to venue
+# discovery where a government-run hall may legitimately be bookable).
+#
+# Extend this list as new false-positive entity types are discovered.
+_NON_COMMERCIAL_KEYWORDS: List[str] = [
+    # Government / Public Sector Undertakings
+    "irctc", "railways", "railway", "doordarshan", "bsnl", "ntpc",
+    "ongc", "bhel", "sail", "iocl", "gail", "ril", "municipal",
+    "corporation", "authority", "government", "govt", "ministry",
+    "central government", "state government", "public sector",
+    "nagar nigam", "panchayat", "cantonment board",
+    # Educational institutions
+    "institute of hotel management", "ihm", "hotel management college",
+    "hotel management institute", "catering college", "catering school",
+    "catering institute", "food technology college", "iit", "nit",
+    "national institute", "university", "college of", "school of",
+    "polytechnic", "iitm", "iitd", "iimb", "iima",
+    # Associations / Federations (not hireable vendors)
+    "association of", "federation of", "council of", "chamber of",
+    "trade union", "welfare society",
+]
+
+# Categories where the non-commercial filter applies (lowercase, underscore-separated)
+_FILTERED_VENDOR_CATEGORIES: Set[str] = {
+    "catering", "food_beverage", "decor", "av_production",
+    "photography", "logistics", "security", "entertainment",
+    "floral", "transportation",
+}
+
+
 class ProviderNormalizer:
     """Deterministic normalizer and data sanitization engine for raw scraper data."""
+
+    @classmethod
+    def is_non_commercial_entity(cls, name: str, raw_category: Optional[str], vendor_category: Optional[str]) -> bool:
+        """Returns True if the entity name/category signals a non-commercial/non-hireable entity.
+
+        Only applied to vendor discovery categories (not venue discovery).
+        """
+        if vendor_category and vendor_category.lower() not in _FILTERED_VENDOR_CATEGORIES:
+            return False
+        text_to_check = " ".join(filter(None, [name, raw_category])).lower()
+        return any(kw in text_to_check for kw in _NON_COMMERCIAL_KEYWORDS)
 
     @classmethod
     def normalize_phone(cls, phone: Optional[str]) -> Optional[str]:
@@ -117,6 +167,18 @@ class ProviderNormalizer:
             "base_cost": "inferred",
         }
 
+        # Priority 4b: Flag non-commercial/non-hireable entities in raw_data so
+        # downstream qualification can reject them without losing the record.
+        raw_data_out = raw.raw_data or raw.model_dump(mode="json")
+        is_non_commercial = cls.is_non_commercial_entity(
+            name=name,
+            raw_category=raw_category,
+            vendor_category=None,  # will be classified downstream; applies to all categories
+        )
+        if is_non_commercial:
+            raw_data_out["_non_commercial"] = True
+            raw_data_out["_non_commercial_reason"] = "Name or category matched non-hireable entity denylist (govt/PSU/educational)"
+
         return NormalizedProvider(
             source="GOOGLE_MAPS",
             source_id=source_id,
@@ -139,5 +201,5 @@ class ProviderNormalizer:
             is_active=is_active,
             opening_hours=raw.opening_hours or {},
             field_sources=field_sources,
-            raw_data=raw.raw_data or raw.model_dump(mode="json"),
+            raw_data=raw_data_out,
         )
