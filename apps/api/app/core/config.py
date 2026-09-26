@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # Database configuration (PostgreSQL)
-    DATABASE_URL: str = "postgresql+psycopg://neondb_owner:npg_SXdJea6ZQmf2@ep-divine-mud-b5u94wxa.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require"
+    DATABASE_URL: str = "postgresql+psycopg://eventra_user:eventra_password@localhost:5432/eventra_db"
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
     DB_POOL_TIMEOUT: int = 10
