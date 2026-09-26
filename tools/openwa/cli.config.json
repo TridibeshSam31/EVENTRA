@@ -4,7 +4,7 @@
   "webhook": "http://127.0.0.1:8000/api/webhooks/openwa",
   "sessionId": "eventra_ops",
   "multiDevice": true,
-  "headless": false,
+  "headless": true,
   "useChrome": true,
   "qrTimeout": 0,
   "authTimeout": 0,

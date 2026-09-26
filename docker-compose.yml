@@ -31,13 +31,12 @@ services:
       dockerfile: Dockerfile
     container_name: eventra-openwa
     restart: unless-stopped
+    command: ["--no-update", "--headless"]
     ports:
       - "2785:2785"
-    environment:
-      - PORT=2785
     volumes:
-      - openwa_sessions:/home/node/app
-      - ./tools/openwa/cli.config.json:/home/node/app/cli.config.json:ro
+      - openwa_sessions:/sessions
+      - ./tools/openwa/cli.config.json:/config/cli.config.json:ro
 
   api:
     build:
