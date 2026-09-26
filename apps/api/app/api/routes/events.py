@@ -259,6 +259,74 @@ def discover_providers_for_event(
     )
 
 
+@router.post("/{event_id}/providers/agentic-discovery", status_code=status.HTTP_200_OK)
+def run_agentic_provider_discovery_for_event(
+    event_id: str,
+    request_in: Any,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Executes multi-iteration agentic discovery tailored to event specification, location,
+
+    guest count, and constraints.
+    """
+    from app.services.event_service import EventService
+    from app.schemas.agentic_discovery import (
+        AgenticDiscoveryRequest,
+        AgenticDiscoveryResponse,
+        map_ranked_candidate_to_card,
+    )
+    from app.services.agentic_discovery_controller import AgenticDiscoveryController
+
+    event_service = EventService(db)
+    event = event_service.get_event(event_id)
+    if not event:
+        raise NotFoundException(f"Event with id '{event_id}' not found.")
+
+    req = AgenticDiscoveryRequest.model_validate(request_in)
+
+    loc = req.location
+    if not loc and event.location:
+        if isinstance(event.location, dict):
+            loc = event.location.get("city") or event.location.get("name")
+        elif isinstance(event.location, str):
+            loc = event.location
+    if not loc:
+        loc = "Delhi"
+
+    g_count = req.guest_count or event.guest_count
+    e_type = req.event_type or event.event_type or "GENERIC"
+
+    controller = AgenticDiscoveryController(
+        db=db,
+        max_iterations=req.max_iterations,
+        target_count=req.target_count,
+    )
+    result = controller.execute_discovery(
+        event_id=event_id,
+        category=req.category,
+        location=loc,
+        event_type=e_type,
+        guest_count=g_count,
+        max_budget=req.max_budget,
+        base_radius_km=req.base_radius_km,
+        required_amenities=req.required_amenities,
+        latitude=req.latitude,
+        longitude=req.longitude,
+        simulate_outreach=req.simulate_outreach,
+    )
+
+    return AgenticDiscoveryResponse(
+        top_matches=[map_ranked_candidate_to_card(c) for c in result.top_matches],
+        other_available_options=[map_ranked_candidate_to_card(c) for c in result.other_available_options],
+        backup_waitlist=[map_ranked_candidate_to_card(c) for c in result.backup_waitlist],
+        funnel_stats=result.funnel_stats,
+        target_count_met=result.target_count_met,
+        diagnosis_message=result.diagnosis_message,
+        search_queries_used=result.search_queries_used,
+    )
+
+
 @router.post("/{event_id}/venues/discover", response_model=VenueDiscoveryResponse, status_code=status.HTTP_200_OK)
 def discover_venues_for_event(
     event_id: str,

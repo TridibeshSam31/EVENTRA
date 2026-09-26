@@ -30,6 +30,7 @@ class RawScraperBusiness(BaseModel):
     title: Optional[str] = None
     name: Optional[str] = None
     category: Optional[str] = None
+    categories: Optional[List[str]] = Field(default_factory=list)
     address: Optional[str] = None
     phone: Optional[str] = None
     emails: Optional[str] = None
@@ -46,6 +47,10 @@ class RawScraperBusiness(BaseModel):
     cid: Optional[str] = None
     place_id: Optional[str] = None
     description: Optional[str] = None
+    business_status: Optional[str] = None  # OPERATIONAL, CLOSED_TEMPORARILY, CLOSED_PERMANENTLY
+    opening_hours: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    website_title: Optional[str] = None
+    website_text: Optional[str] = None
     raw_data: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -56,6 +61,7 @@ class NormalizedProvider(BaseModel):
     name: str
     category: str = "OTHER"  # Default EVENTRA taxonomy category
     raw_category: Optional[str] = None
+    categories: List[str] = Field(default_factory=list)
     address: Optional[str] = None
     city: str = "Local"
     latitude: Optional[float] = None
@@ -68,7 +74,12 @@ class NormalizedProvider(BaseModel):
     maps_url: Optional[str] = None
     description: Optional[str] = None
     base_cost: Optional[float] = None
+    capacity: Optional[int] = None
+    business_status: Optional[str] = "OPERATIONAL"
+    is_active: bool = True
+    opening_hours: Optional[Dict[str, Any]] = Field(default_factory=dict)
     capabilities: List[str] = Field(default_factory=list)
     classification_confidence: float = 0.0
     classification_reason: Optional[str] = None
+    field_sources: Dict[str, str] = Field(default_factory=dict)  # e.g., {"capacity": "inferred", "phone": "verified"}
     raw_data: Dict[str, Any] = Field(default_factory=dict)

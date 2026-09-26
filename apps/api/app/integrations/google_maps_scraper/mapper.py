@@ -97,6 +97,25 @@ class ProviderNormalizer:
                 source_id = cid_match.group(1)
 
         raw_category = (raw.category or "").strip() or None
+        categories_list = raw.categories or ([raw_category] if raw_category else [])
+
+        b_status = (raw.business_status or "OPERATIONAL").upper()
+        if b_status not in ("OPERATIONAL", "CLOSED_TEMPORARILY", "CLOSED_PERMANENTLY"):
+            b_status = "OPERATIONAL"
+        is_active = b_status == "OPERATIONAL"
+
+        # Field source tags: verified vs inferred
+        field_sources: Dict[str, str] = {
+            "name": "verified",
+            "address": "verified" if address else "inferred",
+            "phone": "verified" if phone else "inferred",
+            "website": "verified" if website else "inferred",
+            "rating": "verified" if rating is not None else "inferred",
+            "review_count": "verified" if rev_count is not None else "inferred",
+            "business_status": "verified" if raw.business_status else "inferred",
+            "capacity": "inferred",
+            "base_cost": "inferred",
+        }
 
         return NormalizedProvider(
             source="GOOGLE_MAPS",
@@ -104,6 +123,7 @@ class ProviderNormalizer:
             name=name,
             category="OTHER",  # Classified in downstream classification layer
             raw_category=raw_category,
+            categories=categories_list,
             address=address,
             city=city,
             latitude=lat,
@@ -115,5 +135,9 @@ class ProviderNormalizer:
             review_count=rev_count,
             maps_url=raw.link,
             description=raw.description,
+            business_status=b_status,
+            is_active=is_active,
+            opening_hours=raw.opening_hours or {},
+            field_sources=field_sources,
             raw_data=raw.raw_data or raw.model_dump(mode="json"),
         )
