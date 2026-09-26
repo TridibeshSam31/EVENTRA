@@ -17,10 +17,131 @@ from app.schemas.venue import (
     PaginatedVenuesResponse,
     VenueDiscoveryRequest,
     VenueDiscoveryResponse,
+    VenueRecommendationRequest,
+    VenueRecommendationResponse,
+    RankedVenueItem,
 )
+from app.models.event import Event
+from app.models.requirement import Requirement
 from app.core.exceptions import AppException
+from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/venues", tags=["venues"])
+
+
+class VenueSelectRequest(BaseModel):
+    event_id: str = Field(..., description="Target Event ID")
+    venue_id: str = Field(..., description="Chosen Venue ID")
+
+
+@router.post("/recommend", response_model=VenueRecommendationResponse, status_code=status.HTTP_200_OK)
+def recommend_venues(
+    req: VenueRecommendationRequest,
+    db: Session = Depends(get_db_session),
+):
+    """AI Agent venue navigation: Scouts live open geospatial radar and ranks the best venue for the event requirement."""
+    service = VenueService(db)
+
+    city = req.city
+    guest_count = req.guest_count
+    event_type = req.event_type
+    budget = req.budget
+    user_description = req.description
+
+    # Inherit from event if provided
+    if req.event_id:
+        event = db.query(Event).filter(Event.id == req.event_id).first()
+        if event:
+            if not city or city == "Delhi":
+                city = event.location or city
+            if not guest_count:
+                guest_count = event.guest_count
+            if not event_type:
+                event_type = event.event_type
+            if not budget:
+                budget = float(event.total_budget or 0)
+            if not user_description:
+                user_description = event.description
+
+    res = service.recommend_best_venues(
+        city=city or "Delhi",
+        guest_count=guest_count,
+        event_type=event_type,
+        budget=budget,
+        required_amenities=req.required_amenities,
+        user_description=user_description,
+    )
+
+    return VenueRecommendationResponse(
+        city=res["city"],
+        total_scouted=res["total_scouted"],
+        agent_summary=res["agent_summary"],
+        best_venue=RankedVenueItem(**res["best_venue"]) if res["best_venue"] else None,
+        ranked_venues=[RankedVenueItem(**item) for item in res["ranked_venues"]],
+    )
+
+
+@router.post("/select", status_code=status.HTTP_200_OK)
+def select_event_venue(
+    req: VenueSelectRequest,
+    db: Session = Depends(get_db_session),
+):
+    """Locks the selected venue to the event specification and updates operational requirements."""
+    service = VenueService(db)
+    venue = service.get_venue(req.venue_id)
+    if not venue:
+        raise AppException(
+            message=f"Venue '{req.venue_id}' not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="VENUE_NOT_FOUND",
+        )
+
+    event = db.query(Event).filter(Event.id == req.event_id).first()
+    if not event:
+        raise AppException(
+            message=f"Event '{req.event_id}' not found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="EVENT_NOT_FOUND",
+        )
+
+    event.location = f"{venue.name}, {venue.city}"
+
+    req_record = db.query(Requirement).filter(
+        Requirement.event_id == event.id,
+        Requirement.type == "VENUE",
+    ).first()
+    venue_details = {
+        "venue_id": venue.id,
+        "venue_name": venue.name,
+        "address": venue.address,
+        "city": venue.city,
+        "capacity": venue.capacity,
+        "hourly_rate": venue.hourly_rate,
+        "amenities": venue.amenities,
+    }
+    if req_record:
+        req_record.value = venue_details
+        req_record.description = f"Locked venue: {venue.name} in {venue.city}"
+    else:
+        req_record = Requirement(
+            event_id=event.id,
+            name=f"Venue: {venue.name}",
+            type="VENUE",
+            required=True,
+            description=f"Locked venue: {venue.name} in {venue.city}",
+            value=venue_details,
+        )
+        db.add(req_record)
+
+    db.commit()
+    db.refresh(event)
+
+    return {
+        "success": True,
+        "message": f"Venue '{venue.name}' successfully locked for event '{event.name}'",
+        "event_id": event.id,
+        "venue": venue_details,
+    }
 
 
 @router.post("/discover", response_model=VenueDiscoveryResponse, status_code=status.HTTP_200_OK)

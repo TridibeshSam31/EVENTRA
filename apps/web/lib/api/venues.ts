@@ -73,3 +73,56 @@ export async function discoverVenuesForEvent(
   return apiClient.post(`/events/${eventId}/venues/discover`, payload);
 }
 
+export interface VenueRecommendationParams {
+  city: string;
+  guest_count?: number;
+  event_type?: string;
+  budget?: number;
+  required_amenities?: string[];
+  description?: string;
+  event_id?: string;
+}
+
+export interface RankedVenue {
+  id: string;
+  name: string;
+  address?: string;
+  city: string;
+  capacity: number;
+  venue_type: string;
+  hourly_rate?: number;
+  amenities: string[];
+  suitability_score: number;
+  is_best_match: boolean;
+  badge: string;
+  match_reasons: string[];
+  pros: string[];
+  cons: string[];
+  capacity_status: string;
+}
+
+export interface VenueRecommendationResult {
+  city: string;
+  total_scouted: number;
+  agent_summary: string;
+  best_venue?: RankedVenue;
+  ranked_venues: RankedVenue[];
+}
+
+export async function recommendVenues(
+  payload: VenueRecommendationParams
+): Promise<VenueRecommendationResult> {
+  return apiClient.post("/venues/recommend", payload);
+}
+
+export async function selectEventVenue(
+  eventId: string,
+  venueId: string
+): Promise<{ success: boolean; message: string; venue: any }> {
+  return apiClient.post("/venues/select", {
+    event_id: eventId,
+    venue_id: venueId,
+  });
+}
+
+

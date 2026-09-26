@@ -123,3 +123,40 @@ class VenueDiscoveryResponse(BaseModel):
     source: str
     items: List[VenueResponse]
 
+
+class VenueRecommendationRequest(BaseModel):
+    city: str = Field("Delhi", description="Target city or state")
+    guest_count: Optional[int] = Field(None, description="Expected guest or attendee count")
+    event_type: Optional[str] = Field(None, description="Type of event")
+    budget: Optional[float] = Field(None, description="Total budget in currency")
+    required_amenities: Optional[List[str]] = Field(default_factory=list, description="Requested amenities")
+    description: Optional[str] = Field(None, description="Full natural language event requirement description")
+    event_id: Optional[str] = Field(None, description="Optional related event ID")
+
+
+class RankedVenueItem(BaseModel):
+    id: str
+    name: str
+    address: Optional[str] = None
+    city: str
+    capacity: int
+    venue_type: str
+    hourly_rate: Optional[float] = None
+    amenities: List[str] = Field(default_factory=list)
+    suitability_score: int = Field(..., description="Fit percentage 0-100")
+    is_best_match: bool = False
+    badge: str = "Candidate Space"
+    match_reasons: List[str] = Field(default_factory=list)
+    pros: List[str] = Field(default_factory=list)
+    cons: List[str] = Field(default_factory=list)
+    capacity_status: str = "FIT"
+
+
+class VenueRecommendationResponse(BaseModel):
+    city: str
+    total_scouted: int
+    agent_summary: str
+    best_venue: Optional[RankedVenueItem] = None
+    ranked_venues: List[RankedVenueItem] = Field(default_factory=list)
+
+

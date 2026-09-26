@@ -3,7 +3,7 @@
 Implements deterministic discovery, filtering, availability checks,
 and factual suitability evaluation for venues.
 """
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Set
 from datetime import datetime
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
@@ -360,4 +360,179 @@ class VenueService:
             self.db.refresh(v)
 
         return result_venues, total_created, city, source
+
+    def recommend_best_venues(
+        self,
+        city: str,
+        guest_count: Optional[int] = None,
+        event_type: Optional[str] = None,
+        budget: Optional[float] = None,
+        required_amenities: Optional[List[str]] = None,
+        user_description: Optional[str] = None,
+        limit: int = 15,
+    ) -> Dict[str, Any]:
+        """Scouts real venues from live geospatial network and ranks the best venue for the event requirement."""
+        city_clean = city.strip()
+        # 1. Discover live venues in that city
+        venues, _, _, _ = self.discover_live_venues(
+            city=city_clean,
+            limit=limit,
+            save_to_db=True,
+        )
+
+        # Supplement with any existing DB venues in that city
+        db_venues = self.db.query(Venue).filter(func.lower(Venue.city) == city_clean.lower()).all()
+        seen_ids = set()
+        all_candidates: List[Venue] = []
+        for v in (venues + db_venues):
+            if v.id not in seen_ids:
+                seen_ids.add(v.id)
+                all_candidates.append(v)
+
+        # 2. Extract keywords from user_description if provided
+        keywords: Set[str] = set()
+        if required_amenities:
+            for a in required_amenities:
+                keywords.add(a.lower().strip())
+        desc_lower = (user_description or "").lower()
+        check_words = [
+            "outdoor", "lawn", "garden", "banquet", "hall", "parking", "av",
+            "sound", "stage", "lighting", "catering", "wifi", "luxury",
+            "auditorium", "theatre", "conference", "exhibition"
+        ]
+        for w in check_words:
+            if w in desc_lower:
+                keywords.add(w)
+
+        # 3. Evaluate each venue
+        target_guests = guest_count or 100
+        scored_venues = []
+
+        for v in all_candidates:
+            cap = v.capacity or 500
+            # Capacity calculation
+            cap_status = "FIT"
+            if cap >= target_guests:
+                ratio = cap / target_guests
+                if 1.0 <= ratio <= 2.5:
+                    cap_score = 98  # Ideal sizing
+                elif ratio <= 5.0:
+                    cap_score = 90  # Generous headroom
+                else:
+                    cap_score = 80  # Much larger than needed
+            else:
+                shortfall = (target_guests - cap) / target_guests
+                cap_score = max(30, int(90 - (shortfall * 70)))
+                cap_status = "TIGHT" if cap_score >= 60 else "EXCEEDED"
+
+            # Amenity & description keyword match
+            v_amenities = [a.lower() for a in (v.amenities or [])]
+            v_text = f"{v.name} {v.venue_type} {' '.join(v_amenities)}".lower()
+
+            matched_amenities = []
+            pros = []
+            cons = []
+
+            if cap >= target_guests:
+                pros.append(f"Comfortably accommodates {target_guests} attendees (capacity: {cap})")
+            else:
+                cons.append(f"Capacity of {cap} is below the {target_guests} guest requirement")
+
+            amenity_score = 85
+            if keywords:
+                matched = [kw for kw in keywords if kw in v_text]
+                matched_amenities = matched
+                if matched:
+                    amenity_score = min(99, 75 + int((len(matched) / len(keywords)) * 25))
+                    pros.append(f"Supports required features: {', '.join(matched)}")
+                else:
+                    amenity_score = 65
+                    cons.append("May require external setup for specialized amenities")
+            else:
+                matched_amenities = (v.amenities or [])[:3]
+
+            # Budget score
+            budget_score = 90
+            hr_rate = v.hourly_rate or 250.0
+            if budget:
+                est_venue_cost = hr_rate * 8.0  # 8 hour day estimate
+                if est_venue_cost <= (budget * 0.4):
+                    budget_score = 95
+                    pros.append(f"Within target budget range (~₹{est_venue_cost:,.0f} full day)")
+                elif est_venue_cost <= (budget * 0.6):
+                    budget_score = 80
+                else:
+                    budget_score = 65
+                    cons.append(f"Higher hourly rate (₹{hr_rate}/hr may consume significant budget)")
+
+            # Overall composite suitability score (weighted)
+            overall_score = int((cap_score * 0.45) + (amenity_score * 0.35) + (budget_score * 0.20))
+            overall_score = max(45, min(99, overall_score))
+
+            # Badge designation
+            badge = "Candidate Space"
+            if overall_score >= 93:
+                badge = "🏆 Top Recommendation"
+            elif "outdoor" in v_text or "lawn" in v_text:
+                badge = "🌳 Premier Outdoor Venue"
+            elif cap >= 1000:
+                badge = "🌟 Mega Capacity Space"
+            elif hr_rate < 200:
+                badge = "💰 Best Value Space"
+
+            match_reasons = []
+            if cap_status == "FIT":
+                match_reasons.append(f"Fits {target_guests} guests with comfortable operational buffer")
+            if matched_amenities:
+                match_reasons.append(f"Matches requirements: {', '.join(matched_amenities[:3])}")
+            if v.address:
+                match_reasons.append(f"Location: {v.address}")
+
+            scored_venues.append({
+                "id": v.id,
+                "name": v.name,
+                "address": v.address or f"{v.city} Metro Area",
+                "city": v.city,
+                "capacity": cap,
+                "venue_type": v.venue_type,
+                "hourly_rate": hr_rate,
+                "amenities": v.amenities or [],
+                "suitability_score": overall_score,
+                "is_best_match": False,
+                "badge": badge,
+                "match_reasons": match_reasons,
+                "pros": pros,
+                "cons": cons,
+                "capacity_status": cap_status,
+            })
+
+        # Sort descending by suitability score
+        scored_venues.sort(key=lambda x: x["suitability_score"], reverse=True)
+
+        best_venue = None
+        if scored_venues:
+            scored_venues[0]["is_best_match"] = True
+            scored_venues[0]["badge"] = "🏆 Best Overall Match"
+            best_venue = scored_venues[0]
+
+        summary = ""
+        if best_venue:
+            e_type_str = f" {event_type.lower()}" if event_type else " event"
+            g_str = f" for {target_guests} guests" if guest_count else ""
+            summary = (
+                f"Scouted {len(scored_venues)} venues in {city_clean}. Based on your{e_type_str} requirement{g_str}, "
+                f"the AI Agent recommends **{best_venue['name']}** as the best fit ({best_venue['suitability_score']}% match). "
+                f"It offers {best_venue['capacity']} capacity, {best_venue['venue_type']} layout, and matches your core operational criteria."
+            )
+        else:
+            summary = f"Scouted live venues in {city_clean}. No active candidates found."
+
+        return {
+            "city": city_clean,
+            "total_scouted": len(scored_venues),
+            "agent_summary": summary,
+            "best_venue": best_venue,
+            "ranked_venues": scored_venues,
+        }
+
 

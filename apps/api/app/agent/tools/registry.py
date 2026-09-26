@@ -1422,6 +1422,10 @@ def create_default_tool_registry() -> AgentToolRegistry:
     registry.register(RecordDecisionTool())
     registry.register(GetDecisionTraceTool())
 
+    # 7. Venue Discovery & Navigation Tools
+    from app.agent.tools.venue_tools import DiscoverAndRankVenuesTool
+    registry.register(DiscoverAndRankVenuesTool())
+
     return registry
 
 
