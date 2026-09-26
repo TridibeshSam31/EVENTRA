@@ -97,7 +97,9 @@ def log_startup_adapter_status():
             "    real vendors. All dispatch calls will silently succeed in local memory.",
             "    To contact real vendors:",
             "      - WhatsApp: set COMMUNICATION_PROVIDER=openwa and OPENWA_ENABLED=true in .env",
-            "      - Telephony: set COMMUNICATION_PROVIDER=exotel, EXOTEL_ENABLED=true, and",
+            "      - Telephony (Twilio): set COMMUNICATION_PROVIDER=twilio, TWILIO_ENABLED=true, and",
+            "        TWILIO_STREAM_URL=wss://<tunnel-domain>/api/v1/voice/stream in .env",
+            "      - Telephony (Exotel): set COMMUNICATION_PROVIDER=exotel, EXOTEL_ENABLED=true, and",
             "        EXOTEL_STREAM_URL=wss://<tunnel-domain>/api/v1/voice/exotel/stream in .env",
             "!" * 80,
         ]
