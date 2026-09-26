@@ -103,11 +103,13 @@ def test_ranking_engine_weight_profiles():
         max_budget=5000.0,
     )
     assert 0.0 <= score_corp <= 1.0
+    assert 0.0 <= score_wedding <= 1.0
+    assert score_corp != score_wedding  # Profiles MUST weight criteria differently
     assert len(reasons_corp) >= 2
 
 
 def test_outreach_service_state_machine():
-    """Verify outreach updates state to confirmed/declined and enforces shortlist eligibility."""
+    """Verify outreach updates state to pending_response on dispatch, confirmed when simulated/resolved."""
     cand = NormalizedProvider(
         name="Royal Feast Caterers",
         category="CATERING",
@@ -127,18 +129,28 @@ def test_outreach_service_state_machine():
     assert len(ranked_list) == 1
     assert ranked_list[0].availability == "unconfirmed"
 
+    # Real path: dispatch sets availability to pending_response
+    item_pending = DiscoveryOutreachService.contact_candidate(
+        item=ranked_list[0],
+        event_id="evt-test-1",
+        dev_simulate_responses=False,
+    )
+    assert item_pending.availability == "pending_response"
+
+    # Dev/test path: simulated response resolves to confirmed (for rating >= 4.0)
+    item_pending.availability = "unconfirmed"
     outreach_res = DiscoveryOutreachService.contact_batch(
         ranked_candidates=ranked_list,
         event_id="evt-test-1",
         batch_size=1,
-        simulate_responses=True,
+        dev_simulate_responses=True,
     )
     assert outreach_res.total_contacted == 1
     assert ranked_list[0].availability == "confirmed"
 
 
 def test_agentic_discovery_controller_end_to_end(db_session):
-    """Verify agentic discovery controller multi-iteration search, deduplication, and tiered shortlist output."""
+    """Verify agentic discovery controller multi-iteration search, deduplication, and confirmed shortlist eligibility."""
     controller = AgenticDiscoveryController(
         db=db_session,
         max_iterations=2,
@@ -156,5 +168,51 @@ def test_agentic_discovery_controller_end_to_end(db_session):
         simulate_outreach=True,
     )
 
-    assert result.funnel_stats.total_scraped >= 0
-    assert len(result.top_matches) + len(result.other_available_options) >= 0
+    # Invariant: every presented candidate MUST have confirmed availability
+    for cand in result.top_matches + result.other_available_options:
+        assert cand.availability == "confirmed"
+
+
+def test_radius_expansion_kwarg_plumbing(db_session, monkeypatch):
+    """Regression test: verify radius_km actually expands across iterations when target_count is not met."""
+    scraped_radii = []
+
+    def mock_search_providers(category, city=None, query=None, latitude=None, longitude=None, limit=20, radius_km=None):
+        scraped_radii.append(radius_km)
+        from app.integrations.base import IntegrationResult, IntegrationSource
+        # Return 1 candidate per iteration to force controller to expand radius on iteration 2
+        cand_dict = {
+            "name": f"Provider at {radius_km}km",
+            "category": "CATERING",
+            "city": "Delhi",
+            "rating": 4.5,
+            "phone": f"+9199999{len(scraped_radii)}",
+            "is_active": True,
+            "business_status": "OPERATIONAL",
+        }
+        return IntegrationResult(data=[cand_dict], source=IntegrationSource.REAL, success=True)
+
+    from app.integrations.registry import registry
+    adapter = registry.get_provider_directory()
+    monkeypatch.setattr(adapter, "search_providers", mock_search_providers)
+
+    controller = AgenticDiscoveryController(
+        db=db_session,
+        max_iterations=2,
+        target_count=5,  # High target to force iteration 2
+        allowed_expansion_km=10.0,
+    )
+
+    controller.execute_discovery(
+        event_id="test-event-radius",
+        category="CATERING",
+        location="Delhi",
+        base_radius_km=10.0,
+        simulate_outreach=True,
+    )
+
+    assert len(scraped_radii) >= 2
+    # Verify radius actually expanded between iteration 1 and iteration 2
+    assert scraped_radii[0] == 10.0
+    assert scraped_radii[-1] > 10.0
+

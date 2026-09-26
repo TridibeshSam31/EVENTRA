@@ -86,6 +86,7 @@ export function AgenticProviderDiscovery({
   const [maxBudget, setMaxBudget] = useState<number>(15000);
   const [baseRadius, setBaseRadius] = useState<number>(10);
   const [requiredAmenities, setRequiredAmenities] = useState<string>("");
+  const [demoMode, setDemoMode] = useState<boolean>(false);
 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [results, setResults] = useState<AgenticDiscoveryResponse | null>(null);
@@ -123,7 +124,7 @@ export function AgenticProviderDiscovery({
           required_amenities: amenitiesList,
           target_count: 6,
           max_iterations: 3,
-          simulate_outreach: true,
+          simulate_outreach: demoMode,
         }),
       });
 
@@ -251,9 +252,16 @@ export function AgenticProviderDiscovery({
         </div>
 
         <div className="mt-4 flex items-center justify-between pt-3 border-t border-slate-800">
-          <span className="text-[11px] text-slate-400 italic">
-            Automated multi-query planning, strict pass/fail gating, and availability outreach verification
-          </span>
+          <label className="flex items-center gap-2 cursor-pointer text-[11px] text-slate-300">
+            <input
+              type="checkbox"
+              checked={demoMode}
+              onChange={(e) => setDemoMode(e.target.checked)}
+              className="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-0 h-3.5 w-3.5"
+            />
+            <span className="font-semibold text-yellow-400">Demo Mode</span>
+            <span className="text-slate-500">(Simulate vendor outreach replies)</span>
+          </label>
           <button
             type="submit"
             disabled={isLoading}
