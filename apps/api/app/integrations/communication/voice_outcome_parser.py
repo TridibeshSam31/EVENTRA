@@ -44,6 +44,10 @@ from app.models.enums import (
 from app.models.vendor_outcome import VendorOutcome
 from app.models.vendor_outcome_validation import VendorOutcomeValidation
 from app.schemas.vendor_outcome import VendorOutcomeCreate
+from app.schemas.vendor_binding import (
+    BindingDecision,
+    VendorTaskBindingResponse,
+)
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.services.vendor_outcome_service import VendorOutcomeService
