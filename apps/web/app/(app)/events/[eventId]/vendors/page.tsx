@@ -12,10 +12,12 @@ import {
 import {
   getAssignmentsForEvent,
   discoverProviders,
-  type VendorResponse,
-  type VendorAssignmentResponse,
-} from '../../../../lib/api/vendors';
-import { getActivityFeed } from '../../../../lib/api/observability';
+} from '@/lib/api/vendors';
+import type {
+  VendorResponse,
+  VendorAssignmentResponse,
+} from '@/types/api';
+import { getActivityFeed } from '@/lib/api/observability';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface ActivityEntry {
@@ -184,7 +186,7 @@ export default function ProvidersPage() {
   };
 
   // Merge: confirmed assignments + newly discovered
-  const allVendors: Array<VendorResponse & { _assigned?: boolean }> = [
+  const allVendors: Array<Partial<VendorResponse> & { id: string; name: string; _assigned?: boolean }> = [
     ...assignments.map(a => ({
       ...(a.vendor || {}),
       id: a.vendor_id,

@@ -8,8 +8,8 @@ import {
   MessageSquare, DollarSign, Clock, LayoutTemplate, Activity,
   CornerDownRight, Fingerprint, RefreshCw, Loader2, Bot
 } from 'lucide-react';
-import { listApprovals, approveRequest, rejectRequest } from '../../../../lib/api/approvals';
-import type { ApprovalRequestResponse } from '../../../../types/api';
+import { listApprovals, approveRequest, rejectRequest } from '@/lib/api/approvals';
+import type { ApprovalRequestResponse } from '@/types/api';
 
 // ─── Fallback static data (only shown while loading or if event has no real approvals yet) ───
 const STATIC_APPROVALS = [
@@ -35,16 +35,21 @@ function severityFromPriority(priority?: string): 'critical' | 'warning' | 'info
 }
 
 function toDisplayItem(r: ApprovalRequestResponse) {
+  const reqAction = (r.requested_action || {}) as Record<string, any>;
+  const title = (reqAction.title as string) || (reqAction.action as string) || (r.action_type ? r.action_type.replace(/_/g, ' ').toUpperCase() : 'Approval Request');
+  const description = (reqAction.description as string) || (reqAction.reason as string) || (r.decision_notes) || `Target: ${r.target_type || 'system'} (${r.target_id || 'N/A'})`;
+  const aiAnalysis = (reqAction.ai_context as string) || (reqAction.reasoning as string) || (reqAction.recommendation as string) || `Agent requested ${r.action_type} on ${r.target_type || 'event'}. Impact level: ${r.impact_level}.`;
+
   return {
     id: r.id,
     type: r.action_type || 'Operational Action',
-    title: r.title || r.action_type || 'Approval Request',
+    title,
     requestedBy: r.requester_id || 'System AI',
     time: r.created_at ? new Date(r.created_at).toLocaleTimeString() : '',
-    severity: severityFromPriority(r.priority),
-    description: r.description || 'No description provided.',
-    aiAnalysis: r.ai_context || r.reasoning || 'No AI context available.',
-    status: r.status,
+    severity: severityFromPriority(r.impact_level),
+    description,
+    aiAnalysis,
+    status: r.status as string,
   };
 }
 

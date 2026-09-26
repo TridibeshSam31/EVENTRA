@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 export interface CandidateCard {
-  id: str;
+  id: string;
   name: string;
   category: string;
   city: string;
