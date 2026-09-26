@@ -16,10 +16,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 # Ensure test environment
 os.environ["ENVIRONMENT"] = "test"
 os.environ["LLM_PROVIDER"] = "mock"
+os.environ["COMMUNICATION_PROVIDER"] = "mock"
+os.environ["EXOTEL_ENABLED"] = "false"
+os.environ["OPENWA_ENABLED"] = "false"
+os.environ.setdefault("EXOTEL_STREAM_URL", "wss://test.stream.eventra.ai/stream")
 
 from app.main import app
 from app.core.config import settings
 settings.LLM_PROVIDER = "mock"
+settings.COMMUNICATION_PROVIDER = "mock"
+settings.EXOTEL_ENABLED = False
+settings.OPENWA_ENABLED = False
+if not settings.EXOTEL_STREAM_URL:
+    settings.EXOTEL_STREAM_URL = "wss://test.stream.eventra.ai/stream"
+settings.GEMINI_LIVE_MODEL = "gemini-3.8-live"
+
+from app.integrations.registry import registry
+registry._communication_provider = None
 from app.db.base import Base
 from app.db.session import get_db
 from app.api.dependencies import get_db_session

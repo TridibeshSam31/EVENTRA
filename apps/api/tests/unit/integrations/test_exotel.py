@@ -18,7 +18,7 @@ import httpx
 from unittest.mock import MagicMock, patch
 
 from app.core.config import settings
-from app.integrations.base import IntegrationSource
+from app.integrations.base import IntegrationSource, IntegrationResult
 from app.integrations.communication.exotel import ExotelVoiceAdapter, _normalize_phone_number
 from app.integrations.registry import IntegrationRegistry
 from app.services.provider_communication_service import ProviderCommunicationService
@@ -159,6 +159,7 @@ def test_exotel_successful_call_xml_response(monkeypatch):
         api_token="mock_token",
         account_sid="mock_sid",
         caller_id="08012345678",
+        stream_url="wss://test.domain/api/v1/voice/exotel/stream",
     )
 
     xml_content = """<?xml version="1.0" encoding="UTF-8"?>
@@ -200,6 +201,7 @@ def test_exotel_api_http_error(monkeypatch):
         api_token="bad_token",
         account_sid="bad_sid",
         caller_id="08012345678",
+        stream_url="wss://test.domain/api/v1/voice/exotel/stream",
     )
 
     fake_response = httpx.Response(
@@ -231,6 +233,7 @@ def test_exotel_network_timeout(monkeypatch):
         api_token="token",
         account_sid="sid",
         caller_id="08012345678",
+        stream_url="wss://test.domain/api/v1/voice/exotel/stream",
     )
 
     with patch.object(httpx.Client, "post", side_effect=httpx.ConnectTimeout("Connection timed out")):
@@ -318,6 +321,26 @@ def test_provider_communication_service_make_call(monkeypatch):
     """Verifies ProviderCommunicationService.make_call dispatches to adapter and writes audit log."""
     mock_db = MagicMock()
     service = ProviderCommunicationService(db=mock_db)
+
+    monkeypatch.setattr(
+        service._provider,
+        "make_call",
+        lambda **kwargs: IntegrationResult(
+            data={
+                "call_sid": "exotel-test-sid-123",
+                "session_id": kwargs.get("session_id", "sess-voice-test"),
+                "event_id": kwargs.get("event_id"),
+                "task_id": kwargs.get("task_id"),
+                "provider_id": kwargs.get("provider_id"),
+                "recipient_phone": kwargs.get("recipient_phone"),
+                "status": "QUEUED",
+                "channel": "EXOTEL_VOICE",
+            },
+            source=IntegrationSource.REAL,
+            success=True,
+            latency_ms=45.0,
+        ),
+    )
 
     result = service.make_call(
         event_id="evt-prod-1",

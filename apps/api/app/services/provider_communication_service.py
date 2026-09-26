@@ -100,15 +100,28 @@ class ProviderCommunicationService:
         actor_type: Optional[str] = "SYSTEM",
     ) -> IntegrationResult[Dict[str, Any]]:
         """Initiates an outbound telephony call to a vendor/provider."""
-        result = self._provider.make_call(
-            event_id=event_id,
-            provider_id=provider_id,
-            recipient_phone=recipient_phone,
-            task_id=task_id,
-            session_id=session_id,
-            custom_field=custom_field,
-            metadata=metadata,
-        )
+        try:
+            result = self._provider.make_call(
+                event_id=event_id,
+                provider_id=provider_id,
+                recipient_phone=recipient_phone,
+                task_id=task_id,
+                session_id=session_id,
+                custom_field=custom_field,
+                metadata=metadata,
+            )
+        except NotImplementedError:
+            from app.integrations.communication.exotel import ExotelVoiceAdapter
+            exotel_adapter = ExotelVoiceAdapter()
+            result = exotel_adapter.make_call(
+                event_id=event_id,
+                provider_id=provider_id,
+                recipient_phone=recipient_phone,
+                task_id=task_id,
+                session_id=session_id,
+                custom_field=custom_field,
+                metadata=metadata,
+            )
 
         if self._audit:
             self._audit.record(

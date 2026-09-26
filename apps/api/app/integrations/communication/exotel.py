@@ -32,31 +32,40 @@ def _normalize_phone_number(phone: Optional[str]) -> str:
     return digits
 
 
+_DEFAULT = object()
+
+
 class ExotelVoiceAdapter(ProviderCommunicationProvider):
     """Exotel telephony communication adapter for outbound calls and status verification."""
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        api_token: Optional[str] = None,
-        account_sid: Optional[str] = None,
-        subdomain: Optional[str] = None,
-        caller_id: Optional[str] = None,
-        app_id: Optional[str] = None,
-        stream_url: Optional[str] = None,
-        callback_url: Optional[str] = None,
-        timeout_seconds: Optional[int] = None,
+        api_key: Any = _DEFAULT,
+        api_token: Any = _DEFAULT,
+        account_sid: Any = _DEFAULT,
+        subdomain: Any = _DEFAULT,
+        caller_id: Any = _DEFAULT,
+        app_id: Any = _DEFAULT,
+        stream_url: Any = _DEFAULT,
+        callback_url: Any = _DEFAULT,
+        timeout_seconds: Any = _DEFAULT,
         **kwargs: Any,
     ):
-        self.api_key = api_key or settings.EXOTEL_API_KEY
-        self.api_token = api_token or settings.EXOTEL_API_TOKEN
-        self.account_sid = account_sid or settings.EXOTEL_ACCOUNT_SID
-        self.subdomain = (subdomain or settings.EXOTEL_SUBDOMAIN or "api.exotel.com").strip()
-        self.caller_id = caller_id or settings.EXOTEL_CALLER_ID
-        self.app_id = app_id or settings.EXOTEL_APP_ID
-        self.stream_url = stream_url or settings.EXOTEL_STREAM_URL
-        self.callback_url = callback_url or settings.EXOTEL_CALLBACK_URL
-        self.timeout_seconds = timeout_seconds or settings.EXOTEL_TIMEOUT_SECONDS
+        self.api_key = settings.EXOTEL_API_KEY if api_key is _DEFAULT else api_key
+        self.api_token = settings.EXOTEL_API_TOKEN if api_token is _DEFAULT else api_token
+        self.account_sid = settings.EXOTEL_ACCOUNT_SID if account_sid is _DEFAULT else account_sid
+        self.subdomain = (
+            (settings.EXOTEL_SUBDOMAIN or "api.exotel.com")
+            if subdomain is _DEFAULT
+            else (subdomain or "api.exotel.com")
+        ).strip()
+        self.caller_id = settings.EXOTEL_CALLER_ID if caller_id is _DEFAULT else caller_id
+        self.app_id = settings.EXOTEL_APP_ID if app_id is _DEFAULT else app_id
+        self.stream_url = settings.EXOTEL_STREAM_URL if stream_url is _DEFAULT else stream_url
+        self.callback_url = settings.EXOTEL_CALLBACK_URL if callback_url is _DEFAULT else callback_url
+        self.timeout_seconds = (
+            settings.EXOTEL_TIMEOUT_SECONDS if timeout_seconds is _DEFAULT else timeout_seconds
+        )
         self._fallback = MockCommunicationProvider()
 
     @property
@@ -143,12 +152,32 @@ class ExotelVoiceAdapter(ProviderCommunicationProvider):
         }
         custom_str = custom_field or json.dumps(custom_payload)
 
+        # STRICT REQUIREMENT: Fail loudly if EXOTEL_STREAM_URL is not configured
+        if not self.stream_url:
+            err_msg = "EXOTEL_STREAM_URL not set — outbound calls cannot bridge audio"
+            logger.error(err_msg)
+            return IntegrationResult(
+                data={
+                    "call_sid": None,
+                    "session_id": sid,
+                    "event_id": event_id,
+                    "task_id": task_id,
+                    "provider_id": provider_id,
+                    "recipient_phone": normalized_recipient,
+                    "status": "FAILED",
+                    "channel": "EXOTEL_VOICE",
+                    "error": err_msg,
+                },
+                source=IntegrationSource.REAL,
+                success=False,
+                error=err_msg,
+            )
+
         # Build form payload according to direct Exotel Connect Voice AI specification
-        stream_url = self.stream_url or "wss://api.eventra.ai/api/v1/voice/exotel/stream"
         form_data: Dict[str, str] = {
             "From": normalized_recipient,
             "CallerId": self.caller_id,
-            "StreamUrl": stream_url,
+            "StreamUrl": self.stream_url,
             "StreamType": "bidirectional",
             "CustomField": custom_str,
         }
