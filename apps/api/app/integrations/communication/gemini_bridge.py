@@ -386,6 +386,30 @@ class GeminiLiveBridge(AudioStreamListener):
                 self.turn_count,
                 len(self.transcript),
             )
+            # Record voice transcript as inbound Message through ConversationService (Part A.2)
+            if self.transcript:
+                try:
+                    full_transcript = self.get_full_transcript_text()
+                    event_id = self.sanitized_context.event_id if self.sanitized_context else None
+                    if full_transcript and event_id and event_id != "default-event":
+                        from app.db.session import SessionLocal
+                        from app.services.conversation_service import ConversationService
+                        with SessionLocal() as db_session:
+                            conv_service = ConversationService(db_session)
+                            conv_service.record_inbound_message(
+                                event_id=event_id,
+                                vendor_id=self.sanitized_context.provider_id if self.sanitized_context else None,
+                                raw_text=full_transcript,
+                                channel="call",
+                                sender=f"Vendor Voice Call ({self.session.call_sid})",
+                                context={
+                                    "task_id": self.sanitized_context.task_id if self.sanitized_context else None,
+                                    "event_type": self.sanitized_context.event_type if self.sanitized_context else None,
+                                    "guest_count": self.sanitized_context.guest_count if self.sanitized_context else None,
+                                },
+                            )
+                except Exception as tx_exc:
+                    logger.warning("Failed to record voice call transcript into ConversationService: %s", tx_exc)
 
     async def _send_loop(self, gemini_session: Any) -> None:
         """Reads Exotel audio from the bounded queue and streams it to Gemini Live."""

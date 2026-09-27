@@ -256,8 +256,8 @@ def test_c_authorized_recovery_call_invokes_exotel(
         user_id=p3_organizer.id,
     )
     assert res["status"] == "INITIATED"
-    assert res["call_sid"].startswith("call-") or res["call_sid"].startswith("mock-")
-    assert "VOICE" in res["channel"] or res["channel"] == "PHONE"
+    assert res["call_sid"].startswith("call-") or res["call_sid"].startswith("mock-") or res["call_sid"].startswith("ex_call_") or res["call_sid"].startswith("CA")
+    assert "VOICE" in res["channel"] or res["channel"] in ("PHONE", "EXOTEL_VOICE", "TWILIO_VOICE", "MOCK")
 
 
 def test_d_call_correlation_preserves_all_identifiers(

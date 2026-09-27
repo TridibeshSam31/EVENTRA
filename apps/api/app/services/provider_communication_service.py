@@ -111,17 +111,43 @@ class ProviderCommunicationService:
                 metadata=metadata,
             )
         except NotImplementedError:
-            from app.integrations.communication.exotel import ExotelVoiceAdapter
-            exotel_adapter = ExotelVoiceAdapter()
-            result = exotel_adapter.make_call(
-                event_id=event_id,
-                provider_id=provider_id,
-                recipient_phone=recipient_phone,
-                task_id=task_id,
-                session_id=session_id,
-                custom_field=custom_field,
-                metadata=metadata,
-            )
+            from app.core.config import settings
+            if settings.TWILIO_ENABLED or (settings.COMMUNICATION_PROVIDER or "").lower() == "twilio":
+                from app.integrations.communication.twilio import TwilioVoiceAdapter
+                twilio_adapter = TwilioVoiceAdapter()
+                result = twilio_adapter.make_call(
+                    event_id=event_id,
+                    provider_id=provider_id,
+                    recipient_phone=recipient_phone,
+                    task_id=task_id,
+                    session_id=session_id,
+                    custom_field=custom_field,
+                    metadata=metadata,
+                )
+            elif settings.EXOTEL_ENABLED:
+                from app.integrations.communication.exotel import ExotelVoiceAdapter
+                exotel_adapter = ExotelVoiceAdapter()
+                result = exotel_adapter.make_call(
+                    event_id=event_id,
+                    provider_id=provider_id,
+                    recipient_phone=recipient_phone,
+                    task_id=task_id,
+                    session_id=session_id,
+                    custom_field=custom_field,
+                    metadata=metadata,
+                )
+            else:
+                from app.integrations.communication.mock import MockCommunicationProvider
+                mock_adapter = MockCommunicationProvider()
+                result = mock_adapter.make_call(
+                    event_id=event_id,
+                    provider_id=provider_id,
+                    recipient_phone=recipient_phone,
+                    task_id=task_id,
+                    session_id=session_id,
+                    custom_field=custom_field,
+                    metadata=metadata,
+                )
 
         if self._audit:
             self._audit.record(
@@ -138,8 +164,8 @@ class ProviderCommunicationService:
                     "recipient_phone": recipient_phone,
                     "session_id": session_id,
                     "success": result.success,
-                    "channel": result.data.get("channel") if result.data else "UNKNOWN",
-                    "call_sid": result.data.get("call_sid") if result.data else None,
+                    "channel": str(result.data.get("channel")) if (result.data and result.data.get("channel")) else "UNKNOWN",
+                    "call_sid": str(result.data.get("call_sid")) if (result.data and result.data.get("call_sid") is not None) else None,
                 },
             )
 

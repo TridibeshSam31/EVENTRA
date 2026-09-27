@@ -39,6 +39,7 @@ class DiscoveryOutreachService:
         task_id: Optional[str] = None,
         dev_simulate_responses: bool = False,
         simulate_responses: Optional[bool] = None,
+        db: Optional[Any] = None,
     ) -> RankedCandidate:
         """Contacts a single ranked candidate to confirm availability.
 
@@ -63,12 +64,28 @@ class DiscoveryOutreachService:
         # Attempt communication dispatch via registered communication provider
         try:
             comm_provider = registry.get_communication_provider()
+            msg_text = f"Hello {cand.name}, checking availability for {cand.category} event ID {event_id}."
             comm_provider.send_message(
                 event_id=event_id,
                 provider_id=cand.source_id or cand.name,
-                message=f"Hello {cand.name}, checking availability for {cand.category} event ID {event_id}.",
+                message=msg_text,
                 recipient_contact=phone,
             )
+
+            # Persist outbound message in ConversationService (Part A.2)
+            if db:
+                try:
+                    from app.services.conversation_service import ConversationService
+                    conv_service = ConversationService(db)
+                    conv_service.record_outbound_message(
+                        event_id=event_id,
+                        vendor_id=cand.source_id,
+                        raw_text=msg_text,
+                        channel="whatsapp",
+                        recipient=phone,
+                    )
+                except Exception as conv_err:
+                    logger.warning(f"Could not persist outbound message in conversation log: {conv_err}")
 
             if dev_simulate_responses:
                 # DEV ONLY: deterministically resolve based on rating for local testing
@@ -108,6 +125,7 @@ class DiscoveryOutreachService:
         batch_size: int = 5,
         dev_simulate_responses: bool = False,
         simulate_responses: Optional[bool] = None,
+        db: Optional[Any] = None,
     ) -> OutreachContactBatchResult:
         """Contacts a batch of uncontacted qualified candidates and updates their availability states."""
         if simulate_responses is not None:
@@ -125,6 +143,7 @@ class DiscoveryOutreachService:
                 event_id=event_id,
                 task_id=task_id,
                 dev_simulate_responses=dev_simulate_responses,
+                db=db,
             )
             if updated_item.availability == "confirmed":
                 confirmed.append(updated_item)

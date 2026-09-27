@@ -4,7 +4,7 @@ Provides REST endpoints for natural language event intake, missing information d
 conversational plan modification, and 'Start Operations' autonomous execution.
 """
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -90,13 +90,23 @@ def modify_plan(
 @router.post("/{event_id}/start-operations", status_code=status.HTTP_200_OK)
 def start_operations(
     event_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
 ) -> Dict[str, Any]:
-    """Transitions event to LIVE and begins autonomous venue and multi-category vendor sourcing and dispatch."""
+    """Transitions event to LIVE and initiates autonomous operations & discovery in background.
+    (Decision 1: start_operations must not run discovery synchronously in the request)
+    """
     service = AutonomousOperationsService(db)
     try:
-        result = service.start_operations(event_id=event_id)
-        return result
+        init_result = service.initiate_operations_run(event_id=event_id, user_id=current_user_id)
+        background_tasks.add_task(
+            AutonomousOperationsService.run_background_operations,
+            event_id=event_id,
+            run_id=init_result.get("run_id"),
+            user_id=current_user_id,
+        )
+        return init_result
     except NotFoundException as nfe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(nfe))
     except BadRequestException as bre:

@@ -23,6 +23,8 @@ from app.api.routes.agent import router as agent_router
 from app.api.routes.integrations import router as integrations_router
 from app.api.routes.intake import router as intake_router
 from app.api.routes.voice import router as voice_router
+from app.api.routes.discovery_runs import router as discovery_runs_router
+from app.api.routes.conversations import router as conversations_router
 
 # Initialize application logging
 setup_logging()
@@ -194,6 +196,14 @@ app.include_router(integrations_router, prefix=settings.API_V1_STR)
 
 # Conversational Intake & Autonomous Operations Execution
 app.include_router(intake_router, prefix=settings.API_V1_STR)
+
+# Discovery Runs & Live Funnel Telemetry (Part A.1)
+app.include_router(discovery_runs_router, prefix=settings.API_V1_STR)
+app.include_router(discovery_runs_router)
+
+# Real Conversations & Message Threads (Part A.2)
+app.include_router(conversations_router, prefix=settings.API_V1_STR)
+app.include_router(conversations_router)
 
 # Exotel Connect Voice AI & AgentStream WebSocket Layer
 app.include_router(voice_router, prefix="/api/v1")

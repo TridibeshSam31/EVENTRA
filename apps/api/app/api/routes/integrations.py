@@ -203,6 +203,20 @@ async def receive_openwa_webhook(
 
     # 3. Find active assignment
     assignment = neg_service.find_active_assignment(vendor.id)
+    event_id = assignment.event_id if assignment else "SYSTEM"
+
+    # Persist inbound message and extract structured facts (Part A.2)
+    from app.services.conversation_service import ConversationService
+    conv_service = ConversationService(db)
+    msg_record = conv_service.record_inbound_message(
+        event_id=event_id,
+        raw_text=text,
+        vendor_id=vendor.id,
+        channel="whatsapp",
+        sender=sender,
+        context={"assignment_id": assignment.id} if assignment else None,
+    )
+
     if not assignment:
         audit = AuditRecorder(db)
         audit.record(
@@ -220,7 +234,28 @@ async def receive_openwa_webhook(
             "vendor_id": vendor.id,
             "vendor_name": vendor.name,
             "message": "Provider resolved, but no active engagement found.",
+            "extracted_facts": msg_record.extracted_facts,
         }
+
+    # Auto-trigger Incident on Provider Cancellation (Part B.10)
+    if msg_record.extracted_facts.get("available") is False:
+        try:
+            from app.schemas.incident import IncidentCreate
+            from app.models.enums import IncidentType, IncidentSeverity
+            from app.services.incident_service import IncidentService
+            inc_service = IncidentService(db)
+            inc_data = IncidentCreate(
+                incident_type=IncidentType.VENDOR_CANCELLED,
+                severity=IncidentSeverity.CRITICAL,
+                title=f"Provider Cancellation: {vendor.name}",
+                description=f"Provider {vendor.name} sent WhatsApp message: '{text}' indicating unavailability.",
+                source="INBOUND_WHATSAPP",
+                related_vendor_id=vendor.id,
+                related_task_id=getattr(assignment, "task_id", None),
+            )
+            inc_service.create_incident(event_id=assignment.event_id, data=inc_data, current_user_id="inbound_agent")
+        except Exception as inc_exc:
+            logger.warning(f"Could not auto-create incident on cancellation: {inc_exc}")
 
     # 4. Process provider response through authoritative domain service
     proc_result = neg_service.process_provider_response(
@@ -234,6 +269,7 @@ async def receive_openwa_webhook(
         "vendor_id": vendor.id,
         "vendor_name": vendor.name,
         "assignment_id": assignment.id,
+        "extracted_facts": msg_record.extracted_facts,
         "negotiation_result": proc_result,
     }
 

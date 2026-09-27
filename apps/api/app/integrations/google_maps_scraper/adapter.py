@@ -85,6 +85,8 @@ class GoogleMapsScraperAdapter(ProviderDirectoryProvider):
                         ProviderNormalizer.normalize(r, default_city=city_target)
                         for r in raw_results[:limit]
                     ]
+                    for p in normalized:
+                        p.source = "LIVE_SCRAPE"
                     latency = round((time.time() - start_time) * 1000, 2)
                     return IntegrationResult(
                         data=[p.model_dump(mode="json") for p in normalized],
@@ -107,6 +109,9 @@ class GoogleMapsScraperAdapter(ProviderDirectoryProvider):
                 limit=limit,
             )
             if live_providers:
+                for lp in live_providers:
+                    if isinstance(lp, dict):
+                        lp["source"] = "OSM_FALLBACK"
                 latency = round((time.time() - start_time) * 1000, 2)
                 return IntegrationResult(
                     data=live_providers,
@@ -120,6 +125,9 @@ class GoogleMapsScraperAdapter(ProviderDirectoryProvider):
         # Fallback to simulated fixture if scraper container and live network are not available
         if self.fallback_to_mock:
             simulated = self._get_simulated_fixtures(category, city_target, lat, lon)
+            for s in simulated:
+                if isinstance(s, dict):
+                    s["source"] = "SIMULATED"
             latency = round((time.time() - start_time) * 1000, 2)
             return IntegrationResult(
                 data=simulated[:limit],

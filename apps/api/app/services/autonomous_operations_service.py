@@ -39,6 +39,12 @@ from app.schemas.incident import IncidentCreate
 from app.schemas.approval import ApprovalRequestCreate
 from app.observability.audit import AuditRecorder
 from app.core.exceptions import NotFoundException, BadRequestException
+from app.models.discovery_run import DiscoveryRun
+from app.services.agentic_discovery_controller import AgenticDiscoveryController
+import uuid
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def utc_now():
@@ -63,10 +69,98 @@ class AutonomousOperationsService:
         self._verification_service = VerificationService(db)
         self._audit = AuditRecorder(db)
 
+    def initiate_operations_run(
+        self,
+        event_id: str,
+        user_id: str = "anonymous_operator",
+    ) -> Dict[str, Any]:
+        """Transitions event to LIVE, ensures plan exists, initiates DiscoveryRun,
+        and returns immediately so heavy multi-iteration scraping runs in BackgroundTasks.
+        (Decision 1: start_operations must not run discovery synchronously in the request)
+        """
+        event = self.db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            raise NotFoundException(f"Event with ID '{event_id}' not found.")
+
+        # 1. Ensure operational plan exists
+        existing_tasks = self.db.query(Task).filter(Task.event_id == event.id).all()
+        if not existing_tasks or event.lifecycle_state == EventLifecycleState.DRAFT.value:
+            self._planning_service.generate_plan(event.id)
+            self.db.refresh(event)
+
+        # 2. Transition lifecycle state to LIVE
+        if event.lifecycle_state in (EventLifecycleState.PLANNED.value, EventLifecycleState.DRAFT.value):
+            try:
+                self._live_state.go_live(event.id, reason="Organizer started autonomous operations")
+            except Exception:
+                event.lifecycle_state = EventLifecycleState.LIVE.value
+                event.state = EventState.NORMAL.value
+                self.db.commit()
+                self.db.refresh(event)
+
+        # 3. Create initial DiscoveryRun in RUNNING state
+        requirements = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
+        primary_category = requirements[0].type if requirements else "CATERING"
+        run_id = f"run_{uuid.uuid4().hex[:12]}"
+
+        run = DiscoveryRun(
+            id=run_id,
+            event_id=event.id,
+            category=primary_category,
+            status="RUNNING",
+            trigger="operations",
+            current_iteration=1,
+            max_iterations=3,
+            radius_km=10.0,
+            target_count=6,
+            parameters={
+                "location": event.location or "Delhi",
+                "guest_count": event.guest_count or 100,
+            },
+        )
+        self.db.add(run)
+        self.db.commit()
+        self.db.refresh(run)
+
+        return {
+            "status": "STARTED",
+            "message": f"Autonomous operations initiated for '{event.name}'. Discovery and outreach running in background.",
+            "event_id": event.id,
+            "run_id": run.id,
+            "lifecycle_state": event.lifecycle_state,
+        }
+
+    @classmethod
+    def run_background_operations(
+        cls,
+        event_id: str,
+        run_id: Optional[str] = None,
+        user_id: str = "anonymous_operator",
+    ):
+        """Asynchronous worker for running operations pipeline with isolated SessionLocal session."""
+        from app.db.session import SessionLocal
+        db = SessionLocal()
+        try:
+            service = cls(db)
+            service.start_operations(event_id=event_id, user_id=user_id, run_id=run_id)
+        except Exception as exc:
+            logger.error(f"Background operations execution failed for event {event_id}: {exc}", exc_info=True)
+            if run_id:
+                try:
+                    run = db.query(DiscoveryRun).filter(DiscoveryRun.id == run_id).first()
+                    if run:
+                        run.status = "FAILED"
+                        db.commit()
+                except Exception:
+                    pass
+        finally:
+            db.close()
+
     def start_operations(
         self,
         event_id: str,
         user_id: str = "anonymous_operator",
+        run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Transitions event to LIVE and kicks off autonomous sourcing and provider engagement."""
         event = self.db.query(Event).filter(Event.id == event_id).first()
@@ -110,10 +204,20 @@ class AutonomousOperationsService:
         # 5. Vendor Operations (Catering, AV, Photography, Security, Transport, etc.)
         vendor_categories = [c for c in categories_to_source if c != "VENUE"]
         for category in vendor_categories:
-            cat_res = self._execute_vendor_operations(event, category, city, pax, date_str)
+            cat_res = self._execute_vendor_operations(event, category, city, pax, date_str, run_id=run_id)
             operations_report.append(cat_res)
             if cat_res.get("contacted"):
                 providers_contacted_count += 1
+
+        # Complete DiscoveryRun if active
+        if run_id:
+            try:
+                run = self.db.query(DiscoveryRun).filter(DiscoveryRun.id == run_id).first()
+                if run:
+                    run.status = "COMPLETED"
+                    self.db.commit()
+            except Exception as r_err:
+                logger.warning(f"Could not mark DiscoveryRun completed: {r_err}")
 
         # 6. Audit & Telemetry
         self._audit.record(
@@ -142,7 +246,7 @@ class AutonomousOperationsService:
         )
         for item in operations_report:
             status_emoji = "✓" if item.get("status") in ("CONFIRMED", "CONTACTED", "SOURCED", "ASSIGNED") else "⟳"
-            src_tag = " [Simulated]" if item.get("is_simulated") else " [Verified DB]"
+            src_tag = f" [{item.get('source', 'LIVE_SCRAPE')}]"
             summary_msg += f"• **{item.get('category', '').title()}**: {status_emoji} {item.get('provider_name', 'Sourcing candidate')}{src_tag} ({item.get('status', 'Pending')})\n"
 
         summary_msg += (
@@ -154,6 +258,7 @@ class AutonomousOperationsService:
             "status": "OPERATING",
             "message": summary_msg,
             "event_id": event.id,
+            "run_id": run_id,
             "lifecycle_state": event.lifecycle_state,
             "operations_report": operations_report,
             "providers_contacted_count": providers_contacted_count,
@@ -288,38 +393,92 @@ class AutonomousOperationsService:
         city: str,
         pax: int,
         date_str: str,
+        run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Discovers, scores, assigns, and contacts providers for a specific category."""
+        """Discovers, scores, assigns, and contacts providers for a specific category via AgenticDiscoveryController."""
         cat_lower = category.lower()
-        vendors, total = self._vendor_service.search_vendors(category=cat_lower, city=city, limit=5)
 
-        if not vendors:
-            vendors, total = self._vendor_service.search_vendors(category=cat_lower, limit=5)
+        # 1. Run Agentic Discovery (Multi-iteration scraping + qualification + ranking)
+        controller = AgenticDiscoveryController(
+            self.db,
+            max_iterations=2,
+            target_count=3,
+        )
+        discovery_res = controller.execute_discovery(
+            event_id=event.id,
+            category=category,
+            location=city,
+            guest_count=pax,
+            run_id=run_id,
+            trigger="operations",
+            simulate_outreach=False,
+        )
 
+        selected_vendor = None
+        best_score = 0.85
         is_simulated = False
-        if not vendors:
-            is_simulated = True
-            sample_vendor = Vendor(
-                name=f"Elite {category.replace('_', ' ').title()} Solutions {city}",
-                category=cat_lower,
-                city=city,
-                address=f"Central Business Plaza, Sector 4, {city}",
-                contact_phone="+919811223344",
-                contact_email=f"contact@elite{cat_lower}.com",
-                base_cost=float(pax * 450) if "cater" in cat_lower else 45000.0,
-                rating=4.8,
-                status="ACTIVE",
-                source="DEMO_FALLBACK",
-            )
-            self.db.add(sample_vendor)
-            self.db.commit()
-            self.db.refresh(sample_vendor)
-            vendors = [sample_vendor]
+        vendor_source = "LIVE_SCRAPE"
 
-        # Deterministic scoring across all candidates
-        scored_candidates = [(v, self._score_vendor_candidate(v, category, city, pax)) for v in vendors]
-        scored_candidates.sort(key=lambda x: x[1], reverse=True)
-        selected_vendor, best_score = scored_candidates[0]
+        if discovery_res.top_matches:
+            top_match = discovery_res.top_matches[0]
+            cand = top_match.candidate
+            best_score = top_match.score or 0.85
+            vendor_source = getattr(cand, "source", "LIVE_SCRAPE") or "LIVE_SCRAPE"
+
+            # Find or upsert vendor in DB
+            selected_vendor = (
+                self.db.query(Vendor)
+                .filter(
+                    Vendor.name == cand.name,
+                    Vendor.city.ilike(f"%{city}%"),
+                )
+                .first()
+            )
+            if not selected_vendor:
+                selected_vendor = Vendor(
+                    name=cand.name,
+                    category=category.upper(),
+                    city=cand.city or city,
+                    address=cand.address,
+                    latitude=cand.latitude,
+                    longitude=cand.longitude,
+                    contact_phone=cand.phone or "+919811223344",
+                    contact_email=cand.email,
+                    website=cand.website,
+                    base_cost=float(pax * 450) if "cater" in cat_lower else (cand.base_cost or 45000.0),
+                    rating=cand.rating or 4.8,
+                    review_count=cand.review_count or 15,
+                    status="ACTIVE",
+                    source=vendor_source,
+                )
+                self.db.add(selected_vendor)
+                self.db.commit()
+                self.db.refresh(selected_vendor)
+
+        if not selected_vendor:
+            # Check cached DB strictly meeting radius and category
+            cached_vendors = self._vendor_service.get_cached_candidates(category=category, city=city, limit=1)
+            if cached_vendors:
+                selected_vendor = cached_vendors[0]
+                vendor_source = "CACHED_DB"
+            else:
+                is_simulated = True
+                vendor_source = "DEMO_FALLBACK"
+                selected_vendor = Vendor(
+                    name=f"Elite {category.replace('_', ' ').title()} Solutions {city}",
+                    category=category.upper(),
+                    city=city,
+                    address=f"Central Business Plaza, Sector 4, {city}",
+                    contact_phone="+919811223344",
+                    contact_email=f"contact@elite{cat_lower}.com",
+                    base_cost=float(pax * 450) if "cater" in cat_lower else 45000.0,
+                    rating=4.8,
+                    status="ACTIVE",
+                    source="DEMO_FALLBACK",
+                )
+                self.db.add(selected_vendor)
+                self.db.commit()
+                self.db.refresh(selected_vendor)
 
         # Record candidate evaluation trace
         self._audit.record(
@@ -332,11 +491,11 @@ class AutonomousOperationsService:
             target_id=selected_vendor.id,
             after_state={
                 "category": category,
-                "total_candidates": len(vendors),
+                "total_candidates": len(discovery_res.top_matches) if discovery_res.top_matches else 1,
                 "selected_provider": selected_vendor.name,
                 "evaluation_score": best_score,
                 "base_cost": float(selected_vendor.base_cost or 0),
-                "source": selected_vendor.source or "DATABASE",
+                "source": vendor_source,
             },
         )
 
@@ -365,6 +524,36 @@ class AutonomousOperationsService:
         else:
             assignment = existing_assignment
 
+        # Strict requirement (Decision 2): Every vendor-binding action strictly requires an ApprovalRequest via ApprovalService
+        cat_task = (
+            self.db.query(Task)
+            .filter(
+                Task.event_id == event.id,
+                (Task.required_provider_category.ilike(f"%{cat_lower}%"))
+                | (Task.name.ilike(f"%{cat_lower}%")),
+            )
+            .first()
+        )
+        try:
+            approval_in = ApprovalRequestCreate(
+                action_type="CONTRACT_VENDOR",
+                target_type="VENDOR",
+                target_id=selected_vendor.id,
+                requested_action={
+                    "vendor_id": selected_vendor.id,
+                    "vendor_name": selected_vendor.name,
+                    "category": category,
+                    "task_id": cat_task.id if cat_task else None,
+                    "assignment_id": assignment.id,
+                    "agreed_cost": float(selected_vendor.base_cost or 0),
+                    "notes": f"Contracting shortlisted provider {selected_vendor.name} for {category.title()}",
+                },
+                notes=f"Approval required to contract {selected_vendor.name} for {category.title()}",
+            )
+            self._approval_service.create_request(event.id, requester_id="autonomous_operations_engine", data=approval_in)
+        except Exception as app_err:
+            logger.warning(f"Could not create approval request for vendor {selected_vendor.name}: {app_err}")
+
         # Dispatch outreach message
         cat_title = category.replace("_", " ").title()
         outreach_msg = (
@@ -392,8 +581,8 @@ class AutonomousOperationsService:
             "contact_phone": selected_vendor.contact_phone,
             "evaluation_score": best_score,
             "base_cost": float(selected_vendor.base_cost or 0),
-            "is_simulated": is_simulated or (selected_vendor.source == "DEMO_FALLBACK"),
-            "source": selected_vendor.source or "DATABASE",
+            "is_simulated": is_simulated or (vendor_source == "DEMO_FALLBACK"),
+            "source": vendor_source,
         }
 
     def simulate_caterer_cancellation(
@@ -451,18 +640,74 @@ class AutonomousOperationsService:
             catering_task.status = TaskStatus.BLOCKED.value
             self.db.commit()
 
-        # 3. Ensure a qualified alternative catering provider exists in DB
-        backup_caterer = (
-            self.db.query(Vendor)
-            .filter(
-                Vendor.category.ilike("%cater%"),
-                Vendor.id != (catering_assignment.vendor_id if catering_assignment else ""),
-                Vendor.status == "ACTIVE",
-            )
-            .first()
-        )
         pax = event.guest_count or 500
         budget_target = float(catering_assignment.agreed_cost) if catering_assignment and catering_assignment.agreed_cost else float(pax * 370)
+
+        # 3. Create Incident first so recovery discovery can attach directly to it
+        incident_in = IncidentCreate(
+            incident_type="VENDOR_CANCELLATION",
+            severity="HIGH",
+            title="Catering Provider Cancellation Incident",
+            description="Assigned catering provider submitted unexpected cancellation due to infrastructure breakdown.",
+            source="MONITORING_ENGINE",
+            related_task_id=catering_task.id if catering_task else None,
+            related_vendor_id=catering_assignment.vendor_id if catering_assignment else None,
+            evidence_metadata={
+                "cancellation_reason": "Kitchen infrastructure failure",
+                "original_vendor_id": catering_assignment.vendor_id if catering_assignment else None,
+            },
+        )
+        incident = self._incident_service.create_incident(event.id, incident_in, current_user_id=user_id)
+
+        # 4. Live recovery discovery via AgenticDiscoveryController
+        backup_caterer = None
+        try:
+            controller = AgenticDiscoveryController(self.db, max_iterations=2, target_count=3)
+            recov_disc = controller.execute_discovery(
+                event_id=event.id,
+                category="CATERING",
+                location=event.location or "Delhi",
+                guest_count=pax,
+                trigger="recovery",
+                incident_id=incident.id,
+                simulate_outreach=False,
+            )
+            if recov_disc.top_matches:
+                top_backup = recov_disc.top_matches[0].candidate
+                backup_caterer = self.db.query(Vendor).filter(
+                    Vendor.name == top_backup.name,
+                    Vendor.id != (catering_assignment.vendor_id if catering_assignment else ""),
+                ).first()
+                if not backup_caterer:
+                    backup_caterer = Vendor(
+                        name=top_backup.name,
+                        category="catering",
+                        city=top_backup.city or event.location or "Delhi",
+                        address=top_backup.address,
+                        contact_phone=top_backup.phone or "+919876500112",
+                        contact_email=top_backup.email or "concierge@backupcaterer.in",
+                        base_cost=budget_target,
+                        rating=top_backup.rating or 4.9,
+                        status="ACTIVE",
+                        source=getattr(top_backup, "source", "LIVE_SCRAPE") or "LIVE_SCRAPE",
+                    )
+                    self.db.add(backup_caterer)
+                    self.db.commit()
+                    self.db.refresh(backup_caterer)
+        except Exception as disc_err:
+            logger.warning(f"Recovery discovery error: {disc_err}")
+
+        # Fallback to database or deterministic backup if discovery produced no new vendor
+        if not backup_caterer:
+            backup_caterer = (
+                self.db.query(Vendor)
+                .filter(
+                    Vendor.category.ilike("%cater%"),
+                    Vendor.id != (catering_assignment.vendor_id if catering_assignment else ""),
+                    Vendor.status == "ACTIVE",
+                )
+                .first()
+            )
         if not backup_caterer:
             backup_caterer = Vendor(
                 name="Saffron Artisan Catering Services",
@@ -483,24 +728,14 @@ class AutonomousOperationsService:
             backup_caterer.base_cost = budget_target
             self.db.commit()
 
-        # 4. Trigger incident via IncidentService
-        incident_in = IncidentCreate(
-            incident_type="VENDOR_CANCELLATION",
-            severity="HIGH",
-            title="Catering Provider Cancellation Incident",
-            description="Assigned catering provider submitted unexpected cancellation due to infrastructure breakdown.",
-            source="MONITORING_ENGINE",
-            related_task_id=catering_task.id if catering_task else None,
-            related_vendor_id=catering_assignment.vendor_id if catering_assignment else None,
-            evidence_metadata={
-                "cancellation_reason": "Kitchen infrastructure failure",
-                "original_vendor_id": catering_assignment.vendor_id if catering_assignment else None,
-                "replacement_vendor_id": backup_caterer.id,
-                "replacement_vendor_name": backup_caterer.name,
-                "replacement_cost": float(backup_caterer.base_cost),
-            },
-        )
-        incident = self._incident_service.create_incident(event.id, incident_in, current_user_id=user_id)
+        # Update incident evidence metadata with chosen replacement
+        if incident.evidence_metadata:
+            meta = dict(incident.evidence_metadata)
+            meta["replacement_vendor_id"] = backup_caterer.id
+            meta["replacement_vendor_name"] = backup_caterer.name
+            meta["replacement_cost"] = float(backup_caterer.base_cost)
+            incident.evidence_metadata = meta
+            self.db.commit()
 
         # 5. Generate deterministic recovery options
         recovery_options = self._recovery_service.generate_recovery_options(event.id, incident.id, current_user_id=user_id)

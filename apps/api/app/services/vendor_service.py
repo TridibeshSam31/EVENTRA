@@ -165,6 +165,46 @@ class VendorService:
         )
         return results, total
 
+    def get_cached_candidates(
+        self,
+        category: str,
+        city: Optional[str] = None,
+        latitude: Optional[float] = None,
+        longitude: Optional[float] = None,
+        radius_km: Optional[float] = 10.0,
+        limit: int = 20,
+    ) -> List[Vendor]:
+        """Local cache lookup for providers.
+
+        STRICT PREREQUISITE (Decision 4):
+        Only hits if candidates satisfy BOTH category and geographic radius (distance <= radius_km).
+        Carries explicit provenance tag 'CACHED_DB'.
+        """
+        cat_clean = category.strip().lower()
+        query = self.db.query(Vendor).filter(
+            func.lower(Vendor.category) == cat_clean,
+            Vendor.status == "ACTIVE",
+        )
+        if city:
+            clean_c = city.strip().lower()
+            query = query.filter(func.lower(Vendor.city).contains(clean_c) | func.lower(Vendor.address).contains(clean_c))
+
+        candidates = query.limit(limit * 2).all()
+        valid: List[Vendor] = []
+        for cand in candidates:
+            cand.source = "CACHED_DB"
+            if latitude is not None and longitude is not None and cand.latitude is not None and cand.longitude is not None:
+                dist = haversine_distance_km(latitude, longitude, cand.latitude, cand.longitude)
+                cand.distance_km = dist
+                if radius_km is not None and dist > radius_km:
+                    continue  # Out of radius
+            elif radius_km is not None and (latitude is not None and longitude is not None):
+                continue
+            valid.append(cand)
+            if len(valid) >= limit:
+                break
+        return valid
+
     def add_provider_availability(
         self,
         vendor_id: str,

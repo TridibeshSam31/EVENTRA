@@ -52,6 +52,9 @@ from app.models.pause_record import EventPauseRecord
 from app.models.requirement import Requirement
 from app.models.objective import Objective
 from app.models.constraint import Constraint
+from app.models.discovery_run import DiscoveryRun, DiscoveryRunEvent
+from app.models.communication import Conversation, Message
+from app.models.activity_log import EventActivityLog
 
 __all__ = [
     "EventType",
@@ -109,4 +112,9 @@ __all__ = [
     "Requirement",
     "Objective",
     "Constraint",
+    "DiscoveryRun",
+    "DiscoveryRunEvent",
+    "Conversation",
+    "Message",
+    "EventActivityLog",
 ]

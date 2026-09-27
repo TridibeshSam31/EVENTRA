@@ -27,6 +27,8 @@ from app.services.discovery_outreach_service import DiscoveryOutreachService
 from app.services.deduplication import ProviderDeduplicator
 from app.services.geospatial_service import geospatial_discovery
 from app.services.vendor_service import haversine_distance_km
+from app.models.discovery_run import DiscoveryRun, DiscoveryRunEvent
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +44,17 @@ class FunnelTransparencyStats(BaseModel):
     total_confirmed: int = 0
     radius_searched_km: float = 10.0
     iterations_run: int = 1
+    # Illustrated target terms (Appendix Section 8.2)
+    discovered: int = 0
+    unique: int = 0
+    relevant: int = 0
+    matching: int = 0
+    shortlisted: int = 0
 
 
 class TieredShortlistResult(BaseModel):
     """Tiered, transparent candidate presentation for frontend UI."""
+    run_id: Optional[str] = None
     top_matches: List[RankedCandidate] = Field(default_factory=list)
     other_available_options: List[RankedCandidate] = Field(default_factory=list)
     backup_waitlist: List[RankedCandidate] = Field(default_factory=list)
@@ -85,9 +94,12 @@ class AgenticDiscoveryController:
         latitude: Optional[float] = None,
         longitude: Optional[float] = None,
         outreach_batch_size: int = 5,
-        simulate_outreach: bool = True,
+        simulate_outreach: bool = False,
+        run_id: Optional[str] = None,
+        trigger: str = "routine",
+        incident_id: Optional[str] = None,
     ) -> TieredShortlistResult:
-        """Executes the complete agentic discovery loop end-to-end."""
+        """Executes the complete agentic discovery loop end-to-end with persisted run telemetry."""
         # 1. Resolve coordinates
         clean_loc = geospatial_discovery.clean_city_name(location or "Delhi")
         if latitude is None or longitude is None:
@@ -97,6 +109,54 @@ class AgenticDiscoveryController:
 
         max_radius = base_radius_km + self.allowed_expansion_km
         current_radius = base_radius_km
+
+        # Persist DiscoveryRun (Part A.1 & A.3)
+        run = None
+        if event_id and event_id != "demo-event":
+            try:
+                if run_id:
+                    run = self.db.query(DiscoveryRun).filter(DiscoveryRun.id == run_id).first()
+                if not run:
+                    run = DiscoveryRun(
+                        id=run_id or f"disc_{uuid.uuid4().hex[:12]}",
+                        event_id=event_id,
+                        category=category,
+                        status="RUNNING",
+                        trigger=trigger,
+                        incident_id=incident_id,
+                        current_iteration=1,
+                        max_iterations=self.max_iterations,
+                        radius_km=base_radius_km,
+                        target_count=self.target_count,
+                        parameters={
+                            "location": clean_loc,
+                            "event_type": event_type,
+                            "guest_count": guest_count,
+                            "max_budget": max_budget,
+                        },
+                    )
+                    self.db.add(run)
+                    self.db.commit()
+                    self.db.refresh(run)
+            except Exception as r_err:
+                logger.warning(f"Could not persist DiscoveryRun: {r_err}")
+                self.db.rollback()
+
+        def _log_event(ev_type: str, message: str, data: Optional[Dict[str, Any]] = None):
+            if run:
+                try:
+                    ev = DiscoveryRunEvent(
+                        run_id=run.id,
+                        iteration=iteration or 1,
+                        event_type=ev_type,
+                        message=message,
+                        data=data or {},
+                    )
+                    self.db.add(ev)
+                    self.db.commit()
+                except Exception as log_err:
+                    logger.warning(f"Could not log DiscoveryRunEvent: {log_err}")
+                    self.db.rollback()
 
         seen_ids: Set[str] = set()
         tried_queries: Set[str] = set()
@@ -112,11 +172,24 @@ class AgenticDiscoveryController:
 
         # Global deduplicator connected to DB Vendor table
         deduplicator = ProviderDeduplicator(self.db)
-
         directory_provider = registry.get_provider_directory()
+
+        _log_event(
+            "requirements_parsed",
+            f"Understanding event requirements: category={category}, location={clean_loc}, radius={current_radius}km, target={self.target_count}",
+            {"category": category, "location": clean_loc, "radius_km": current_radius, "target": self.target_count},
+        )
 
         while iteration < self.max_iterations:
             iteration += 1
+            if run:
+                run.current_iteration = iteration
+                run.radius_km = current_radius
+                try:
+                    self.db.commit()
+                except Exception:
+                    self.db.rollback()
+
             logger.info(f"Agentic Discovery Iteration {iteration}/{self.max_iterations} (Radius: {current_radius}km)")
 
             # Step A: Search Planner generates query variants
@@ -130,6 +203,12 @@ class AgenticDiscoveryController:
             )
             tried_queries.update(q.lower() for q in queries)
             all_queries_used.extend(queries)
+
+            _log_event(
+                "query_generated",
+                f"Generating discovery queries: {', '.join(queries)}",
+                {"queries": queries, "iteration": iteration},
+            )
 
             # Step B: Scrape with dynamic radius
             radius_meters = int(current_radius * 1000)
@@ -151,6 +230,11 @@ class AgenticDiscoveryController:
                         iter_scraped_candidates.append(norm)
 
             total_scraped_count += len(iter_scraped_candidates)
+            _log_event(
+                "batch_scraped",
+                f"{len(iter_scraped_candidates)} candidates discovered from directory/scraper",
+                {"scraped_count": len(iter_scraped_candidates), "iteration": iteration},
+            )
 
             # Step C: Global Persistent Deduplication
             new_candidates: List[NormalizedProvider] = []
@@ -200,6 +284,12 @@ class AgenticDiscoveryController:
                     deduplicator.upsert_provider(r.candidate, commit=True)
                     qualified_pool.append(r)
 
+            _log_event(
+                "qualification_passed",
+                f"{len(ranked_new)} candidates qualified against event constraints (total qualified: {len(qualified_pool)})",
+                {"iteration_qualified": len(ranked_new), "total_qualified": len(qualified_pool)},
+            )
+
             # Step F: Outreach & Availability Confirmation State Machine
             uncontacted_qualified = [c for c in qualified_pool if c.availability == "unconfirmed"]
 
@@ -209,6 +299,13 @@ class AgenticDiscoveryController:
                     event_id=event_id or "demo-event",
                     batch_size=outreach_batch_size,
                     dev_simulate_responses=simulate_outreach,
+                    db=self.db,
+                )
+
+                _log_event(
+                    "outreach_dispatched",
+                    f"Outreach dispatched to {len(uncontacted_qualified[:outreach_batch_size])} candidates via telephony/messaging",
+                    {"contacted": len(uncontacted_qualified[:outreach_batch_size]), "simulated": simulate_outreach},
                 )
 
                 for item in qualified_pool:
@@ -232,6 +329,11 @@ class AgenticDiscoveryController:
                 new_radius = min(max_radius, round(current_radius * density_factor, 1))
                 if new_radius > current_radius:
                     logger.info(f"Diagnosis: Search problem. Widening radius from {current_radius}km to {new_radius}km")
+                    _log_event(
+                        "radius_expanded",
+                        f"Expanding search radius from {current_radius}km to {new_radius}km for iteration {iteration + 1}",
+                        {"old_radius_km": current_radius, "new_radius_km": new_radius},
+                    )
                     current_radius = new_radius
                 else:
                     logger.info(f"Radius reached maximum expansion cap ({max_radius}km).")
@@ -261,6 +363,29 @@ class AgenticDiscoveryController:
                 f"or amenities to see more options?"
             )
 
+        _log_event(
+            "target_reached" if target_met else "run_completed",
+            f"Discovery completed: {len(confirmed_pool)} confirmed, {len(qualified_pool)} matching candidates",
+            {"confirmed": len(confirmed_pool), "qualified": len(qualified_pool)},
+        )
+
+        # Update DiscoveryRun in database (Part A.1)
+        if run:
+            try:
+                run.discovered = total_scraped_count
+                run.unique_count = total_deduped_count
+                run.relevant = len([c for c in qualified_pool if c.qualification in ("qualified", "uncertain")])
+                run.matching = len([c for c in qualified_pool if c.qualification == "qualified"])
+                run.shortlisted = len(confirmed_pool) if confirmed_pool else min(len(qualified_pool), self.target_count)
+                run.current_iteration = iteration
+                run.radius_km = current_radius
+                run.status = "TARGET_REACHED" if target_met else ("EXHAUSTED" if iteration >= self.max_iterations else "COMPLETED")
+                run.summary = diag_msg or f"Successfully shortlisted {run.shortlisted} candidates across {iteration} iterations."
+                self.db.commit()
+            except Exception as up_err:
+                logger.warning(f"Could not update DiscoveryRun counters: {up_err}")
+                self.db.rollback()
+
         funnel_stats = FunnelTransparencyStats(
             total_scraped=total_scraped_count,
             total_deduplicated=total_deduped_count,
@@ -271,9 +396,15 @@ class AgenticDiscoveryController:
             total_confirmed=len(confirmed_pool),
             radius_searched_km=current_radius,
             iterations_run=iteration,
+            discovered=total_scraped_count,
+            unique=total_deduped_count,
+            relevant=len([c for c in qualified_pool if c.qualification in ("qualified", "uncertain")]),
+            matching=len([c for c in qualified_pool if c.qualification == "qualified"]),
+            shortlisted=len(confirmed_pool) if confirmed_pool else min(len(qualified_pool), self.target_count),
         )
 
         return TieredShortlistResult(
+            run_id=run.id if run else None,
             top_matches=top_matches,
             other_available_options=other_available,
             backup_waitlist=backup_waitlist,

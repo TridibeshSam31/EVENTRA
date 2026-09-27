@@ -66,7 +66,11 @@ class AuditRecorder:
         return query.order_by(AuditRecord.created_at.desc()).limit(limit).all()
 
     def _sanitize_payload(self, data: Any) -> Any:
-        """Removes sensitive authentication tokens, passwords, and private keys."""
+        """Removes sensitive authentication tokens and ensures JSON serializability."""
+        if hasattr(data, "_mock_name") or "mock" in type(data).__name__.lower():
+            return str(data)
+        if isinstance(data, (str, int, float, bool)) or data is None:
+            return data
         if isinstance(data, dict):
             sanitized = {}
             for k, v in data.items():
@@ -75,6 +79,11 @@ class AuditRecorder:
                 else:
                     sanitized[k] = self._sanitize_payload(v)
             return sanitized
-        elif isinstance(data, list):
+        elif isinstance(data, (list, tuple, set)):
             return [self._sanitize_payload(item) for item in data]
-        return data
+        try:
+            import json
+            json.dumps(data)
+            return data
+        except Exception:
+            return str(data)
