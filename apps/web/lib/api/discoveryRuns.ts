@@ -16,10 +16,13 @@ export async function getDiscoveryRun(eventId: string, runId: string): Promise<D
 export async function getDiscoveryRunEvents(
   eventId: string,
   runId: string
-): Promise<{ items: DiscoveryRunEvent[]; total: number }> {
-  return apiRequest<{ items: DiscoveryRunEvent[]; total: number }>(
+): Promise<DiscoveryRunEvent[]> {
+  const res = await apiRequest<any>(
     `/events/${eventId}/discovery-runs/${runId}/events`
   );
+  if (Array.isArray(res)) return res;
+  if (res && Array.isArray(res.items)) return res.items;
+  return [];
 }
 
 export async function startOperations(

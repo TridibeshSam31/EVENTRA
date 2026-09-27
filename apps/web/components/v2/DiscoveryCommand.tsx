@@ -132,9 +132,10 @@ export function DiscoveryCommand({
       if (runsRes.status === "fulfilled" && runsRes.value.items) {
         setRuns(runsRes.value.items);
         if (runsRes.value.items.length > 0) {
-          const latest = runsRes.value.items[0];
-          setSelectedRun(latest);
-          loadRunEvents(latest.run_id);
+          const running = runsRes.value.items.find((r) => r.status === "RUNNING");
+          const targetRun = running || runsRes.value.items[0];
+          setSelectedRun(targetRun);
+          loadRunEvents(targetRun.run_id);
         } else {
           setSelectedRun(null);
           setRunEvents([]);
@@ -148,16 +149,16 @@ export function DiscoveryCommand({
   }, [eventId, discoveryType, category]);
 
   // 2. Fetch specific run events
-  const loadRunEvents = async (runId: string) => {
+  const loadRunEvents = useCallback(async (runId: string) => {
     try {
-      const res = await getDiscoveryRunEvents(eventId, runId);
-      if (res && res.items) {
-        setRunEvents(res.items);
-      }
+      const events = await getDiscoveryRunEvents(eventId, runId);
+      setRunEvents(events);
+      return events;
     } catch (err) {
       console.error("Failed to load run events:", err);
+      return [];
     }
-  };
+  }, [eventId]);
 
   // 3. Load candidates for current category / type
   const loadCandidates = useCallback(async () => {
@@ -248,19 +249,77 @@ export function DiscoveryCommand({
     }
   }, [eventData, loadCandidates]);
 
+  // 4. Live Polling Effect while DiscoveryRun status is RUNNING
+  useEffect(() => {
+    if (!eventId || !selectedRun?.run_id) return;
+    if (selectedRun.status !== "RUNNING") return;
+
+    let isMounted = true;
+    const currentRunId = selectedRun.run_id;
+
+    const pollInterval = setInterval(async () => {
+      try {
+        const [updatedRun, events] = await Promise.all([
+          getDiscoveryRun(eventId, currentRunId),
+          getDiscoveryRunEvents(eventId, currentRunId),
+        ]);
+
+        if (!isMounted) return;
+
+        setSelectedRun(updatedRun);
+        setRunEvents(events);
+
+        // Update run in runs list
+        setRuns((prevRuns) =>
+          prevRuns.map((r) => (r.run_id === updatedRun.run_id ? updatedRun : r))
+        );
+
+        const terminalStatuses = ["TARGET_REACHED", "EXHAUSTED", "FAILED", "COMPLETED"];
+        if (terminalStatuses.includes(updatedRun.status)) {
+          clearInterval(pollInterval);
+          setScouting(false);
+          setStatusMessage(
+            `Discovery run finished: ${updatedRun.status} (${updatedRun.discovered} discovered, ${updatedRun.shortlisted || updatedRun.matching || 0} matching).`
+          );
+          // Refresh candidates list now that background discovery has finished
+          loadCandidates();
+        }
+      } catch (err) {
+        console.error("Error polling discovery run:", err);
+      }
+    }, 2500);
+
+    return () => {
+      isMounted = false;
+      clearInterval(pollInterval);
+    };
+  }, [eventId, selectedRun?.run_id, selectedRun?.status, loadCandidates]);
+
   // Trigger autonomous operations / new discovery run
   const handleTriggerDiscovery = async () => {
     try {
       setScouting(true);
+      setShowIterations(true);
       setStatusMessage("Dispatching live autonomous discovery run...");
       const res = await startOperations(eventId);
-      setStatusMessage(res.message);
-      await loadRunsAndEvent();
-      await loadCandidates();
+      setStatusMessage(res.message || "Autonomous operations & discovery run dispatched.");
+
+      if (res.run_id) {
+        try {
+          const newRun = await getDiscoveryRun(eventId, res.run_id);
+          setSelectedRun(newRun);
+          setRuns((prev) => [newRun, ...prev.filter((r) => r.run_id !== newRun.run_id)]);
+          const events = await getDiscoveryRunEvents(eventId, res.run_id);
+          setRunEvents(events);
+        } catch {
+          await loadRunsAndEvent();
+        }
+      } else {
+        await loadRunsAndEvent();
+      }
     } catch (err: any) {
       console.error("Discovery run dispatch failed:", err);
       setStatusMessage(err.message || "Failed to start discovery run.");
-    } finally {
       setScouting(false);
     }
   };
@@ -291,7 +350,7 @@ export function DiscoveryCommand({
           vendor_id: candidate.id,
           category: candidate.category,
         });
-        setStatusMessage(`Provider '${candidate.name}' contracted.`);
+        setStatusMessage(`Provider '${candidate.name}' added to shortlist — pending approval.`);
       }
       await loadCandidates();
     } catch (err: any) {
@@ -363,12 +422,21 @@ export function DiscoveryCommand({
 
               {selectedRun && (
                 <span
-                  className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full border ${
-                    selectedRun.status === "COMPLETED"
+                  className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full border inline-flex items-center gap-1.5 ${
+                    selectedRun.status === "COMPLETED" || selectedRun.status === "TARGET_REACHED"
                       ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                      : selectedRun.status === "RUNNING"
+                      ? "bg-amber-50 text-amber-700 border-amber-200 animate-pulse"
+                      : selectedRun.status === "EXHAUSTED"
+                      ? "bg-amber-50 text-amber-800 border-amber-300"
+                      : selectedRun.status === "FAILED"
+                      ? "bg-rose-50 text-rose-700 border-rose-200"
                       : "bg-blue-50 text-blue-700 border-blue-200"
                   }`}
                 >
+                  {selectedRun.status === "RUNNING" && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping inline-block" />
+                  )}
                   Run: {selectedRun.status}
                 </span>
               )}

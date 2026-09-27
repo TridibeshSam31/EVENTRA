@@ -1,10 +1,10 @@
 export interface ExtractedFacts {
   available?: boolean | null;
   quoted_amount?: number | null;
-  currency: string;
+  currency?: string;
   notes?: string | null;
-  confidence: number;
-  field_sources: Record<string, string>;
+  confidence?: number;
+  field_sources?: Record<string, string>;
 }
 
 export interface Message {

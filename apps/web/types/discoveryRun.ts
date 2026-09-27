@@ -12,7 +12,7 @@ export interface DiscoveryRun {
   run_id: string;
   event_id: string;
   category: string;
-  status: "RUNNING" | "COMPLETED" | "FAILED" | "PAUSED";
+  status: "RUNNING" | "COMPLETED" | "TARGET_REACHED" | "EXHAUSTED" | "FAILED" | "PAUSED" | string;
   trigger: "routine" | "operations" | "recovery" | "manual";
   incident_id?: string | null;
   current_iteration: number;

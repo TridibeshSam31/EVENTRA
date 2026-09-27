@@ -331,7 +331,7 @@ export function CandidateEvidenceDrawer({
                 ? "Locking Selection..."
                 : candidate.entity_type === "VENUE"
                 ? "Select as Venue"
-                : "Contract Provider"}
+                : "Request Provider (Pending Approval)"}
             </button>
           )}
         </div>
