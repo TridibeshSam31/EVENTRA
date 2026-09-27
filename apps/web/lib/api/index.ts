@@ -14,3 +14,6 @@ export * from "./verification";
 export * from "./observability";
 export * from "./agent";
 export * from "./integrations";
+export * from "./discoveryRuns";
+export * from "./conversations";
+export * from "./activityStream";

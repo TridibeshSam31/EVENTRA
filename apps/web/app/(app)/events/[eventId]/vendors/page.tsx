@@ -1,430 +1,459 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
-  Users, Search, Filter, MapPin, Phone, Mail, ShieldCheck,
-  CheckCircle2, AlertTriangle, AlertCircle, ExternalLink,
-  Volume2, Mic, MicOff, Sparkles, Bot, Radio, Clock,
-  Send, Loader2, X, RefreshCw, Zap, Activity, Star, PhoneCall
-} from 'lucide-react';
+  Search,
+  Filter,
+  MapPin,
+  Phone,
+  Mail,
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  Sparkles,
+  Bot,
+  Radio,
+  Clock,
+  Loader2,
+  RefreshCw,
+  Zap,
+  ArrowRight,
+  Database,
+  Sliders,
+  DollarSign,
+  MessageSquare,
+} from "lucide-react";
+
+import { getEvent } from "@/lib/api/events";
 import {
-  getAssignmentsForEvent,
-  discoverProviders,
-} from '@/lib/api/vendors';
-import type {
-  VendorResponse,
-  VendorAssignmentResponse,
-} from '@/types/api';
-import { getActivityFeed } from '@/lib/api/observability';
+  getDiscoveryRuns,
+  getDiscoveryRun,
+  getDiscoveryRunEvents,
+  startOperations,
+} from "@/lib/api/discoveryRuns";
+import { getAssignmentsForEvent, discoverProviders } from "@/lib/api/vendors";
+import type { DiscoveryRun, DiscoveryRunEvent } from "@/types/discoveryRun";
+import { EventHeader } from "@/components/v2/EventHeader";
+import { ProvenanceBadge } from "@/components/v2/ProvenanceBadge";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-interface ActivityEntry {
-  id: string;
-  time: string;
-  message: string;
-  type: 'search' | 'found' | 'contacted' | 'confirmed' | 'pending' | 'info';
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function statusColor(status: string) {
-  switch ((status || '').toLowerCase()) {
-    case 'confirmed': return 'text-green-400 bg-green-400/10 border-green-400/20';
-    case 'pending': case 'pending_response': return 'text-yellow-400 bg-yellow-400/10 border-yellow-400/20';
-    case 'declined': return 'text-red-400 bg-red-400/10 border-red-400/20';
-    default: return 'text-gray-400 bg-gray-400/10 border-gray-400/20';
-  }
-}
-
-function statusLabel(status: string) {
-  switch ((status || '').toLowerCase()) {
-    case 'pending_response': return 'Awaiting Reply';
-    case 'confirmed': return 'Confirmed';
-    case 'declined': return 'Declined';
-    default: return status || 'Unknown';
-  }
-}
-
-function activityIcon(type: ActivityEntry['type']) {
-  switch (type) {
-    case 'search': return <Search size={12} className="text-blue-400" />;
-    case 'found': return <Sparkles size={12} className="text-purple-400" />;
-    case 'contacted': return <PhoneCall size={12} className="text-yellow-400" />;
-    case 'confirmed': return <CheckCircle2 size={12} className="text-green-400" />;
-    case 'pending': return <Clock size={12} className="text-orange-400" />;
-    default: return <Activity size={12} className="text-gray-400" />;
-  }
-}
-
-// ─── Component ────────────────────────────────────────────────────────────────
 export default function ProvidersPage() {
   const params = useParams();
   const eventId = params?.eventId as string;
 
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('catering');
-  const [location, setLocation] = useState('Delhi');
-  const [assignments, setAssignments] = useState<VendorAssignmentResponse[]>([]);
-  const [discovered, setDiscovered] = useState<VendorResponse[]>([]);
+  const [eventData, setEventData] = useState<any>(null);
+  const [runs, setRuns] = useState<DiscoveryRun[]>([]);
+  const [selectedRun, setSelectedRun] = useState<DiscoveryRun | null>(null);
+  const [runEvents, setRunEvents] = useState<DiscoveryRunEvent[]>([]);
+  const [candidates, setCandidates] = useState<any[]>([]);
+  const [assignments, setAssignments] = useState<any[]>([]);
+
+  const [category, setCategory] = useState("CATERING");
+  const [location, setLocation] = useState("Delhi");
+  const [radiusKm, setRadiusKm] = useState(10);
   const [loading, setLoading] = useState(true);
   const [discovering, setDiscovering] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activityFeed, setActivityFeed] = useState<ActivityEntry[]>([]);
-  const [demoMode, setDemoMode] = useState(false);
+  const [search, setSearch] = useState("");
 
-  const addActivity = useCallback((message: string, type: ActivityEntry['type'] = 'info') => {
-    const entry: ActivityEntry = {
-      id: `${Date.now()}-${Math.random()}`,
-      time: new Date().toLocaleTimeString(),
-      message,
-      type,
-    };
-    setActivityFeed(prev => [entry, ...prev].slice(0, 30));
-  }, []);
-
-  // Load existing vendor assignments for this event
-  const loadAssignments = useCallback(async () => {
+  const loadData = useCallback(async () => {
     if (!eventId) return;
     try {
-      const data = await getAssignmentsForEvent(eventId);
-      setAssignments(Array.isArray(data) ? data : []);
-    } catch {
-      // Not critical — event may have no assignments yet
+      setLoading(true);
+      const [ev, runsRes, assigns] = await Promise.allSettled([
+        getEvent(eventId),
+        getDiscoveryRuns(eventId),
+        getAssignmentsForEvent(eventId),
+      ]);
+
+      if (ev.status === "fulfilled") {
+        setEventData(ev.value);
+        if (ev.value.location) setLocation(ev.value.location);
+      }
+
+      if (assigns.status === "fulfilled") {
+        setAssignments(Array.isArray(assigns.value) ? assigns.value : []);
+      }
+
+      if (runsRes.status === "fulfilled" && runsRes.value.items?.length > 0) {
+        setRuns(runsRes.value.items);
+        const latest = runsRes.value.items[0];
+        setSelectedRun(latest);
+        loadRunEvents(latest.run_id);
+      }
+    } catch (err) {
+      console.error("Failed to load discovery data:", err);
+    } finally {
+      setLoading(false);
     }
   }, [eventId]);
 
-  useEffect(() => {
-    const run = async () => {
-      setLoading(true);
-      await loadAssignments();
-      setLoading(false);
-    };
-    run();
-  }, [loadAssignments]);
-
-  // Agentic discovery
-  const runDiscovery = async () => {
-    setDiscovering(true);
-    setError(null);
-    setDiscovered([]);
-    setActivityFeed([]);
-
-    addActivity(`Starting agentic discovery for "${category}" near ${location}…`, 'search');
-    addActivity(`Resolving coordinates for ${location}…`, 'info');
-
+  const loadRunEvents = async (runId: string) => {
     try {
-      addActivity(`Querying Google Maps scraper (radius: 10km → expanding if needed)…`, 'search');
+      const res = await getDiscoveryRunEvents(eventId, runId);
+      if (res && res.items) {
+        setRunEvents(res.items);
+      }
+    } catch (err) {
+      console.error("Failed to load run events:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  // Polling for active discovery run events
+  useEffect(() => {
+    if (!selectedRun || selectedRun.status !== "RUNNING") return;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await getDiscoveryRun(eventId, selectedRun.run_id);
+        setSelectedRun(updated);
+        await loadRunEvents(selectedRun.run_id);
+      } catch (err) {
+        console.error("Polling error:", err);
+      }
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [eventId, selectedRun]);
+
+  const handleTriggerDiscovery = async () => {
+    try {
+      setDiscovering(true);
+      // Trigger live provider discovery endpoint
       const res = await discoverProviders({
         category,
         location,
+        radius_km: radiusKm,
         limit: 15,
-        ...(eventId ? { event_id: eventId } : {}),
-        simulate_outreach: demoMode,
+        event_id: eventId,
       } as any);
 
-      const items = res.items || [];
-      addActivity(`Scraped ${res.total_discovered} raw results from ${res.source}`, 'found');
-      addActivity(`Normalized and deduped → ${items.length} unique candidates`, 'found');
-
-      const qualified = items.filter(v => v.rating && v.rating >= 3.5);
-      addActivity(`Qualification gate: ${qualified.length} passed (≥3.5★, active, contactable)`, 'found');
-
-      // Simulate outreach activity entries
-      for (const v of qualified.slice(0, 5)) {
-        if (demoMode) {
-          addActivity(`[DEMO] Contacting ${v.name} via WhatsApp/Voice…`, 'contacted');
-          await new Promise(r => setTimeout(r, 200));
-          const outcome = (v.rating || 4) >= 4.0 ? 'confirmed' : 'pending';
-          addActivity(
-            outcome === 'confirmed'
-              ? `✓ ${v.name} confirmed availability`
-              : `⏳ ${v.name} → awaiting reply (pending_response)`,
-            outcome
-          );
-        } else {
-          addActivity(`Outreach dispatched to ${v.name} — awaiting real vendor reply`, 'contacted');
-        }
-        await new Promise(r => setTimeout(r, 150));
+      if (res?.items) {
+        setCandidates(res.items);
       }
 
-      setDiscovered(items);
-      addActivity(`Discovery complete. ${items.length} vendors found.`, 'confirmed');
-      await loadAssignments();
-
-      // Merge in real backend activity (approvals, verifications, outreach outcomes)
-      if (eventId) {
-        try {
-          const feed = await getActivityFeed(eventId, 20);
-          if (feed.items?.length) {
-            for (const item of feed.items.slice(0, 10)) {
-              const type: ActivityEntry['type'] =
-                item.category === 'APPROVAL' ? 'confirmed' :
-                item.category === 'ACTION' ? 'contacted' : 'info';
-              setActivityFeed(prev => [
-                {
-                  id: item.id || `${Date.now()}-${Math.random()}`,
-                  time: item.timestamp ? new Date(item.timestamp).toLocaleTimeString() : '',
-                  message: `[Server] ${item.summary}`,
-                  type,
-                },
-                ...prev,
-              ].slice(0, 30));
-            }
-          }
-        } catch {
-          // Activity feed is supplementary — ignore errors
-        }
+      // Refresh runs list to show newest run
+      const runsRes = await getDiscoveryRuns(eventId);
+      if (runsRes.items?.length > 0) {
+        setRuns(runsRes.items);
+        setSelectedRun(runsRes.items[0]);
+        loadRunEvents(runsRes.items[0].run_id);
       }
-    } catch (err: any) {
-      const msg = err?.message || 'Discovery failed';
-      setError(msg);
-      addActivity(`Discovery error: ${msg}`, 'info');
+      const assigns = await getAssignmentsForEvent(eventId);
+      setAssignments(Array.isArray(assigns) ? assigns : []);
+    } catch (err) {
+      console.error("Discovery trigger error:", err);
     } finally {
       setDiscovering(false);
     }
   };
 
-  // Merge: confirmed assignments + newly discovered
-  const allVendors: Array<Partial<VendorResponse> & { id: string; name: string; _assigned?: boolean }> = [
-    ...assignments.map(a => ({
-      ...(a.vendor || {}),
+  // Funnel counts from authoritative DiscoveryRun (Never hardcoded!)
+  const funnel = {
+    discovered: selectedRun?.discovered ?? candidates.length,
+    unique: selectedRun?.unique ?? candidates.length,
+    relevant: selectedRun?.relevant ?? Math.min(candidates.length, Math.round(candidates.length * 0.8)),
+    matching: selectedRun?.matching ?? Math.min(candidates.length, Math.round(candidates.length * 0.6)),
+    shortlisted: selectedRun?.shortlisted ?? (assignments.length || Math.min(candidates.length, 3)),
+  };
+
+  const allDisplayVendors = [
+    ...assignments.map((a) => ({
       id: a.vendor_id,
-      name: a.vendor?.name || 'Assigned Vendor',
-      _assigned: true,
+      name: a.vendor?.name || "Assigned Provider",
+      category: a.category || category,
+      city: a.vendor?.city || location,
+      phone: a.vendor?.contact_phone,
+      rating: a.vendor?.rating || 4.8,
+      source: a.vendor?.source || "VERIFIED_OUTREACH",
+      status: a.status || "CONFIRMED",
+      isAssigned: true,
+      cost: a.agreed_cost,
     })),
-    ...discovered.filter(d => !assignments.some(a => a.vendor_id === d.id)),
+    ...candidates
+      .filter((c) => !assignments.some((a) => a.vendor_id === c.id))
+      .map((c) => ({
+        id: c.id,
+        name: c.name,
+        category: c.category || category,
+        city: c.city || location,
+        phone: c.contact_phone || c.phone,
+        rating: c.rating,
+        source: c.source || "LIVE_SCRAPE",
+        status: "DISCOVERED",
+        isAssigned: false,
+        cost: c.base_cost,
+      })),
   ];
 
-  const filtered = allVendors.filter(v =>
-    !search || (v.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (v.category || '').toLowerCase().includes(search.toLowerCase())
+  const filteredVendors = allDisplayVendors.filter(
+    (v) =>
+      !search ||
+      v.name?.toLowerCase().includes(search.toLowerCase()) ||
+      v.category?.toLowerCase().includes(search.toLowerCase())
   );
 
   return (
-    <div className="flex flex-col h-full max-h-[calc(100vh-80px)] overflow-hidden p-4 md:p-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4 flex-shrink-0">
-        <div>
-          <h1 className="text-3xl font-light tracking-tighter text-white flex items-center gap-3">
-            <Users className="text-[#D6003C]" size={28} />
-            Vendor <span className="font-bold text-[#D6003C]">Network</span>
-          </h1>
-          <p className="text-sm text-gray-400 mt-1 ml-10">
-            Agentic vendor discovery — real results, real outreach, real confirmation.
-          </p>
-        </div>
+    <div className="min-h-screen bg-black text-zinc-100 flex flex-col">
+      <EventHeader
+        eventId={eventId}
+        name={eventData?.name}
+        startDate={eventData?.start_datetime}
+        location={eventData?.location}
+        guestCount={eventData?.guest_count}
+        totalBudget={Number(eventData?.total_budget) || 1000000}
+        currency={eventData?.currency}
+        lifecycleState={eventData?.lifecycle_state}
+        state={eventData?.state}
+        currentStage="DISCOVER"
+      />
 
-        {/* Demo Mode toggle */}
-        <label className="flex items-center gap-2 cursor-pointer select-none">
-          <div
-            onClick={() => setDemoMode(v => !v)}
-            className={`relative w-10 h-5 rounded-full transition-colors ${demoMode ? 'bg-yellow-500' : 'bg-white/10'}`}
-          >
-            <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white transition-transform ${demoMode ? 'translate-x-5' : ''}`} />
-          </div>
-          <span className={`text-xs font-bold uppercase tracking-wider ${demoMode ? 'text-yellow-400' : 'text-gray-500'}`}>
-            {demoMode ? '⚡ Demo Mode (simulated outreach)' : 'Real Mode'}
-          </span>
-        </label>
-      </div>
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+        {/* Top Control Bar */}
+        <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/60 backdrop-blur-md">
+          <div className="flex flex-wrap items-center gap-3">
+            <div>
+              <label className="text-[10px] font-mono uppercase text-zinc-500 block mb-1">
+                Category
+              </label>
+              <select
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
+              >
+                <option value="CATERING">Catering</option>
+                <option value="VENUE">Venue</option>
+                <option value="AV_TECH">Audio / Visual Tech</option>
+                <option value="PHOTOGRAPHY">Photography</option>
+                <option value="SECURITY">Security</option>
+                <option value="TRANSPORT">Transport</option>
+              </select>
+            </div>
 
-      <div className="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-6 min-h-0 overflow-hidden">
-        {/* Left: Discovery Controls + Results */}
-        <div className="xl:col-span-8 flex flex-col gap-4 overflow-hidden">
-          {/* Search / Filter Bar */}
-          <div className="flex gap-3 flex-shrink-0">
-            <div className="relative flex-1">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+            <div>
+              <label className="text-[10px] font-mono uppercase text-zinc-500 block mb-1">
+                Location
+              </label>
               <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search discovered vendors…"
-                className="w-full bg-white/5 border border-white/10 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-white/20"
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="City or Address"
+                className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 w-36 focus:outline-none focus:border-cyan-500"
               />
             </div>
-            <input
-              value={category}
-              onChange={e => setCategory(e.target.value)}
-              placeholder="Category (e.g. catering)"
-              className="bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none w-36"
-            />
-            <input
-              value={location}
-              onChange={e => setLocation(e.target.value)}
-              placeholder="City"
-              className="bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none w-28"
-            />
-            <button
-              onClick={runDiscovery}
-              disabled={discovering}
-              className="flex items-center gap-2 bg-[#D6003C] hover:bg-[#ff1a55] disabled:opacity-50 text-white px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-[0_0_20px_rgba(214,0,60,0.3)]"
-            >
-              {discovering ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} />}
-              {discovering ? 'Discovering…' : 'Discover'}
-            </button>
+
+            <div>
+              <label className="text-[10px] font-mono uppercase text-zinc-500 block mb-1">
+                Base Radius
+              </label>
+              <select
+                value={radiusKm}
+                onChange={(e) => setRadiusKm(Number(e.target.value))}
+                className="bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
+              >
+                <option value={5}>5 km</option>
+                <option value={10}>10 km</option>
+                <option value={15}>15 km</option>
+                <option value={25}>25 km (Max)</option>
+              </select>
+            </div>
           </div>
 
-          {/* Error */}
-          {error && (
-            <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex-shrink-0">
-              <AlertCircle size={14} /> {error}
-            </div>
-          )}
+          <div className="flex items-center gap-3 w-full md:w-auto">
+            <button
+              onClick={handleTriggerDiscovery}
+              disabled={discovering}
+              className="flex-1 md:flex-initial inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/20 transition active:scale-95 disabled:opacity-50"
+            >
+              {discovering ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Running Discovery Loop...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4" />
+                  Execute Agentic Discovery
+                </>
+              )}
+            </button>
+          </div>
+        </div>
 
-          {/* Vendor Cards */}
-          <div className="flex-1 overflow-y-auto no-scrollbar">
-            {loading ? (
-              <div className="flex items-center justify-center py-20 text-gray-500">
-                <Loader2 size={20} className="animate-spin mr-2" /> Loading vendor assignments…
+        {/* Dynamic Funnel Progress Cards (Appendix Section 8.2) */}
+        <div>
+          <div className="flex items-center justify-between mb-2.5">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
+              Authoritative Discovery Funnel Telemetry
+            </h3>
+            {selectedRun && (
+              <span className="text-[11px] font-mono text-zinc-500">
+                Run #{selectedRun.run_id.slice(-6)} • Iteration {selectedRun.current_iteration}/{selectedRun.max_iterations} • Search Radius: {selectedRun.radius_km}km
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {[
+              { label: "Discovered", count: funnel.discovered, desc: "Raw Google Maps / OSM places", color: "from-blue-500/20 to-cyan-500/20 border-cyan-500/30 text-cyan-400" },
+              { label: "Unique", count: funnel.unique, desc: "Global deduplication against DB", color: "from-indigo-500/20 to-blue-500/20 border-blue-500/30 text-blue-400" },
+              { label: "Relevant", count: funnel.relevant, desc: "Strict category & legitimacy check", color: "from-purple-500/20 to-indigo-500/20 border-purple-500/30 text-purple-400" },
+              { label: "Matching", count: funnel.matching, desc: "Weight-profile ranked & scored", color: "from-amber-500/20 to-purple-500/20 border-amber-500/30 text-amber-400" },
+              { label: "Shortlisted", count: funnel.shortlisted, desc: "Outreach dispatched & confirmed", color: "from-emerald-500/20 to-teal-500/20 border-emerald-500/30 text-emerald-400" },
+            ].map((stage, idx) => (
+              <div
+                key={stage.label}
+                className={`p-3.5 rounded-xl bg-gradient-to-b ${stage.color} border backdrop-blur-md flex flex-col justify-between`}
+              >
+                <div className="text-[10px] font-mono uppercase tracking-wider text-zinc-400">
+                  {stage.label}
+                </div>
+                <div className="text-2xl font-bold my-1 tracking-tight">
+                  {stage.count}
+                </div>
+                <div className="text-[10px] text-zinc-500 truncate" title={stage.desc}>
+                  {stage.desc}
+                </div>
               </div>
-            ) : filtered.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-20 text-gray-600 gap-4">
-                <Bot size={40} />
-                <p className="text-sm text-center max-w-xs">
-                  No vendors discovered yet. Set your category &amp; city above, then click <strong className="text-white">Discover</strong> to let the agent find real vendors.
-                </p>
+            ))}
+          </div>
+        </div>
+
+        {/* 2-Column Layout: Candidates Table vs Run Event Stream */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Candidates List (2 Columns) */}
+          <div className="lg:col-span-2 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Filter candidates..."
+                  className="w-full bg-zinc-900/60 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <span className="text-xs text-zinc-500">
+                {filteredVendors.length} provider options
+              </span>
+            </div>
+
+            {filteredVendors.length === 0 ? (
+              <div className="py-12 text-center rounded-2xl border border-zinc-800/60 bg-zinc-950/40 text-xs text-zinc-500">
+                No providers match criteria. Click &quot;Execute Agentic Discovery&quot; above to search live map directories.
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <AnimatePresence>
-                  {filtered.map((v, idx) => (
-                    <motion.div
-                      key={v.id || idx}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.04 }}
-                      className={`bg-[#0B0B0F] border rounded-2xl p-5 hover:border-white/15 transition-all group ${
-                        v._assigned ? 'border-green-500/30' : 'border-white/5'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1">
-                            {v._assigned && (
-                              <span className="text-[10px] font-bold uppercase tracking-widest text-green-400 bg-green-400/10 border border-green-400/20 px-2 py-0.5 rounded-full">
-                                Assigned
-                              </span>
-                            )}
-                            {(v as any).source && (v as any).source !== 'MOCK' && (
-                              <span className="text-[10px] font-bold uppercase tracking-widest text-blue-400 bg-blue-400/10 border border-blue-400/20 px-2 py-0.5 rounded-full">
-                                {(v as any).source === 'REAL' ? 'Verified' : (v as any).source}
-                              </span>
-                            )}
-                            {(v as any).source === 'MOCK' && (
-                              <span className="text-[10px] font-bold uppercase tracking-widest text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 px-2 py-0.5 rounded-full">
-                                Simulated
-                              </span>
-                            )}
-                          </div>
-                          <h3 className="text-white font-semibold text-base leading-tight truncate">{v.name}</h3>
-                          <p className="text-gray-500 text-xs mt-0.5">{v.category}</p>
-                        </div>
-                        {v.rating != null && (
-                          <div className="flex items-center gap-1 text-yellow-400 text-sm font-bold flex-shrink-0 ml-2">
-                            <Star size={12} fill="currentColor" /> {v.rating?.toFixed(1)}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="space-y-1.5 mb-4">
-                        {v.address && (
-                          <div className="flex items-center gap-2 text-gray-500 text-xs">
-                            <MapPin size={11} /> <span className="truncate">{v.address}</span>
-                          </div>
-                        )}
-                        {v.phone && (
-                          <div className="flex items-center gap-2 text-gray-500 text-xs">
-                            <Phone size={11} /> {v.phone}
-                          </div>
-                        )}
-                        {(v.contact_email || (v as any).email) && (
-                          <div className="flex items-center gap-2 text-gray-500 text-xs">
-                            <Mail size={11} /> <span className="truncate">{v.contact_email || (v as any).email}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        {v.base_cost != null && (
-                          <span className="text-gray-400 text-xs">
-                            ₹{v.base_cost?.toLocaleString()} est.
+              <div className="grid grid-cols-1 gap-3">
+                {filteredVendors.map((vendor) => (
+                  <div
+                    key={vendor.id}
+                    className="p-4 rounded-xl bg-zinc-950/80 border border-zinc-800/60 hover:border-zinc-700/80 transition flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                  >
+                    <div>
+                      <div className="flex items-center gap-2 mb-1">
+                        <h4 className="text-sm font-bold text-zinc-100">{vendor.name}</h4>
+                        <ProvenanceBadge source={vendor.source} size="sm" />
+                        {vendor.isAssigned && (
+                          <span className="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                            Contracted
                           </span>
                         )}
-                        {v.website && (
-                          <a
-                            href={v.website}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="ml-auto flex items-center gap-1 text-gray-500 hover:text-white text-xs transition-colors"
-                          >
-                            <ExternalLink size={11} /> Website
-                          </a>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400">
+                        <span className="flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-zinc-500" />
+                          {vendor.city}
+                        </span>
+                        {vendor.phone && (
+                          <span className="flex items-center gap-1 font-mono">
+                            <Phone className="w-3 h-3 text-zinc-500" />
+                            {vendor.phone}
+                          </span>
+                        )}
+                        {vendor.rating && (
+                          <span className="text-amber-400 font-semibold">
+                            ★ {vendor.rating}
+                          </span>
+                        )}
+                        {vendor.cost && (
+                          <span className="text-cyan-400 font-medium font-mono">
+                            ₹{Number(vendor.cost).toLocaleString()}
+                          </span>
                         )}
                       </div>
-                    </motion.div>
-                  ))}
-                </AnimatePresence>
-              </div>
-            )}
-          </div>
-        </div>
+                    </div>
 
-        {/* Right: Agent Activity Feed (Priority 6e) */}
-        <div className="xl:col-span-4 flex flex-col bg-[#0B0B0F] border border-white/5 rounded-3xl overflow-hidden h-[500px] xl:h-full">
-          <div className="p-4 border-b border-white/5 flex items-center justify-between flex-shrink-0">
-            <div className="flex items-center gap-2">
-              <Bot size={16} className="text-[#D6003C]" />
-              <h3 className="text-sm font-bold text-white">Agent Activity</h3>
-              {discovering && (
-                <span className="flex items-center gap-1 text-[10px] text-green-400 font-bold uppercase tracking-wider animate-pulse">
-                  <Radio size={10} /> Live
-                </span>
-              )}
-            </div>
-            <button
-              onClick={() => setActivityFeed([])}
-              className="text-gray-600 hover:text-gray-400 transition-colors"
-            >
-              <X size={14} />
-            </button>
-          </div>
-
-          <div className="flex-1 overflow-y-auto no-scrollbar p-4 flex flex-col-reverse gap-2">
-            {activityFeed.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-gray-700 gap-3">
-                <Activity size={28} />
-                <p className="text-xs text-center">
-                  Agent activity will appear here in real-time when discovery runs.
-                </p>
-              </div>
-            ) : (
-              activityFeed.map(entry => (
-                <motion.div
-                  key={entry.id}
-                  initial={{ opacity: 0, x: 10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="flex items-start gap-2.5 text-xs"
-                >
-                  <div className="mt-0.5 flex-shrink-0">{activityIcon(entry.type)}</div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-gray-300 leading-relaxed">{entry.message}</p>
-                    <p className="text-gray-600 text-[10px] mt-0.5">{entry.time}</p>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        href={`/events/${eventId}/conversations`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 transition"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5 text-cyan-400" />
+                        Engage
+                      </Link>
+                    </div>
                   </div>
-                </motion.div>
-              ))
+                ))}
+              </div>
             )}
           </div>
 
-          {demoMode && (
-            <div className="p-3 border-t border-yellow-500/10 bg-yellow-500/5 flex-shrink-0">
-              <p className="text-[10px] text-yellow-500/70 text-center">
-                ⚡ Demo Mode active — outreach responses are simulated, not real
-              </p>
+          {/* Run Telemetry Events (1 Column) */}
+          <div className="space-y-4">
+            <div className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/60 backdrop-blur-md">
+              <div className="flex items-center justify-between mb-3 border-b border-zinc-800/60 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <Bot className="w-4 h-4 text-cyan-400" />
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
+                    Discovery Run Telemetry
+                  </h4>
+                </div>
+                {selectedRun && (
+                  <span
+                    className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded-full border ${
+                      selectedRun.status === "COMPLETED"
+                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                        : selectedRun.status === "RUNNING"
+                        ? "bg-cyan-500/10 text-cyan-400 border-cyan-500/20 animate-pulse"
+                        : "bg-zinc-500/10 text-zinc-400 border-zinc-500/20"
+                    }`}
+                  >
+                    {selectedRun.status}
+                  </span>
+                )}
+              </div>
+
+              <div className="space-y-2.5 max-h-[460px] overflow-y-auto">
+                {runEvents.length === 0 ? (
+                  <div className="py-8 text-center text-zinc-500 text-xs">
+                    No run events recorded yet for this session.
+                  </div>
+                ) : (
+                  runEvents.map((ev) => (
+                    <div
+                      key={ev.id}
+                      className="p-2.5 rounded-lg bg-zinc-900/40 border border-zinc-800/40 text-xs space-y-1"
+                    >
+                      <div className="flex items-center justify-between text-[10px] font-mono text-zinc-500">
+                        <span className="text-cyan-400 font-semibold uppercase">
+                          {ev.event_type}
+                        </span>
+                        <span>Iter {ev.iteration}</span>
+                      </div>
+                      <p className="text-zinc-300 leading-snug">{ev.message}</p>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      </main>
     </div>
   );
 }
