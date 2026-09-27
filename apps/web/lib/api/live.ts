@@ -2,6 +2,7 @@ import { apiClient } from "./client";
 import type {
   EventLiveState,
   TaskProgress,
+  ProviderOperationalSummary,
 } from "../../types/api";
 
 export async function goLive(
@@ -29,6 +30,14 @@ export async function updateTaskStatus(
       actual_start: actualStart,
       actual_end: actualEnd,
     }
+  );
+}
+
+export async function getProvidersLiveState(
+  eventId: string
+): Promise<ProviderOperationalSummary> {
+  return apiClient.get<ProviderOperationalSummary>(
+    `/events/${eventId}/providers/live-state`
   );
 }
 

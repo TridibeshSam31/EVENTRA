@@ -3,50 +3,82 @@
 @tailwind utilities;
 
 :root {
-  --background: 222 47% 6%;
-  --foreground: 210 40% 98%;
-  --card: 222 47% 9%;
-  --card-foreground: 210 40% 98%;
-  --border: 217 33% 18%;
-  --ring: 217 91% 60%;
+  /* Clean Light Enterprise SaaS Tokens */
+  --background: 210 40% 98%;      /* #f8fafc slate-50 */
+  --foreground: 222 47% 11%;      /* #0f172a slate-900 */
+  
+  --card: 0 0% 100%;             /* #ffffff pure white */
+  --card-foreground: 222 47% 11%; /* #0f172a slate-900 */
+  
+  --popover: 0 0% 100%;          /* #ffffff */
+  --popover-foreground: 222 47% 11%;
+  
+  --primary: 343 100% 42%;        /* #D6003C brand accent */
+  --primary-foreground: 0 0% 100%;
+  
+  --secondary: 210 40% 96%;      /* #f1f5f9 slate-100 */
+  --secondary-foreground: 222 47% 11%;
+  
+  --muted: 210 40% 96%;          /* #f1f5f9 */
+  --muted-foreground: 215 16% 47%;/* #64748b slate-500 */
+  
+  --accent: 210 40% 96%;
+  --accent-foreground: 222 47% 11%;
+  
+  --destructive: 0 84% 60%;      /* #dc2626 red-600 */
+  --destructive-foreground: 0 0% 100%;
+  
+  --border: 214 32% 91%;         /* #e2e8f0 slate-200 */
+  --input: 214 32% 91%;          /* #e2e8f0 */
+  --ring: 215 20% 65%;           /* #94a3b8 slate-400 */
+  
+  --radius: 0.5rem;
+
+  /* Semantic Status Variables */
+  --success: 158 64% 52%;        /* #10b981 emerald-500 */
+  --success-foreground: 161 94% 13%;
+  --warning: 38 92% 50%;         /* #f59e0b amber-500 */
+  --warning-foreground: 26 83% 14%;
+  --info: 217 91% 60%;           /* #3b82f6 blue-500 */
+  --info-foreground: 224 76% 20%;
 }
 
 body {
-  background-color: #070b12;
-  color: #f1f5f9;
+  background-color: #f8fafc;
+  color: #0f172a;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   overflow-x: hidden;
 }
 
-/* Custom scrollbars for high-density command center */
+/* Subtle, clean enterprise scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #090e17;
+  background: #f1f5f9;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: #cbd5e1;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #334155;
+  background: #94a3b8;
 }
 
-/* Radar & pulsating indicators */
+/* Operational pulse indicators */
 @keyframes radar-pulse {
   0% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4);
   }
   70% {
     transform: scale(1);
-    box-shadow: 0 0 0 8px rgba(239, 68, 68, 0);
+    box-shadow: 0 0 0 6px rgba(220, 38, 38, 0);
   }
   100% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
   }
 }
 
@@ -56,10 +88,10 @@ body {
 
 @keyframes live-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
   }
   70% {
-    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+    box-shadow: 0 0 0 5px rgba(16, 185, 129, 0);
   }
   100% {
     box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
@@ -70,35 +102,11 @@ body {
   animation: live-pulse 2s infinite;
 }
 
-/* Control center grid overlay */
+/* Subtle subtle grid overlay for technical maps when enabled */
 .bg-grid-pattern {
   background-size: 24px 24px;
   background-image: 
-    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
 }
 
-@layer base {
-  :root {
-    --destructive-foreground: var(--color-red-800);
-    --success: var(--color-emerald-500);
-    --success-foreground: var(--color-emerald-900);
-    --info: var(--color-violet-500);
-    --info-foreground: var(--color-violet-900);
-    --warning: var(--color-yellow-500);
-    --warning-foreground: var(--color-yellow-900);
-    --invert: var(--color-zinc-900);
-    --invert-foreground: var(--color-zinc-50);
-  }
-  .dark {
-    --destructive-foreground: var(--color-red-600);
-    --success: var(--color-emerald-500);
-    --success-foreground: var(--color-emerald-600);
-    --info: var(--color-violet-500);
-    --info-foreground: var(--color-violet-600);
-    --warning: var(--color-yellow-500);
-    --warning-foreground: var(--color-yellow-600);
-    --invert: var(--color-zinc-700);
-    --invert-foreground: var(--color-zinc-50);
-  }
-}

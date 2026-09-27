@@ -1,55 +1,75 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'next/navigation';
-import { motion, AnimatePresence } from 'framer-motion';
+import React, { useState, useEffect, useCallback } from "react";
+import { useParams } from "next/navigation";
 import {
-  CheckCircle2, XCircle, ShieldCheck, UserCheck, AlertTriangle,
-  MessageSquare, DollarSign, Clock, LayoutTemplate, Activity,
-  CornerDownRight, Fingerprint, RefreshCw, Loader2, Bot
-} from 'lucide-react';
-import { listApprovals, approveRequest, rejectRequest } from '@/lib/api/approvals';
-import type { ApprovalRequestResponse } from '@/types/api';
+  ShieldCheck,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  UserCheck,
+  RefreshCw,
+  Loader2,
+  Bot,
+  Fingerprint,
+  Info,
+  Clock,
+  Inbox,
+  AlertCircle,
+} from "lucide-react";
+import { EventShell } from "@/components/v2/EventShell";
+import { listApprovals, approveRequest, rejectRequest } from "@/lib/api/approvals";
+import type { ApprovalRequestResponse } from "@/types/api";
 
-// ─── Fallback static data (only shown while loading or if event has no real approvals yet) ───
-const STATIC_APPROVALS = [
-  {
-    id: 'REQ-4092',
-    type: 'Financial Override',
-    title: 'Emergency Security Expansion',
-    requestedBy: 'David M. (Security Chief)',
-    time: '10 mins ago',
-    severity: 'critical',
-    description: 'VIP attendance is 15% higher than projected. Requesting immediate authorization to deploy 4 additional private security contractors.',
-    aiAnalysis: 'Approving prevents crowd-control failure in Sector 4. Budget ($2,400) is within 10% contingency. Highly recommended.',
-    status: 'PENDING',
-  },
-];
-
-function severityFromPriority(priority?: string): 'critical' | 'warning' | 'info' {
-  if (!priority) return 'info';
-  const p = priority.toLowerCase();
-  if (p === 'critical' || p === 'high') return 'critical';
-  if (p === 'medium' || p === 'warning') return 'warning';
-  return 'info';
+interface DisplayApproval {
+  id: string;
+  type: string;
+  title: string;
+  requestedBy: string;
+  time: string;
+  severity: "critical" | "warning" | "info";
+  description: string;
+  aiAnalysis: string;
+  status: string;
+  raw: ApprovalRequestResponse;
 }
 
-function toDisplayItem(r: ApprovalRequestResponse) {
+function severityFromPriority(priority?: string): "critical" | "warning" | "info" {
+  if (!priority) return "info";
+  const p = priority.toLowerCase();
+  if (p === "critical" || p === "high") return "critical";
+  if (p === "medium" || p === "warning") return "warning";
+  return "info";
+}
+
+function toDisplayItem(r: ApprovalRequestResponse): DisplayApproval {
   const reqAction = (r.requested_action || {}) as Record<string, any>;
-  const title = (reqAction.title as string) || (reqAction.action as string) || (r.action_type ? r.action_type.replace(/_/g, ' ').toUpperCase() : 'Approval Request');
-  const description = (reqAction.description as string) || (reqAction.reason as string) || (r.decision_notes) || `Target: ${r.target_type || 'system'} (${r.target_id || 'N/A'})`;
-  const aiAnalysis = (reqAction.ai_context as string) || (reqAction.reasoning as string) || (reqAction.recommendation as string) || `Agent requested ${r.action_type} on ${r.target_type || 'event'}. Impact level: ${r.impact_level}.`;
+  const title =
+    (reqAction.title as string) ||
+    (reqAction.action as string) ||
+    (r.action_type ? r.action_type.replace(/_/g, " ").toUpperCase() : "Approval Request");
+  const description =
+    (reqAction.description as string) ||
+    (reqAction.reason as string) ||
+    r.decision_notes ||
+    `Target: ${r.target_type || "system"} (${r.target_id || "N/A"})`;
+  const aiAnalysis =
+    (reqAction.ai_context as string) ||
+    (reqAction.reasoning as string) ||
+    (reqAction.recommendation as string) ||
+    `Agent requested ${r.action_type || "operational action"} on ${r.target_type || "event"}. Impact level: ${r.impact_level}.`;
 
   return {
     id: r.id,
-    type: r.action_type || 'Operational Action',
+    type: r.action_type || "Operational Action",
     title,
-    requestedBy: r.requester_id || 'System AI',
-    time: r.created_at ? new Date(r.created_at).toLocaleTimeString() : '',
+    requestedBy: r.requester_id || "System AI",
+    time: r.created_at ? new Date(r.created_at).toLocaleTimeString() : "",
     severity: severityFromPriority(r.impact_level),
     description,
     aiAnalysis,
     status: r.status as string,
+    raw: r,
   };
 }
 
@@ -57,300 +77,388 @@ export default function ApprovalsPage() {
   const params = useParams();
   const eventId = params?.eventId as string;
 
-  const [items, setItems] = useState(STATIC_APPROVALS);
-  const [activeId, setActiveId] = useState(STATIC_APPROVALS[0].id);
-  const [resolvedIds, setResolvedIds] = useState<Record<string, 'approved' | 'denied'>>({});
+  const [items, setItems] = useState<DisplayApproval[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [resolvedIds, setResolvedIds] = useState<Record<string, "approved" | "denied">>({});
   const [processing, setProcessing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rejectReason, setRejectReason] = useState('');
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
   const [showRejectInput, setShowRejectInput] = useState(false);
 
   const fetchApprovals = useCallback(async () => {
     if (!eventId) return;
     try {
+      setLoading(true);
       setError(null);
-      const res = await listApprovals(eventId, { status: 'PENDING', limit: 50 });
+      setActionError(null);
+      const res = await listApprovals(eventId, { status: "PENDING", limit: 50 });
       if (res.items && res.items.length > 0) {
         const mapped = res.items.map(toDisplayItem);
         setItems(mapped);
-        setActiveId(mapped[0].id);
+        if (!activeId || !mapped.some((m) => m.id === activeId)) {
+          setActiveId(mapped[0].id);
+        }
+      } else {
+        setItems([]);
+        setActiveId(null);
       }
-    } catch (err) {
-      console.error('Failed to fetch approvals:', err);
-      setError('Could not load real approvals. Showing static demo data.');
+    } catch (err: any) {
+      console.error("Failed to fetch approvals:", err);
+      setError(err?.message || "Failed to load approval requests from backend.");
+      setItems([]);
+      setActiveId(null);
     } finally {
       setLoading(false);
     }
-  }, [eventId]);
+  }, [eventId, activeId]);
 
-  useEffect(() => { fetchApprovals(); }, [fetchApprovals]);
+  useEffect(() => {
+    fetchApprovals();
+  }, [fetchApprovals]);
 
-  const activeRequest = items.find(a => a.id === activeId);
-  const resolution = resolvedIds[activeId];
+  const activeRequest = items.find((a) => a.id === activeId);
+  const resolution = activeId ? resolvedIds[activeId] : undefined;
+  const pendingCount = items.filter((i) => !resolvedIds[i.id]).length;
 
-  const handleAction = async (action: 'approved' | 'denied') => {
-    if (!eventId) return;
-    if (action === 'denied' && !showRejectInput) {
+  const handleAction = async (action: "approved" | "denied") => {
+    if (!eventId || !activeId) return;
+    if (action === "denied" && !showRejectInput) {
       setShowRejectInput(true);
       return;
     }
+
     setProcessing(true);
+    setActionError(null);
     setShowRejectInput(false);
+
     try {
-      if (action === 'approved') {
-        await approveRequest(eventId, activeId, 'Approved via Eventra UI');
+      if (action === "approved") {
+        await approveRequest(eventId, activeId, "Approved via Eventra Operations Console");
       } else {
-        await rejectRequest(eventId, activeId, rejectReason || 'Rejected by operator');
+        await rejectRequest(eventId, activeId, rejectReason || "Rejected by executive operator");
       }
-      setResolvedIds(prev => ({ ...prev, [activeId]: action }));
-      // Auto-advance to next pending
-      const next = items.find(i => i.id !== activeId && !resolvedIds[i.id]);
-      if (next) setActiveId(next.id);
+
+      setResolvedIds((prev) => ({ ...prev, [activeId]: action }));
+
+      // Auto-advance to next pending item
+      const next = items.find((i) => i.id !== activeId && !resolvedIds[i.id]);
+      if (next) {
+        setActiveId(next.id);
+      }
     } catch (err: any) {
-      // If real call fails (e.g. approval_id is from static demo), still update UI
-      console.error('Approval action failed:', err);
-      setResolvedIds(prev => ({ ...prev, [activeId]: action }));
+      console.error("Approval action failed:", err);
+      setActionError(err?.message || `Failed to record ${action} decision. Please retry.`);
     } finally {
       setProcessing(false);
-      setRejectReason('');
+      setRejectReason("");
     }
   };
 
-  const getSeverityColor = (severity: string) => {
+  const getSeverityBadge = (severity: string) => {
     switch (severity) {
-      case 'critical': return 'text-[#D6003C] border-[#D6003C]/30 bg-[#D6003C]/10';
-      case 'warning': return 'text-yellow-500 border-yellow-500/30 bg-yellow-500/10';
-      default: return 'text-blue-400 border-blue-400/30 bg-blue-400/10';
+      case "critical":
+        return "text-rose-700 border-rose-200 bg-rose-50";
+      case "warning":
+        return "text-amber-700 border-amber-200 bg-amber-50";
+      default:
+        return "text-blue-700 border-blue-200 bg-blue-50";
     }
   };
-
-  const pendingCount = items.filter(i => !resolvedIds[i.id]).length;
 
   return (
-    <div className="flex flex-col h-full max-h-[calc(100vh-80px)] overflow-hidden p-4 md:p-8">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4 flex-shrink-0">
-        <div>
-          <h1 className="text-3xl font-light tracking-tighter text-white flex items-center gap-3">
-            <ShieldCheck className="text-green-500" size={28} />
-            Human <span className="font-bold text-green-500">Authorization</span>
-          </h1>
-          <p className="text-sm text-gray-400 mt-1 ml-10">AI proposes. You decide. Final executive sign-off queue.</p>
-        </div>
-        <button
-          onClick={() => { setLoading(true); fetchApprovals(); }}
-          className="flex items-center gap-2 text-xs text-gray-400 hover:text-white border border-white/10 hover:border-white/20 rounded-lg px-3 py-2 transition-all"
-        >
-          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-          Refresh
-        </button>
-      </div>
-
-      {/* Error banner */}
-      {error && (
-        <div className="mb-4 px-4 py-3 rounded-xl bg-yellow-500/10 border border-yellow-500/20 text-yellow-400 text-sm flex items-center gap-2 flex-shrink-0">
-          <AlertTriangle size={14} /> {error}
-        </div>
-      )}
-
-      <div className="flex-1 grid grid-cols-1 xl:grid-cols-12 gap-6 min-h-0 overflow-y-auto no-scrollbar pb-20 xl:pb-0">
-        {/* Left Column: Queue */}
-        <div className="xl:col-span-4 flex flex-col h-full gap-4">
-          <div className="flex items-center justify-between flex-shrink-0">
-            <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
-              Action Queue
-            </h3>
-            <span className="bg-white/10 text-white text-[10px] font-bold px-2 py-1 rounded-full">
-              {loading ? '...' : `${pendingCount} PENDING`}
-            </span>
+    <EventShell eventId={eventId} currentStage="LIVE">
+      <div className="space-y-6">
+        {/* Header Bar */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                Governance Command
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                {pendingCount} Pending Sign-offs
+              </span>
+            </div>
+            <h1 className="text-xl font-bold text-slate-900 tracking-tight mt-1 flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-emerald-600" />
+              Human Authorization Queue
+            </h1>
+            <p className="text-xs text-slate-500 mt-0.5">
+              AI agents propose high-impact operational decisions. Human authority provides final deterministic sign-off.
+            </p>
           </div>
 
-          <div className="flex-1 overflow-y-auto no-scrollbar flex flex-col gap-4">
-            {loading ? (
-              <div className="flex items-center justify-center py-12 text-gray-500">
-                <Loader2 size={20} className="animate-spin mr-2" /> Loading approvals…
+          <button
+            onClick={() => fetchApprovals()}
+            disabled={loading}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition self-start sm:self-auto"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            Refresh Queue
+          </button>
+        </div>
+
+        {/* Global Error Banner */}
+        {error && (
+          <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {/* Action Error Banner */}
+        {actionError && (
+          <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>{actionError}</span>
+          </div>
+        )}
+
+        {/* Main Content */}
+        {loading && items.length === 0 ? (
+          <div className="p-16 text-center text-slate-400 bg-white rounded-xl border border-slate-200">
+            <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-[#D6003C]" />
+            <p className="text-xs font-medium text-slate-600">Loading pending authorization requests…</p>
+          </div>
+        ) : items.length === 0 ? (
+          <div className="p-16 text-center bg-white rounded-xl border border-slate-200 shadow-sm space-y-3">
+            <div className="w-12 h-12 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-900">Authorization Queue Clear</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto">
+              There are no pending actions requiring executive approval. When an autonomous workflow reaches a financial threshold or recovery trigger, it will appear here for review.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+            {/* Left Column: Action Queue */}
+            <div className="lg:col-span-5 space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  Requests ({items.length})
+                </span>
+                <span className="text-[10px] font-semibold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                  {pendingCount} Awaiting Decision
+                </span>
               </div>
-            ) : items.map((req) => {
-              const isActive = activeId === req.id;
-              const status = resolvedIds[req.id];
-              return (
-                <div
-                  key={req.id}
-                  onClick={() => setActiveId(req.id)}
-                  className={`p-5 rounded-3xl border transition-all cursor-pointer relative overflow-hidden group ${
-                    isActive ? 'bg-white/[0.05] border-white/20 shadow-[0_0_30px_rgba(255,255,255,0.05)]' :
-                    'bg-[#0B0B0F] border-white/5 hover:border-white/10 hover:bg-white/[0.02]'
-                  }`}
-                >
-                  {isActive && <motion.div layoutId="active-approval-border" className="absolute left-0 top-0 bottom-0 w-1 bg-green-500" />}
-                  <div className="flex items-start justify-between mb-3">
-                    {status === 'approved' ? (
-                      <div className="px-3 py-1 rounded-full border border-green-500/30 bg-green-500/10 text-green-500 text-[10px] uppercase tracking-widest font-bold flex items-center gap-1.5">
-                        <CheckCircle2 size={12} /> Approved
-                      </div>
-                    ) : status === 'denied' ? (
-                      <div className="px-3 py-1 rounded-full border border-red-500/30 bg-red-500/10 text-red-500 text-[10px] uppercase tracking-widest font-bold flex items-center gap-1.5">
-                        <XCircle size={12} /> Denied
-                      </div>
-                    ) : (
-                      <div className={`px-3 py-1 rounded-full border text-[10px] uppercase tracking-widest font-bold flex items-center gap-1.5 ${getSeverityColor(req.severity)}`}>
-                        <AlertTriangle size={12} /> {req.type}
-                      </div>
-                    )}
-                    <span className="text-xs text-gray-500 font-medium">{req.time}</span>
-                  </div>
-                  <h3 className={`text-lg font-semibold leading-tight mb-2 ${status ? 'text-gray-400' : 'text-white'}`}>
-                    {req.title}
-                  </h3>
-                  <p className="text-xs text-gray-500 flex items-center gap-1.5">
-                    <UserCheck size={12} /> {req.requestedBy}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
 
-        {/* Right Column: Authorization Dashboard */}
-        <div className="xl:col-span-8 flex flex-col h-[800px] xl:h-full bg-[#0B0B0F] border border-white/5 rounded-3xl overflow-hidden relative shadow-2xl">
-          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-green-500/50 to-transparent opacity-50" />
+              <div className="space-y-2.5">
+                {items.map((req) => {
+                  const isActive = activeId === req.id;
+                  const status = resolvedIds[req.id];
 
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeId}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-              className="flex flex-col h-full"
-            >
-              <div className="flex-1 overflow-y-auto no-scrollbar p-6 md:p-8 flex flex-col">
-                {/* Request Context */}
-                <div className="mb-8">
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="text-sm font-mono text-gray-500">{activeRequest?.id}</span>
-                    <span className="w-1 h-1 rounded-full bg-white/20" />
-                    {resolution ? (
-                      <span className={`text-xs font-bold uppercase tracking-widest flex items-center gap-2 ${resolution === 'approved' ? 'text-green-500' : 'text-red-500'}`}>
-                        {resolution === 'approved' ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
-                        Request {resolution}
+                  return (
+                    <button
+                      key={req.id}
+                      onClick={() => {
+                        setActiveId(req.id);
+                        setShowRejectInput(false);
+                        setActionError(null);
+                      }}
+                      className={`w-full text-left p-4 rounded-xl border transition-all text-xs ${
+                        isActive
+                          ? "bg-white border-[#D6003C] shadow-sm ring-1 ring-[#D6003C]/30"
+                          : "bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/50"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2 mb-1.5">
+                        {status === "approved" ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                            <CheckCircle2 className="w-3 h-3" /> Approved
+                          </span>
+                        ) : status === "denied" ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full">
+                            <XCircle className="w-3 h-3" /> Denied
+                          </span>
+                        ) : (
+                          <span
+                            className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${getSeverityBadge(
+                              req.severity
+                            )}`}
+                          >
+                            <AlertTriangle className="w-3 h-3" /> {req.type}
+                          </span>
+                        )}
+                        <span className="text-[10px] font-mono text-slate-400">{req.time}</span>
+                      </div>
+
+                      <h4 className="font-bold text-slate-900 leading-snug text-sm mb-1">{req.title}</h4>
+
+                      <div className="flex items-center gap-1.5 text-slate-500 text-[11px]">
+                        <UserCheck className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Requested by: {req.requestedBy}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Right Column: Authorization Detail & Decision Dashboard */}
+            <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+              {activeRequest ? (
+                <div className="flex flex-col">
+                  {/* Top Status Header */}
+                  <div className="p-6 border-b border-slate-100 bg-slate-50/50 space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-mono text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+                        {activeRequest.id}
                       </span>
-                    ) : (
-                      <span className="text-xs font-bold uppercase tracking-widest text-yellow-500 animate-pulse">
-                        Awaiting Authorization
-                      </span>
-                    )}
-                  </div>
-                  <h2 className="text-2xl md:text-3xl font-medium text-white mb-2">{activeRequest?.title}</h2>
-                  <div className="flex items-center gap-2 text-sm text-gray-400 bg-white/5 w-fit px-3 py-1.5 rounded-lg border border-white/10 mb-6">
-                    <UserCheck size={14} /> Requested by: <span className="text-white font-medium">{activeRequest?.requestedBy}</span>
-                  </div>
-                  <p className="text-gray-300 text-sm md:text-base leading-relaxed max-w-3xl">
-                    {activeRequest?.description}
-                  </p>
-                </div>
+                      {resolution ? (
+                        <span
+                          className={`text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 ${
+                            resolution === "approved" ? "text-emerald-700" : "text-rose-700"
+                          }`}
+                        >
+                          {resolution === "approved" ? (
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                          ) : (
+                            <XCircle className="w-4 h-4 text-rose-600" />
+                          )}
+                          Request {resolution}
+                        </span>
+                      ) : (
+                        <span className="text-xs font-bold uppercase tracking-wider text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-amber-600" /> Awaiting Authorization
+                        </span>
+                      )}
+                    </div>
 
-                {!resolution && (
-                  <>
-                    {/* AI Analysis Box */}
-                    <div className="bg-gradient-to-br from-[#111115] to-black border border-green-500/20 rounded-2xl p-6 mb-8 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-green-500/10 rounded-full blur-[50px] -translate-y-1/2 translate-x-1/4 pointer-events-none" />
-                      <h4 className="text-xs font-bold uppercase tracking-widest text-green-500 mb-3 flex items-center gap-2">
-                        <Bot size={14} /> AI Context Analysis
+                    <h2 className="text-xl font-bold text-slate-900">{activeRequest.title}</h2>
+
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+                      <div className="flex items-center gap-1.5">
+                        <UserCheck className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Requester: <strong className="text-slate-800">{activeRequest.requestedBy}</strong></span>
+                      </div>
+                      <span className="text-slate-300">•</span>
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Submitted: {activeRequest.time || "Recent"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Body Content */}
+                  <div className="p-6 space-y-6">
+                    {/* Operational Description */}
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                        Operational Scope &amp; Context
                       </h4>
-                      <p className="text-gray-300 text-sm leading-relaxed relative z-10">
-                        {activeRequest?.aiAnalysis}
+                      <p className="text-sm text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-200/80">
+                        {activeRequest.description}
                       </p>
                     </div>
 
-                    {/* Reject reason input */}
-                    <AnimatePresence>
-                      {showRejectInput && (
-                        <motion.div
-                          initial={{ opacity: 0, height: 0 }}
-                          animate={{ opacity: 1, height: 'auto' }}
-                          exit={{ opacity: 0, height: 0 }}
-                          className="mb-6"
+                    {/* AI Assessment / Recommendation Box */}
+                    <div className="bg-emerald-50/50 border border-emerald-200 rounded-xl p-5 space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-800">
+                        <Bot className="w-4 h-4 text-emerald-700" />
+                        Autonomous Agent Recommendation &amp; Impact Analysis
+                      </div>
+                      <p className="text-xs text-emerald-950 leading-relaxed">
+                        {activeRequest.aiAnalysis}
+                      </p>
+                    </div>
+
+                    {/* Rejection Note Input */}
+                    {showRejectInput && !resolution && (
+                      <div className="space-y-2">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-rose-700">
+                          Rejection Rationale (Required for Audit Record)
+                        </label>
+                        <textarea
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="Provide the reason for denial to record in the governance trace…"
+                          rows={3}
+                          className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-800 focus:bg-white focus:outline-none focus:ring-1 focus:ring-rose-500"
+                        />
+                      </div>
+                    )}
+
+                    {/* Resolution Banner */}
+                    {resolution && (
+                      <div
+                        className={`p-6 rounded-xl border text-center space-y-2 ${
+                          resolution === "approved"
+                            ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+                            : "bg-rose-50 border-rose-200 text-rose-900"
+                        }`}
+                      >
+                        <div className="w-10 h-10 rounded-full mx-auto flex items-center justify-center bg-white shadow-xs">
+                          {resolution === "approved" ? (
+                            <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+                          ) : (
+                            <XCircle className="w-6 h-6 text-rose-600" />
+                          )}
+                        </div>
+                        <h4 className="text-sm font-bold">
+                          {resolution === "approved" ? "Authorization Granted" : "Request Denied"}
+                        </h4>
+                        <p className="text-xs text-slate-600 max-w-sm mx-auto">
+                          {resolution === "approved"
+                            ? "The action has been authorized and dispatched to the orchestration pipeline."
+                            : "The request has been rejected. Relevant operational owners have been notified."}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Action Footer */}
+                  {!resolution && (
+                    <div className="p-5 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row items-center justify-between gap-4">
+                      <div className="flex items-center gap-2 text-xs text-slate-500">
+                        <Fingerprint className="w-4 h-4 text-slate-400" />
+                        <span>Cryptographically logged to audit trail</span>
+                      </div>
+
+                      <div className="flex items-center gap-3 w-full sm:w-auto">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            showRejectInput ? handleAction("denied") : setShowRejectInput(true)
+                          }
+                          disabled={processing}
+                          className="flex-1 sm:flex-none px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold transition disabled:opacity-50"
                         >
-                          <label className="block text-xs font-bold uppercase tracking-widest text-red-400 mb-2">Rejection Reason</label>
-                          <textarea
-                            value={rejectReason}
-                            onChange={e => setRejectReason(e.target.value)}
-                            placeholder="Explain why this request is denied…"
-                            className="w-full bg-red-500/5 border border-red-500/20 rounded-xl p-3 text-white text-sm resize-none focus:outline-none focus:border-red-500/40"
-                            rows={3}
-                          />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </>
-                )}
-
-                {resolution && (
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    className={`flex-1 flex flex-col items-center justify-center text-center p-8 rounded-3xl border ${
-                      resolution === 'approved' ? 'bg-green-500/10 border-green-500/20' : 'bg-red-500/10 border-red-500/20'
-                    }`}
-                  >
-                    <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-6 border ${
-                      resolution === 'approved' ? 'bg-green-500/20 border-green-500/30' : 'bg-red-500/20 border-red-500/30'
-                    }`}>
-                      {resolution === 'approved' ? <ShieldCheck size={40} className="text-green-500" /> : <XCircle size={40} className="text-red-500" />}
+                          {showRejectInput ? "Confirm Denial" : "Deny Request"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleAction("approved")}
+                          disabled={processing}
+                          className="flex-1 sm:flex-none px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold shadow-xs transition flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                          {processing ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>Signing…</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              <span>Authorize Action</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
-                    <h3 className="text-2xl font-medium text-white mb-2">
-                      {resolution === 'approved' ? 'Authorization Granted' : 'Request Denied'}
-                    </h3>
-                    <p className="text-gray-400 max-w-md">
-                      {resolution === 'approved'
-                        ? 'The request has been approved and the autonomous agent has been notified to execute the action.'
-                        : 'The request has been denied. The requester has been notified.'}
-                    </p>
-                  </motion.div>
-                )}
-              </div>
-
-              {/* Action Footer */}
-              <AnimatePresence>
-                {!resolution && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 20 }}
-                    className="p-6 md:p-8 border-t border-white/10 bg-black/40 flex flex-col md:flex-row items-center justify-between gap-6 flex-shrink-0"
-                  >
-                    <div className="flex items-center gap-3 text-sm text-gray-400">
-                      <Fingerprint size={20} className="text-gray-500" />
-                      Requiring Executive Digital Signature
-                    </div>
-                    <div className="flex w-full md:w-auto gap-4">
-                      <button
-                        onClick={() => showRejectInput ? handleAction('denied') : setShowRejectInput(true)}
-                        disabled={processing}
-                        className="flex-1 md:flex-none bg-transparent hover:bg-red-500/10 text-gray-300 hover:text-red-500 border border-white/20 hover:border-red-500/50 px-6 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all disabled:opacity-50"
-                      >
-                        {showRejectInput ? 'Confirm Denial' : 'Deny Request'}
-                      </button>
-                      <button
-                        onClick={() => handleAction('approved')}
-                        disabled={processing}
-                        className="flex-1 md:flex-none bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white px-8 py-3 rounded-xl text-sm font-bold uppercase tracking-wider transition-all shadow-[0_0_20px_rgba(22,163,74,0.3)] flex items-center justify-center gap-2"
-                      >
-                        {processing ? (
-                          <><Loader2 size={16} className="animate-spin" /> Processing…</>
-                        ) : (
-                          <><CheckCircle2 size={16} /> Approve &amp; Execute</>
-                        )}
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </motion.div>
-          </AnimatePresence>
-        </div>
+                  )}
+                </div>
+              ) : (
+                <div className="p-16 text-center text-slate-400 text-xs">
+                  Select an approval request to inspect context and sign off.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
-    </div>
+    </EventShell>
   );
 }

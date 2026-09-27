@@ -1,8 +1,12 @@
 import { apiRequest } from "./client";
 import type { DiscoveryRun, DiscoveryRunEvent, DiscoveryRunListResponse } from "@/types/discoveryRun";
 
-export async function getDiscoveryRuns(eventId: string): Promise<DiscoveryRunListResponse> {
-  return apiRequest<DiscoveryRunListResponse>(`/events/${eventId}/discovery-runs`);
+export async function getDiscoveryRuns(
+  eventId: string,
+  category?: string
+): Promise<DiscoveryRunListResponse> {
+  const query = category ? `?category=${encodeURIComponent(category.toLowerCase())}` : "";
+  return apiRequest<DiscoveryRunListResponse>(`/events/${eventId}/discovery-runs${query}`);
 }
 
 export async function getDiscoveryRun(eventId: string, runId: string): Promise<DiscoveryRun> {

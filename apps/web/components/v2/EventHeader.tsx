@@ -8,8 +8,6 @@ import {
   MapPin,
   Users,
   CreditCard,
-  ShieldAlert,
-  Radio,
   ArrowLeft,
 } from "lucide-react";
 import { LifecycleStepper, LifecycleStage } from "./LifecycleStepper";
@@ -29,11 +27,11 @@ interface EventHeaderProps {
 
 export function EventHeader({
   eventId,
-  name = "Corporate Summit 2026",
+  name,
   startDate,
-  location = "Delhi, India",
-  guestCount = 100,
-  totalBudget = 1000000,
+  location,
+  guestCount,
+  totalBudget,
   currency = "INR",
   lifecycleState = "PLANNED",
   state = "NORMAL",
@@ -45,68 +43,82 @@ export function EventHeader({
   const isDisrupted = state === "DISRUPTED";
 
   const currencySym = currency === "INR" ? "₹" : "$";
+  const displayName = name || "Event Overview";
+  const displayLocation = location || "Location unassigned";
+  const displayCapacity = guestCount ? `${guestCount} pax` : "Capacity unassigned";
+  const displayBudget =
+    totalBudget != null ? `${currencySym}${totalBudget.toLocaleString()}` : "Budget unassigned";
 
   return (
-    <header className="w-full border-b border-zinc-800/80 bg-zinc-950/90 backdrop-blur-xl sticky top-0 z-30">
+    <div className="w-full bg-white border-b border-slate-200 sticky top-0 z-30">
       {/* Top Banner / Event Metadata */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
           <Link
-            href="/events"
-            className="p-2 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900 border border-zinc-800/80 transition"
-            title="All Events"
+            href="/dashboard"
+            className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 hover:bg-slate-100 border border-slate-200 transition"
+            title="Back to Fleet Dashboard"
           >
             <ArrowLeft className="w-4 h-4" />
           </Link>
 
-          <div>
-            <div className="flex items-center gap-2.5">
-              <h1 className="text-lg font-bold text-zinc-100 tracking-tight">
-                {name}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
+                {displayName}
               </h1>
 
-              {/* Status Pill */}
+              {/* Operational State Pill */}
               <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
                   isDisrupted
-                    ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                    ? "bg-rose-50 text-rose-700 border-rose-200"
                     : isDegraded
-                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                    : "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                    : "bg-emerald-50 text-emerald-700 border-emerald-200"
                 }`}
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
                     isDisrupted
-                      ? "bg-rose-400 animate-ping"
+                      ? "bg-rose-500 animate-ping"
                       : isDegraded
-                      ? "bg-amber-400 animate-pulse"
-                      : "bg-emerald-400"
+                      ? "bg-amber-500 animate-pulse"
+                      : "bg-emerald-500"
                   }`}
                 />
                 {state}
               </span>
+
+              {/* Lifecycle State Pill */}
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold uppercase">
+                {lifecycleState}
+              </span>
             </div>
 
             {/* Quick Specs */}
-            <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-400 mt-1">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 mt-1">
               <span className="flex items-center gap-1">
-                <MapPin className="w-3.5 h-3.5 text-zinc-500" />
-                {location}
+                <MapPin className="w-3.5 h-3.5 text-slate-400" />
+                {displayLocation}
               </span>
               <span className="flex items-center gap-1">
-                <Users className="w-3.5 h-3.5 text-zinc-500" />
-                {guestCount} pax
+                <Users className="w-3.5 h-3.5 text-slate-400" />
+                {displayCapacity}
               </span>
               <span className="flex items-center gap-1">
-                <CreditCard className="w-3.5 h-3.5 text-zinc-500" />
-                {currencySym}
-                {totalBudget.toLocaleString()}
+                <CreditCard className="w-3.5 h-3.5 text-slate-400" />
+                {displayBudget}
               </span>
-              {startDate && (
+              {startDate ? (
                 <span className="flex items-center gap-1">
-                  <Calendar className="w-3.5 h-3.5 text-zinc-500" />
+                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
                   {new Date(startDate).toLocaleDateString()}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-slate-400">
+                  <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                  Date not scheduled
                 </span>
               )}
             </div>
@@ -114,7 +126,7 @@ export function EventHeader({
         </div>
 
         {/* Global Navigation Tabs */}
-        <div className="flex items-center gap-1 overflow-x-auto text-xs font-medium">
+        <div className="flex items-center gap-1 overflow-x-auto text-xs font-medium no-scrollbar py-0.5">
           {[
             { label: "Overview", path: `/events/${eventId}` },
             { label: "Sourcing", path: `/events/${eventId}/vendors` },
@@ -129,10 +141,10 @@ export function EventHeader({
               <Link
                 key={tab.path}
                 href={tab.path}
-                className={`px-3 py-1.5 rounded-lg transition-all whitespace-nowrap ${
+                className={`px-2.5 py-1.5 rounded-md transition-all whitespace-nowrap ${
                   isActive
-                    ? "bg-zinc-800 text-white font-semibold shadow-sm"
-                    : "text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60"
+                    ? "bg-slate-100 text-slate-900 font-semibold border border-slate-200 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
                 }`}
               >
                 {tab.label}
@@ -142,8 +154,8 @@ export function EventHeader({
         </div>
       </div>
 
-      {/* Lifecycle Progress Stepper */}
+      {/* Embedded Lifecycle Stepper */}
       <LifecycleStepper eventId={eventId} currentStage={currentStage} />
-    </header>
+    </div>
   );
 }

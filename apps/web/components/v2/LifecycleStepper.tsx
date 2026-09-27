@@ -43,35 +43,35 @@ const STAGES: {
   {
     id: "DISCOVER",
     label: "Discover",
-    sublabel: "Live Sourcing",
+    sublabel: "Sourcing & Fit",
     path: (id) => `/events/${id}/vendors`,
     icon: Search,
   },
   {
     id: "PLAN",
     label: "Plan",
-    sublabel: "DAG Schedule",
+    sublabel: "Schedule & CPM",
     path: (id) => `/events/${id}/plan`,
     icon: CalendarCheck,
   },
   {
     id: "READY",
     label: "Ready",
-    sublabel: "Quotes & Approvals",
+    sublabel: "Approvals & Sign-off",
     path: (id) => `/events/${id}/approvals`,
     icon: ShieldCheck,
   },
   {
     id: "LIVE",
     label: "Live",
-    sublabel: "Command Center",
+    sublabel: "Execution Control",
     path: (id) => `/events/${id}/live`,
     icon: Radio,
   },
   {
     id: "RECOVER",
     label: "Recover",
-    sublabel: "Adaptive Mitigations",
+    sublabel: "Incident & Swap",
     path: (id) => `/events/${id}/recovery`,
     icon: RefreshCw,
   },
@@ -87,7 +87,7 @@ export function LifecycleStepper({
   return (
     <nav
       aria-label="Event Lifecycle Stages"
-      className={`w-full overflow-x-auto py-2.5 px-4 bg-zinc-950/70 border-b border-zinc-800/60 backdrop-blur-md ${className}`}
+      className={`w-full overflow-x-auto py-2.5 px-4 bg-white border-b border-slate-200 ${className}`}
     >
       <div className="flex items-center justify-between min-w-[720px] max-w-6xl mx-auto gap-2">
         {STAGES.map((stage, idx) => {
@@ -99,25 +99,25 @@ export function LifecycleStepper({
             <React.Fragment key={stage.id}>
               <Link
                 href={stage.path(eventId)}
-                className={`flex items-center gap-2.5 px-3 py-1.5 rounded-xl transition-all duration-200 group ${
+                className={`flex items-center gap-2.5 px-3 py-1.5 rounded-lg transition-all duration-150 group ${
                   isCurrent
-                    ? "bg-zinc-800/80 text-cyan-400 shadow-sm border border-cyan-500/30"
+                    ? "bg-slate-100 text-slate-900 shadow-sm border border-slate-300 font-semibold"
                     : isPassed
-                    ? "text-zinc-300 hover:text-white hover:bg-zinc-900/60"
-                    : "text-zinc-500 hover:text-zinc-400 hover:bg-zinc-900/30"
+                    ? "text-slate-700 hover:text-slate-900 hover:bg-slate-50"
+                    : "text-slate-400 hover:text-slate-600 hover:bg-slate-50/50"
                 }`}
               >
                 <div
-                  className={`w-7 h-7 rounded-lg flex items-center justify-center transition-colors ${
+                  className={`w-7 h-7 rounded-md flex items-center justify-center transition-colors ${
                     isCurrent
-                      ? "bg-cyan-500/20 text-cyan-400 ring-1 ring-cyan-500/40"
+                      ? "bg-[#D6003C]/10 text-[#D6003C] border border-[#D6003C]/30"
                       : isPassed
-                      ? "bg-emerald-500/15 text-emerald-400 ring-1 ring-emerald-500/30"
-                      : "bg-zinc-900 text-zinc-600 border border-zinc-800"
+                      ? "bg-emerald-50 text-emerald-600 border border-emerald-200"
+                      : "bg-slate-100 text-slate-400 border border-slate-200"
                   }`}
                 >
                   {isPassed ? (
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                   ) : (
                     <Icon className="w-3.5 h-3.5" />
                   )}
@@ -127,10 +127,10 @@ export function LifecycleStepper({
                   <div className="text-xs font-semibold tracking-wide uppercase flex items-center gap-1.5">
                     {stage.label}
                     {isCurrent && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-[#D6003C] animate-pulse" />
                     )}
                   </div>
-                  <div className="text-[10px] text-zinc-500 group-hover:text-zinc-400 transition-colors">
+                  <div className="text-[10px] text-slate-500 group-hover:text-slate-700 transition-colors">
                     {stage.sublabel}
                   </div>
                 </div>
@@ -139,7 +139,7 @@ export function LifecycleStepper({
               {idx < STAGES.length - 1 && (
                 <div
                   className={`flex-1 h-px transition-colors mx-1 ${
-                    idx < currentIndex ? "bg-emerald-500/40" : "bg-zinc-800/60"
+                    idx < currentIndex ? "bg-emerald-300" : "bg-slate-200"
                   }`}
                 />
               )}

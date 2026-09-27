@@ -2,16 +2,21 @@
 
 import React, { useState } from "react";
 import {
-  Sparkles,
   Bot,
-  Play,
+  Zap,
   Loader2,
   CheckCircle2,
   AlertCircle,
   ShieldAlert,
   ArrowRight,
-  Zap,
+  ExternalLink,
+  History,
+  Wrench,
+  Cpu,
+  Layers,
 } from "lucide-react";
+import Link from "next/link";
+import { ProvenanceBadge } from "./ProvenanceBadge";
 import { startOperations } from "@/lib/api/discoveryRuns";
 
 interface AgentPanelProps {
@@ -21,6 +26,11 @@ interface AgentPanelProps {
   isRunning?: boolean;
   onOperationsStarted?: (runId?: string) => void;
   className?: string;
+  latestOperation?: string | null;
+  latestTool?: string | null;
+  latestEngine?: string | null;
+  pendingApprovalsCount?: number;
+  latestResult?: string | null;
 }
 
 export function AgentPanel({
@@ -30,6 +40,11 @@ export function AgentPanel({
   isRunning = false,
   onOperationsStarted,
   className = "",
+  latestOperation,
+  latestTool,
+  latestEngine,
+  pendingApprovalsCount = 0,
+  latestResult,
 }: AgentPanelProps) {
   const [starting, setStarting] = useState(false);
   const [lastMessage, setLastMessage] = useState<string | null>(null);
@@ -51,79 +66,170 @@ export function AgentPanel({
   };
 
   const isLive = lifecycleState === "LIVE" || lifecycleState === "IN_PROGRESS";
+  const hasPendingApprovals = pendingApprovalsCount > 0;
 
   return (
-    <div
-      className={`relative overflow-hidden rounded-2xl border border-zinc-800/80 bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-950 p-5 shadow-2xl backdrop-blur-xl ${className}`}
-    >
-      <div className="absolute top-0 right-0 -mr-16 -mt-16 w-48 h-48 rounded-full bg-cyan-500/10 blur-3xl pointer-events-none" />
-      <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-48 h-48 rounded-full bg-purple-500/10 blur-3xl pointer-events-none" />
-
-      <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        {/* Left Info */}
-        <div className="flex items-center gap-3.5">
-          <div className="relative p-2.5 rounded-xl bg-gradient-to-br from-cyan-500/20 to-purple-500/20 border border-cyan-500/30 text-cyan-400">
-            <Bot className="w-6 h-6 animate-pulse" />
-            <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-emerald-400 ring-4 ring-zinc-950" />
+    <div className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4 ${className}`}>
+      {/* Top Header: Identity + Status */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 text-[#D6003C]">
+            <Bot className="w-5 h-5 text-[#D6003C]" />
           </div>
-
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold tracking-wide uppercase text-zinc-100 flex items-center gap-1.5">
+              <h2 className="text-sm font-bold tracking-wide uppercase text-slate-900">
                 Event Operations Agent
               </h2>
-              <span
-                className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full border ${
-                  isLive
-                    ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                    : "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                }`}
-              >
-                {isLive ? "Autonomous Live" : lifecycleState || "Planning"}
-              </span>
+              <ProvenanceBadge provenance="AGENT" size="sm" />
             </div>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Continuously orchestrating discovery, provider outreach, quoting, and adaptive recovery for{" "}
-              <span className="text-zinc-200 font-medium">{eventName}</span>.
+            <p className="text-xs text-slate-500 mt-0.5">
+              Autonomous orchestration layer managing lifecycle operations for{" "}
+              <span className="font-semibold text-slate-800">{eventName}</span>
             </p>
           </div>
         </div>
 
-        {/* Right CTA */}
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          {!isLive && (
-            <button
-              onClick={handleStartOperations}
-              disabled={starting}
-              className="flex-1 md:flex-initial inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white shadow-lg shadow-cyan-500/20 transition-all duration-200 active:scale-95 disabled:opacity-50"
-            >
-              {starting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Initiating Operations...
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4" />
-                  Start Autonomous Operations
-                </>
-              )}
-            </button>
-          )}
-
-          {isLive && (
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-              Active Monitoring & Sourcing
-            </div>
+        {/* Backend Status Badge */}
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          {hasPendingApprovals ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
+              <span>Waiting For Approval</span>
+            </span>
+          ) : isLive ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Autonomous Live</span>
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
+              <span className="w-2 h-2 rounded-full bg-slate-400" />
+              <span>{lifecycleState || "Ready"}</span>
+            </span>
           )}
         </div>
       </div>
 
+      {/* Structured Operational Facts Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+        {/* 1. Current Operation */}
+        <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <Layers className="w-3 h-3 text-slate-500" />
+            <span>Current Operation</span>
+          </div>
+          <div className="font-semibold text-slate-900 truncate">
+            {latestOperation || (isLive ? "Monitoring execution state" : "Awaiting dispatch")}
+          </div>
+          <span className="text-[10px] text-slate-500">Autonomous workflow step</span>
+        </div>
+
+        {/* 2. Tool Invocation */}
+        <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <Wrench className="w-3 h-3 text-slate-500" />
+            <span>Latest Tool</span>
+          </div>
+          <div className="font-mono text-xs font-semibold text-slate-900 truncate">
+            {latestTool || "Tool registry active"}
+          </div>
+          <span className="text-[10px] text-slate-500">Credential-redacted execution</span>
+        </div>
+
+        {/* 3. Deterministic Engine */}
+        <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <Cpu className="w-3 h-3 text-slate-500" />
+            <span>Engine Layer</span>
+          </div>
+          <div className="font-semibold text-slate-900 truncate">
+            {latestEngine || "Discrete deterministic engines"}
+          </div>
+          <span className="text-[10px] text-slate-500">Invariants verification</span>
+        </div>
+
+        {/* 4. Governance & Approvals */}
+        <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <ShieldAlert className="w-3 h-3 text-slate-500" />
+            <span>Governance</span>
+          </div>
+          {hasPendingApprovals ? (
+            <div className="flex items-center justify-between">
+              <span className="text-amber-700 font-bold">
+                {pendingApprovalsCount} Action Pending
+              </span>
+              <Link
+                href={`/events/${eventId}/approvals`}
+                className="text-[11px] font-semibold text-[#D6003C] hover:underline"
+              >
+                Review
+              </Link>
+            </div>
+          ) : (
+            <div className="text-emerald-700 font-medium flex items-center gap-1">
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Compliant</span>
+            </div>
+          )}
+          <span className="text-[10px] text-slate-500">Human-in-the-loop gate</span>
+        </div>
+      </div>
+
+      {/* Bottom Action Controls & Links */}
+      <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
+          <Link
+            href={`/events/${eventId}/activity`}
+            className="inline-flex items-center gap-1.5 text-slate-700 hover:text-slate-950 transition"
+          >
+            <History className="w-3.5 h-3.5 text-[#D6003C]" />
+            <span>Open Agent Activity</span>
+          </Link>
+          <span className="text-slate-200">|</span>
+          <Link
+            href={`/events/${eventId}/audit`}
+            className="inline-flex items-center gap-1.5 text-slate-700 hover:text-slate-950 transition"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-slate-600" />
+            <span>Open Audit Trail</span>
+          </Link>
+        </div>
+
+        {!isLive && (
+          <button
+            onClick={handleStartOperations}
+            disabled={starting}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-sm transition-all disabled:opacity-50"
+          >
+            {starting ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Dispatching Operations...</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-3.5 h-3.5 fill-white" />
+                <span>Start Autonomous Operations</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
       {lastMessage && (
-        <div className="mt-3.5 pt-3 border-t border-zinc-800/60 text-xs text-zinc-300 flex items-center gap-2">
-          <Sparkles className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
-          <span>{lastMessage}</span>
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg flex items-center justify-between text-xs text-slate-700">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-3.5 h-3.5 text-slate-500" />
+            <span>{lastMessage}</span>
+          </div>
+          <button
+            onClick={() => setLastMessage(null)}
+            className="text-[11px] font-semibold text-slate-400 hover:text-slate-600"
+          >
+            Dismiss
+          </button>
         </div>
       )}
     </div>

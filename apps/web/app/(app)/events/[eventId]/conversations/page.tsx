@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import {
   MessageSquare,
   PhoneCall,
@@ -17,6 +18,11 @@ import {
   ShieldCheck,
   RefreshCw,
   Search,
+  Filter,
+  ArrowLeft,
+  FileText,
+  Activity,
+  Layers,
 } from "lucide-react";
 
 import { getEvent } from "@/lib/api/events";
@@ -25,34 +31,71 @@ import {
   getMessages,
   sendMessage,
 } from "@/lib/api/conversations";
+import { getAssignmentsForEvent } from "@/lib/api/vendors";
+import { initiateVoiceCall } from "@/lib/api/voice";
+import { getActivityStream } from "@/lib/api/activityStream";
 import type { Conversation, Message } from "@/types/communication";
-import { EventHeader } from "@/components/v2/EventHeader";
+import type { VendorAssignmentResponse, EventResponse } from "@/types/api";
+import type { ActivityLogItem } from "@/types/activityLog";
+
+import { EventShell } from "@/components/v2/EventShell";
+import { WhatsAppDeliveryStatus } from "@/components/v2/WhatsAppDeliveryStatus";
+import { CallExecutionCard, CallExecutionData } from "@/components/v2/CallExecutionCard";
+import { ResponseFactsCard } from "@/components/v2/ResponseFactsCard";
+import {
+  ProviderContextPanel,
+  ProviderContextData,
+} from "@/components/v2/ProviderContextPanel";
+import { ProvenanceBadge } from "@/components/v2/ProvenanceBadge";
+import { EngagementDashboard } from "@/components/v2/EngagementDashboard";
+
+type ViewMode = "CONSOLE" | "DASHBOARD";
+type MobileTab = "THREADS" | "CHAT" | "CONTEXT";
 
 export default function ConversationsPage() {
   const params = useParams();
   const eventId = params?.eventId as string;
 
-  const [eventData, setEventData] = useState<any>(null);
+  // Mode & navigation
+  const [viewMode, setViewMode] = useState<ViewMode>("CONSOLE");
+  const [mobileTab, setMobileTab] = useState<MobileTab>("THREADS");
+
+  // Core Data
+  const [eventData, setEventData] = useState<EventResponse | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConv, setSelectedConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [assignments, setAssignments] = useState<VendorAssignmentResponse[]>([]);
+  const [activityLogs, setActivityLogs] = useState<ActivityLogItem[]>([]);
+
+  // Search & Filters
+  const [search, setSearch] = useState("");
+  const [channelFilter, setChannelFilter] = useState<string>("ALL");
+  const [statusFilter, setStatusFilter] = useState<string>("ALL");
+
+  // Input & Action States
   const [replyText, setReplyText] = useState("");
   const [sending, setSending] = useState(false);
-  const [search, setSearch] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [activeCall, setActiveCall] = useState<CallExecutionData | null>(null);
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null);
 
-  const loadConversations = useCallback(async () => {
+  // 1. Initial Load of Event, Conversations, and Assignments
+  const loadConversationsAndEvent = useCallback(async () => {
     if (!eventId) return;
     try {
       setLoading(true);
-      const [ev, convsRes] = await Promise.allSettled([
+      const [evRes, convsRes, assignmentsRes, activityRes] = await Promise.allSettled([
         getEvent(eventId),
         getConversations(eventId),
+        getAssignmentsForEvent(eventId),
+        getActivityStream(eventId, 20),
       ]);
 
-      if (ev.status === "fulfilled") {
-        setEventData(ev.value);
+      if (evRes.status === "fulfilled" && evRes.value) {
+        setEventData(evRes.value);
       }
 
       if (convsRes.status === "fulfilled" && convsRes.value?.items) {
@@ -61,30 +104,42 @@ export default function ConversationsPage() {
           setSelectedConv(convsRes.value.items[0]);
         }
       }
+
+      if (assignmentsRes.status === "fulfilled" && Array.isArray(assignmentsRes.value)) {
+        setAssignments(assignmentsRes.value);
+      }
+
+      if (activityRes.status === "fulfilled" && activityRes.value?.items) {
+        setActivityLogs(activityRes.value.items);
+      }
     } catch (err) {
-      console.error("Failed to load conversations:", err);
+      console.error("Failed to load communications data:", err);
     } finally {
       setLoading(false);
     }
   }, [eventId, selectedConv]);
 
-  const loadMessages = useCallback(async (convId: string) => {
-    try {
-      setLoadingMessages(true);
-      const res = await getMessages(eventId, convId);
-      if (res?.items) {
-        setMessages(res.items);
+  // 2. Load Messages for Selected Conversation
+  const loadMessages = useCallback(
+    async (convId: string) => {
+      try {
+        setLoadingMessages(true);
+        const res = await getMessages(eventId, convId);
+        if (res?.items) {
+          setMessages(res.items);
+        }
+      } catch (err) {
+        console.error("Failed to load messages:", err);
+      } finally {
+        setLoadingMessages(false);
       }
-    } catch (err) {
-      console.error("Failed to load messages:", err);
-    } finally {
-      setLoadingMessages(false);
-    }
-  }, [eventId]);
+    },
+    [eventId]
+  );
 
   useEffect(() => {
-    loadConversations();
-  }, [loadConversations]);
+    loadConversationsAndEvent();
+  }, [loadConversationsAndEvent]);
 
   useEffect(() => {
     if (selectedConv) {
@@ -92,21 +147,25 @@ export default function ConversationsPage() {
     }
   }, [selectedConv, loadMessages]);
 
-  // Polling for new messages in selected conversation
+  // Polling for real-time thread messages with visibility guard
   useEffect(() => {
     if (!selectedConv) return;
     const interval = setInterval(() => {
-      loadMessages(selectedConv.id);
-    }, 4000);
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        loadMessages(selectedConv.id);
+      }
+    }, 5000);
     return () => clearInterval(interval);
   }, [selectedConv, loadMessages]);
 
+  // Handle Outbound Message Send
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!replyText.trim() || !selectedConv) return;
 
     try {
       setSending(true);
+      setSendError(null);
       await sendMessage(eventId, selectedConv.id, {
         raw_text: replyText.trim(),
         channel: selectedConv.channel || "whatsapp",
@@ -114,333 +173,568 @@ export default function ConversationsPage() {
       });
       setReplyText("");
       await loadMessages(selectedConv.id);
-    } catch (err) {
+      loadConversationsAndEvent();
+    } catch (err: any) {
       console.error("Failed to send message:", err);
+      setSendError(err.message || "Failed to dispatch message to provider.");
     } finally {
       setSending(false);
     }
   };
 
-  const filteredConvs = conversations.filter(
-    (c) =>
-      !search ||
-      c.vendor_name?.toLowerCase().includes(search.toLowerCase()) ||
-      c.recipient_contact?.toLowerCase().includes(search.toLowerCase())
-  );
+  // Find assignment matching selected conversation
+  const currentAssignment = useMemo(() => {
+    if (!selectedConv) return null;
+    return (
+      assignments.find(
+        (a) =>
+          a.vendor_id === selectedConv.vendor_id ||
+          a.vendor?.name?.toLowerCase() === selectedConv.vendor_name?.toLowerCase()
+      ) || null
+    );
+  }, [selectedConv, assignments]);
 
-  // Latest extracted facts from the most recent inbound message with facts
-  const latestFactMessage = [...messages]
-    .reverse()
-    .find((m) => m.extracted_facts && Object.keys(m.extracted_facts).length > 0);
-  const facts = latestFactMessage?.extracted_facts;
+  // Map Provider Context Data
+  const providerContext: ProviderContextData | null = useMemo(() => {
+    if (!selectedConv) return null;
+    const vendor = currentAssignment?.vendor;
+
+    return {
+      id: selectedConv.vendor_id || currentAssignment?.vendor_id || selectedConv.id,
+      name: selectedConv.vendor_name || vendor?.name || "Provider",
+      category: currentAssignment?.category || "VENDOR",
+      city: vendor?.city || "UNKNOWN",
+      address: vendor?.address || null,
+      phone: vendor?.phone || selectedConv.recipient_contact || null,
+      email: vendor?.contact_email || null,
+      website: vendor?.website || null,
+      maps_url: vendor?.maps_url || null,
+      provenance: (vendor as any)?.source_tag || "LIVE_SCRAPE",
+      rating: vendor?.rating || null,
+      review_count: vendor?.review_count || null,
+      communication_state: selectedConv.status,
+      last_contact_at: selectedConv.last_message_at,
+      response_state: currentAssignment?.negotiation_status || selectedConv.status,
+      approval_required: Boolean(currentAssignment?.approval_id),
+      approval_id: currentAssignment?.approval_id || null,
+    };
+  }, [selectedConv, currentAssignment]);
+
+  // Extract structured facts from newest inbound message that has them
+  const latestFactMessage = useMemo(() => {
+    return [...messages]
+      .reverse()
+      .find((m) => m.extracted_facts && Object.keys(m.extracted_facts).length > 0);
+  }, [messages]);
+
+  // Outbound Telephony Call Action
+  const handleInitiateCall = async (provider: ProviderContextData) => {
+    if (!provider.phone) return;
+    try {
+      setActionInProgress(provider.id);
+      setActiveCall({
+        provider_name: provider.name,
+        recipient_phone: provider.phone,
+        status: "QUEUED",
+        start_time: new Date().toISOString(),
+      });
+
+      const res = await initiateVoiceCall({
+        recipient_phone: provider.phone,
+        vendor_name: provider.name,
+        event_id: eventId,
+        provider_id: provider.id,
+      });
+
+      if (res.success) {
+        setActiveCall({
+          provider_name: provider.name,
+          recipient_phone: provider.phone,
+          status: "RINGING",
+          start_time: new Date().toISOString(),
+          source: res.source,
+          transcript_available: true,
+        });
+      } else {
+        setActiveCall({
+          provider_name: provider.name,
+          recipient_phone: provider.phone,
+          status: "FAILED",
+          error: res.error || "Call rejected by gateway.",
+        });
+      }
+    } catch (err: any) {
+      setActiveCall({
+        provider_name: provider.name,
+        recipient_phone: provider.phone,
+        status: "FAILED",
+        error: err.message || "Failed to connect telephony provider.",
+      });
+    } finally {
+      setActionInProgress(null);
+    }
+  };
+
+  // Filtered Conversations List
+  const filteredConvs = useMemo(() => {
+    return conversations.filter((c) => {
+      // Search
+      const matchesSearch =
+        !search ||
+        (c.vendor_name && c.vendor_name.toLowerCase().includes(search.toLowerCase())) ||
+        (c.recipient_contact && c.recipient_contact.includes(search));
+
+      if (!matchesSearch) return false;
+
+      // Channel Filter
+      if (channelFilter !== "ALL") {
+        if (c.channel?.toLowerCase() !== channelFilter.toLowerCase()) return false;
+      }
+
+      // Status Filter
+      if (statusFilter !== "ALL") {
+        const s = (c.status || "").toUpperCase();
+        if (statusFilter === "AWAITING" && s !== "AWAITING_RESPONSE" && s !== "SENT" && s !== "OPEN") {
+          return false;
+        }
+        if (statusFilter === "RESPONDED" && s !== "RESPONDED" && s !== "CLOSED") {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [conversations, search, channelFilter, statusFilter]);
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 flex flex-col">
-      <EventHeader
-        eventId={eventId}
-        name={eventData?.name}
-        startDate={eventData?.start_datetime}
-        location={eventData?.location}
-        guestCount={eventData?.guest_count}
-        totalBudget={Number(eventData?.total_budget) || 1000000}
-        currency={eventData?.currency}
-        lifecycleState={eventData?.lifecycle_state}
-        state={eventData?.state}
-        currentStage="READY"
-      />
-
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[720px] rounded-2xl border border-zinc-800/80 bg-zinc-950/80 backdrop-blur-xl overflow-hidden">
-          {/* Left Panel: Conversation Master List (4 Cols) */}
-          <div className="lg:col-span-4 border-r border-zinc-800/60 flex flex-col bg-zinc-950/40">
-            <div className="p-4 border-b border-zinc-800/60">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-300 flex items-center gap-2">
-                  <MessageSquare className="w-4 h-4 text-cyan-400" />
-                  Vendor Communications
-                </h3>
-                <span className="text-[11px] font-mono text-zinc-500">
-                  {conversations.length} threads
-                </span>
-              </div>
-
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search provider threads..."
-                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
-                />
-              </div>
+    <EventShell eventId={eventId} currentStage="READY">
+      <div className="space-y-4">
+        {/* Top Workspace Bar */}
+        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                Engagement Command
+              </span>
+              <span className="text-[10px] font-mono text-slate-400">
+                {conversations.length} Active Sessions
+              </span>
             </div>
-
-            <div className="flex-1 overflow-y-auto divide-y divide-zinc-800/30">
-              {filteredConvs.length === 0 ? (
-                <div className="py-12 text-center text-zinc-500 text-xs px-4">
-                  {loading
-                    ? "Loading communication threads..."
-                    : "No vendor conversations yet. Dispatch discovery to trigger outreach."}
-                </div>
-              ) : (
-                filteredConvs.map((conv) => {
-                  const isSelected = selectedConv?.id === conv.id;
-                  const isCall = conv.channel === "call";
-
-                  return (
-                    <button
-                      key={conv.id}
-                      onClick={() => setSelectedConv(conv)}
-                      className={`w-full text-left p-3.5 transition-all flex items-start gap-3 ${
-                        isSelected
-                          ? "bg-zinc-800/60 border-l-2 border-cyan-400"
-                          : "hover:bg-zinc-900/40"
-                      }`}
-                    >
-                      <div
-                        className={`p-2 rounded-xl mt-0.5 ${
-                          isCall
-                            ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                            : "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                        }`}
-                      >
-                        {isCall ? (
-                          <PhoneCall className="w-4 h-4" />
-                        ) : (
-                          <MessageSquare className="w-4 h-4" />
-                        )}
-                      </div>
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between gap-1 mb-0.5">
-                          <h4 className="text-xs font-bold text-zinc-200 truncate">
-                            {conv.vendor_name || "Provider Contact"}
-                          </h4>
-                          <span className="text-[10px] font-mono text-zinc-500 whitespace-nowrap">
-                            {new Date(conv.last_message_at).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-
-                        <p className="text-[11px] text-zinc-400 truncate">
-                          {conv.latest_message?.raw_text || "Outreach initiated"}
-                        </p>
-
-                        <div className="flex items-center gap-2 mt-1.5">
-                          <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-zinc-900 text-zinc-400 border border-zinc-800">
-                            {conv.channel}
-                          </span>
-                          <span className="text-[10px] font-semibold text-emerald-400">
-                            {conv.status}
-                          </span>
-                        </div>
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
+            <h1 className="text-base font-bold text-slate-900 tracking-tight mt-0.5">
+              Provider Outreach & Communication Hub
+            </h1>
           </div>
 
-          {/* Center Panel: Threaded Messages (5 Cols) */}
-          <div className="lg:col-span-5 flex flex-col bg-black/40">
-            {selectedConv ? (
-              <>
-                {/* Thread Header */}
-                <div className="p-4 border-b border-zinc-800/60 flex items-center justify-between bg-zinc-950/60">
-                  <div>
-                    <h3 className="text-xs font-bold text-zinc-100 flex items-center gap-2">
-                      {selectedConv.vendor_name || "Provider"}
-                      <span className="text-[10px] font-mono font-normal text-zinc-500">
-                        ({selectedConv.recipient_contact || "Direct Channel"})
-                      </span>
-                    </h3>
-                    <p className="text-[11px] text-zinc-400 mt-0.5">
-                      Channel: <span className="uppercase text-cyan-400 font-mono">{selectedConv.channel}</span>
-                    </p>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            {/* View Mode Switcher */}
+            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
+              <button
+                onClick={() => setViewMode("CONSOLE")}
+                className={`px-3 py-1 rounded-md transition ${
+                  viewMode === "CONSOLE"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-500 hover:text-slate-900"
+                }`}
+              >
+                Thread Console
+              </button>
+              <button
+                onClick={() => setViewMode("DASHBOARD")}
+                className={`px-3 py-1 rounded-md transition ${
+                  viewMode === "DASHBOARD"
+                    ? "bg-white text-slate-900 shadow-xs"
+                    : "text-slate-500 hover:text-slate-900"
+                }`}
+              >
+                Engagement Registry
+              </button>
+            </div>
+
+            <button
+              onClick={loadConversationsAndEvent}
+              disabled={loading}
+              className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition"
+              title="Refresh"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        </div>
+
+        {/* View Mode 1: Engagement Dashboard / Registry */}
+        {viewMode === "DASHBOARD" ? (
+          <EngagementDashboard
+            eventId={eventId}
+            onSelectConversation={(convId) => {
+              const match = conversations.find((c) => c.id === convId);
+              if (match) {
+                setSelectedConv(match);
+                setViewMode("CONSOLE");
+              }
+            }}
+          />
+        ) : (
+          /* View Mode 2: Master-Detail Communication Workspace */
+          <div className="space-y-4">
+            {/* Mobile Tab Switcher */}
+            <div className="flex lg:hidden bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
+              <button
+                onClick={() => setMobileTab("THREADS")}
+                className={`flex-1 py-1.5 rounded-md text-center transition ${
+                  mobileTab === "THREADS" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
+                }`}
+              >
+                Threads ({filteredConvs.length})
+              </button>
+              <button
+                onClick={() => setMobileTab("CHAT")}
+                className={`flex-1 py-1.5 rounded-md text-center transition ${
+                  mobileTab === "CHAT" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
+                }`}
+              >
+                Chat
+              </button>
+              <button
+                onClick={() => setMobileTab("CONTEXT")}
+                className={`flex-1 py-1.5 rounded-md text-center transition ${
+                  mobileTab === "CONTEXT" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
+                }`}
+              >
+                Context & Facts
+              </button>
+            </div>
+
+            {/* 3-Column Enterprise Workspace */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[680px]">
+              {/* LEFT COLUMN: Provider / Conversation List (4 cols) */}
+              <div
+                className={`lg:col-span-4 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden ${
+                  mobileTab !== "THREADS" ? "hidden lg:flex" : "flex"
+                }`}
+              >
+                {/* Search & Channel Filters */}
+                <div className="p-3 border-b border-slate-200 space-y-2">
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Search provider threads..."
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 transition"
+                    />
                   </div>
 
-                  <button
-                    onClick={() => loadMessages(selectedConv.id)}
-                    className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${loadingMessages ? "animate-spin" : ""}`} />
-                  </button>
+                  {/* Channel Pills */}
+                  <div className="flex items-center gap-1 text-[11px] overflow-x-auto no-scrollbar">
+                    {["ALL", "WHATSAPP", "CALL", "EMAIL"].map((ch) => (
+                      <button
+                        key={ch}
+                        onClick={() => setChannelFilter(ch)}
+                        className={`px-2 py-0.5 rounded-md font-semibold transition whitespace-nowrap ${
+                          channelFilter === ch
+                            ? "bg-slate-900 text-white"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        {ch}
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
-                {/* Messages Stream */}
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {messages.length === 0 ? (
-                    <div className="py-12 text-center text-zinc-500 text-xs">
-                      No messages recorded yet in this thread.
+                {/* Conversation List Feed */}
+                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                  {loading && conversations.length === 0 ? (
+                    <div className="py-16 text-center text-xs text-slate-400">
+                      <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-[#D6003C]" />
+                      Loading communication threads...
+                    </div>
+                  ) : filteredConvs.length === 0 ? (
+                    <div className="py-16 text-center text-xs text-slate-400 px-4">
+                      No provider conversations found. Start discovery or engage shortlisted providers to initiate threads.
                     </div>
                   ) : (
-                    messages.map((msg) => {
-                      const isInbound = msg.direction === "inbound";
-                      const isCall = msg.channel === "call";
+                    filteredConvs.map((conv) => {
+                      const isSelected = selectedConv?.id === conv.id;
+                      const isCall = conv.channel === "call";
 
                       return (
-                        <div
-                          key={msg.id}
-                          className={`flex flex-col ${
-                            isInbound ? "items-start" : "items-end"
+                        <button
+                          key={conv.id}
+                          onClick={() => {
+                            setSelectedConv(conv);
+                            setMobileTab("CHAT");
+                          }}
+                          className={`w-full text-left p-3 transition flex items-start gap-2.5 ${
+                            isSelected
+                              ? "bg-slate-50 border-l-3 border-[#D6003C]"
+                              : "hover:bg-slate-50/60"
                           }`}
                         >
-                          <div className="flex items-center gap-1.5 mb-1 px-1">
-                            <span className="text-[10px] font-mono text-zinc-500">
-                              {isInbound ? "Vendor" : "Eventra Agent"}
-                            </span>
-                            <span className="text-[10px] font-mono text-zinc-600">
-                              {new Date(msg.timestamp).toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
-                          </div>
-
                           <div
-                            className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-xs leading-relaxed ${
-                              isInbound
-                                ? "bg-zinc-900 border border-zinc-800 text-zinc-200 rounded-tl-sm"
-                                : "bg-cyan-600 text-white rounded-tr-sm shadow-md"
+                            className={`p-2 rounded-lg mt-0.5 shrink-0 ${
+                              isCall
+                                ? "bg-purple-50 text-purple-600 border border-purple-200"
+                                : "bg-emerald-50 text-emerald-600 border border-emerald-200"
                             }`}
                           >
-                            {isCall && (
-                              <div className="flex items-center gap-1 text-[10px] font-mono text-cyan-300 mb-1 border-b border-white/10 pb-1">
-                                <PhoneCall className="w-3 h-3" /> Voice Call Transcript
-                              </div>
+                            {isCall ? (
+                              <PhoneCall className="w-3.5 h-3.5" />
+                            ) : (
+                              <MessageSquare className="w-3.5 h-3.5" />
                             )}
-                            <p className="whitespace-pre-wrap">{msg.raw_text}</p>
                           </div>
-                        </div>
+
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between gap-1 mb-0.5">
+                              <h4 className="text-xs font-bold text-slate-900 truncate">
+                                {conv.vendor_name || "Provider Contact"}
+                              </h4>
+                              <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
+                                {new Date(conv.last_message_at).toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </div>
+
+                            <p className="text-[11px] text-slate-500 truncate">
+                              {conv.latest_message?.raw_text || "Outreach initiated"}
+                            </p>
+
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              <span className="text-[9px] uppercase font-mono px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                {conv.channel}
+                              </span>
+                              <span
+                                className={`text-[10px] font-semibold ${
+                                  conv.status === "CONFIRMED"
+                                    ? "text-emerald-600"
+                                    : "text-slate-600"
+                                }`}
+                              >
+                                {conv.status}
+                              </span>
+                            </div>
+                          </div>
+                        </button>
                       );
                     })
                   )}
                 </div>
-
-                {/* Message Input Form */}
-                <form
-                  onSubmit={handleSendMessage}
-                  className="p-3 border-t border-zinc-800/60 bg-zinc-950/60 flex items-center gap-2"
-                >
-                  <input
-                    type="text"
-                    value={replyText}
-                    onChange={(e) => setReplyText(e.target.value)}
-                    placeholder="Type dispatch message or quote inquiry..."
-                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-xl px-3.5 py-2 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500"
-                  />
-                  <button
-                    type="submit"
-                    disabled={sending || !replyText.trim()}
-                    className="p-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-white transition disabled:opacity-50"
-                  >
-                    {sending ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : (
-                      <Send className="w-4 h-4" />
-                    )}
-                  </button>
-                </form>
-              </>
-            ) : (
-              <div className="flex-1 flex items-center justify-center text-xs text-zinc-500">
-                Select a conversation thread to view communications.
-              </div>
-            )}
-          </div>
-
-          {/* Right Panel: Structured Facts Card & Confidence (3 Cols) */}
-          <div className="lg:col-span-3 border-l border-zinc-800/60 p-4 bg-zinc-950/60 flex flex-col justify-between">
-            <div>
-              <div className="flex items-center gap-2 mb-3 pb-2 border-b border-zinc-800/60">
-                <Sparkles className="w-4 h-4 text-cyan-400" />
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-200">
-                  Extracted Operational Facts
-                </h4>
               </div>
 
-              {facts ? (
-                <div className="space-y-3.5 text-xs">
-                  {/* Availability */}
-                  <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/60">
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">
-                      Availability Status
-                    </span>
-                    <div className="flex items-center gap-2">
-                      {facts.available === true ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-400 font-semibold">
-                          <CheckCircle2 className="w-4 h-4" /> Confirmed Available
-                        </span>
-                      ) : facts.available === false ? (
-                        <span className="inline-flex items-center gap-1 text-rose-400 font-semibold">
-                          <AlertCircle className="w-4 h-4" /> Declining / Booked
-                        </span>
-                      ) : (
-                        <span className="text-zinc-400 font-medium">Pending Confirmation</span>
-                      )}
-                    </div>
-                  </div>
+              {/* CENTER COLUMN: Threaded Message History (5 cols) */}
+              <div
+                className={`lg:col-span-5 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden ${
+                  mobileTab !== "CHAT" ? "hidden lg:flex" : "flex"
+                }`}
+              >
+                {selectedConv ? (
+                  <>
+                    {/* Thread Header */}
+                    <div className="p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setMobileTab("THREADS")}
+                          className="lg:hidden p-1 text-slate-500 hover:text-slate-800"
+                        >
+                          <ArrowLeft className="w-4 h-4" />
+                        </button>
+                        <div>
+                          <div className="flex items-center gap-1.5">
+                            <h3 className="text-xs font-bold text-slate-900">
+                              {selectedConv.vendor_name || "Provider Session"}
+                            </h3>
+                            <span className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-200 text-slate-700">
+                              {selectedConv.channel}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            Target: {selectedConv.recipient_contact || "UNKNOWN"}
+                          </span>
+                        </div>
+                      </div>
 
-                  {/* Quoted Amount */}
-                  <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/60">
-                    <span className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">
-                      Quoted Price
-                    </span>
-                    <div className="text-base font-bold text-cyan-400 font-mono">
-                      {facts.quoted_amount
-                        ? `${facts.currency || "₹"} ${facts.quoted_amount.toLocaleString()}`
-                        : "Awaiting Quote"}
-                    </div>
-                  </div>
-
-                  {/* Notes / Conditions */}
-                  {facts.notes && (
-                    <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/60">
-                      <span className="text-[10px] font-mono text-zinc-500 uppercase block mb-1">
-                        Terms & Notes
-                      </span>
-                      <p className="text-zinc-300 text-[11px] leading-relaxed">
-                        {facts.notes}
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Extraction Confidence & Provenance */}
-                  <div className="pt-2 border-t border-zinc-800/40 text-[10px] font-mono text-zinc-500 space-y-1">
-                    <div className="flex justify-between">
-                      <span>Extraction Confidence:</span>
-                      <span className="text-zinc-300 font-semibold">
-                        {Math.round((facts.confidence || 0.85) * 100)}%
-                      </span>
-                    </div>
-                    {facts.field_sources && (
-                      <div className="flex justify-between">
-                        <span>Parser Engine:</span>
-                        <span className="text-cyan-400 uppercase">
-                          {facts.field_sources.available || "NLP_PARSER"}
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setMobileTab("CONTEXT")}
+                          className="lg:hidden text-[11px] font-semibold text-[#D6003C]"
+                        >
+                          View Context
+                        </button>
+                        <span className="text-[10px] font-semibold text-slate-500 uppercase px-2 py-0.5 rounded bg-white border border-slate-200">
+                          {selectedConv.status}
                         </span>
                       </div>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="py-12 text-center text-zinc-500 text-xs">
-                  No extracted quote facts available yet. Facts will appear automatically when the provider replies with availability or rate quotes.
-                </div>
-              )}
-            </div>
+                    </div>
 
-            <div className="p-3 rounded-xl bg-zinc-900/40 border border-zinc-800/40 text-[11px] text-zinc-400 mt-4">
-              <span className="font-semibold text-zinc-300 block mb-0.5">Authoritative Verification:</span>
-              Quotes extracted here are synchronized directly into the operational budget & approval service.
+                    {/* Messages Scroll Area */}
+                    <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-slate-50/30">
+                      {loadingMessages && messages.length === 0 ? (
+                        <div className="py-20 text-center text-xs text-slate-400">
+                          <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-[#D6003C]" />
+                          Retrieving message log...
+                        </div>
+                      ) : messages.length === 0 ? (
+                        <div className="py-20 text-center text-xs text-slate-400">
+                          No messages recorded in this conversation thread yet.
+                        </div>
+                      ) : (
+                        messages.map((msg) => {
+                          const isInbound = msg.direction === "inbound";
+
+                          return (
+                            <div
+                              key={msg.id}
+                              className={`flex flex-col ${isInbound ? "items-start" : "items-end"}`}
+                            >
+                              <div
+                                className={`max-w-[85%] rounded-xl p-3 text-xs shadow-xs space-y-1 ${
+                                  isInbound
+                                    ? "bg-white border border-slate-200 text-slate-900"
+                                    : "bg-slate-900 text-white border border-slate-800"
+                                }`}
+                              >
+                                {/* Header / Sender Info */}
+                                <div className="flex items-center justify-between gap-3 text-[10px] opacity-75">
+                                  <span className="font-semibold flex items-center gap-1">
+                                    {isInbound ? (
+                                      <>
+                                        <User className="w-2.5 h-2.5 text-slate-400" />
+                                        <span>{msg.sender || selectedConv.vendor_name || "Provider"}</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Bot className="w-2.5 h-2.5 text-rose-300" />
+                                        <span>{msg.sender || "EVENTRA Operator"}</span>
+                                      </>
+                                    )}
+                                  </span>
+                                  <span className="font-mono">
+                                    {new Date(msg.timestamp || msg.created_at).toLocaleTimeString([], {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </span>
+                                </div>
+
+                                {/* Raw Text */}
+                                <p className="leading-relaxed whitespace-pre-wrap font-sans text-xs">
+                                  {msg.raw_text}
+                                </p>
+
+                                {/* Delivery Status / Footer */}
+                                <div className="pt-1 flex items-center justify-between gap-2 border-t border-slate-200/20 text-[10px]">
+                                  <span className="uppercase text-[9px] font-mono tracking-wider opacity-70">
+                                    {msg.channel}
+                                  </span>
+
+                                  {!isInbound && (
+                                    <WhatsAppDeliveryStatus
+                                      status={msg.status}
+                                      timestamp={msg.timestamp}
+                                      showLabel={true}
+                                    />
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    {/* Send Message Footer */}
+                    <form
+                      onSubmit={handleSendMessage}
+                      className="p-3 border-t border-slate-200 bg-white space-y-2"
+                    >
+                      {sendError && (
+                        <div className="p-2 rounded bg-rose-50 border border-rose-200 text-[11px] text-rose-700 flex items-center gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                          <span>{sendError}</span>
+                        </div>
+                      )}
+
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          placeholder={`Reply via ${selectedConv.channel || "WhatsApp"}...`}
+                          className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 transition"
+                        />
+                        <button
+                          type="submit"
+                          disabled={sending || !replyText.trim()}
+                          className="px-3.5 py-2 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs transition disabled:opacity-50 flex items-center gap-1.5"
+                        >
+                          {sending ? (
+                            <>
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                              <span>Sending...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Send className="w-3 h-3" />
+                              <span>Send</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </form>
+                  </>
+                ) : (
+                  <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-xs text-slate-400">
+                    <MessageSquare className="w-8 h-8 text-slate-300 mb-2" />
+                    <p className="font-semibold text-slate-600">Select a Provider Thread</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Choose an active conversation from the left to inspect logs or send messages.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* RIGHT COLUMN: Provider Context & Structured Facts (3 cols) */}
+              <div
+                className={`lg:col-span-3 space-y-4 overflow-y-auto ${
+                  mobileTab !== "CONTEXT" ? "hidden lg:block" : "block"
+                }`}
+              >
+                {/* Active Call Live Card if Triggered */}
+                {activeCall && (
+                  <CallExecutionCard
+                    call={activeCall}
+                    onRetryCall={() => {
+                      if (providerContext) handleInitiateCall(providerContext);
+                    }}
+                  />
+                )}
+
+                {/* Structured Extracted Response Facts */}
+                <ResponseFactsCard
+                  facts={latestFactMessage?.extracted_facts}
+                  vendorName={selectedConv?.vendor_name}
+                  timestamp={latestFactMessage?.timestamp}
+                />
+
+                {/* Provider Context & Outreach Actions */}
+                <ProviderContextPanel
+                  provider={providerContext}
+                  eventId={eventId}
+                  onInitiateCall={handleInitiateCall}
+                  onSendWhatsApp={() => {
+                    if (selectedConv) setMobileTab("CHAT");
+                  }}
+                  isActionInProgress={actionInProgress === providerContext?.id}
+                />
+              </div>
             </div>
           </div>
-        </div>
-      </main>
-    </div>
+        )}
+      </div>
+    </EventShell>
   );
 }

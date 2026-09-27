@@ -9,7 +9,11 @@ export * from "./live";
 export * from "./incidents";
 export * from "./recovery";
 export * from "./approvals";
-export * from "./actions";
+export {
+  submitAction,
+  executeRecoveryOption as executeActionRecoveryOption,
+} from "./actions";
+export type { ActionPayload } from "./actions";
 export * from "./verification";
 export * from "./observability";
 export * from "./agent";

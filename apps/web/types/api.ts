@@ -504,11 +504,35 @@ export interface BudgetDeviationResponse {
   is_over_budget: boolean;
 }
 
+export interface ProviderAssignmentLiveSummary {
+  assignment_id: string;
+  vendor_id: string;
+  vendor_name: string;
+  category: string;
+  status: string;
+  negotiation_status?: string | null;
+  quoted_amount?: number | null;
+  agreed_cost?: number | null;
+  currency?: string | null;
+  approval_id?: string | null;
+  is_simulation?: boolean;
+}
+
+export interface ProviderOperationalSummary {
+  total_assignments: number;
+  confirmed_count: number;
+  in_negotiation_count: number;
+  awaiting_approval_count: number;
+  total_committed_cost: number;
+  assignments: ProviderAssignmentLiveSummary[];
+}
+
 export interface EventLiveState {
   event_id: string;
   event_name: string;
   event_type: string;
   lifecycle_state: string;
+  overall_status?: "NORMAL" | "DEGRADED" | "DISRUPTED" | string;
   task_summary: Record<string, number>;
   total_tasks: number;
   completed_tasks: number;
@@ -516,6 +540,7 @@ export interface EventLiveState {
   task_progress: TaskProgress[];
   schedule_deviations: ScheduleDeviationResponse[];
   budget_deviation?: BudgetDeviationResponse | null;
+  provider_summary?: ProviderOperationalSummary | null;
 }
 
 // --- Incident, Impact & Risk Schemas ---
@@ -842,6 +867,38 @@ export interface AgentRunResponse {
   tool_history?: ToolHistoryEntry[];
   error?: string | null;
   step_count?: number | null;
+}
+
+export interface AgentToolSummary {
+  name: string;
+  description: string;
+  category: string;
+  access_mode: string;
+  requires_approval: boolean;
+  permission_action?: string | null;
+  available: boolean;
+}
+
+export interface OperationsStatusResponse {
+  event_id: string;
+  event_name: string;
+  lifecycle_state: string;
+  state: string;
+  total_budget: number;
+  committed_budget: number;
+  currency: string;
+  live_state?: Record<string, unknown>;
+  assignments?: Array<Record<string, unknown>>;
+  tasks?: Array<Record<string, unknown>>;
+  pending_approvals?: Array<Record<string, unknown>>;
+  pending_approvals_count?: number;
+  activity_feed?: Array<{
+    id: string;
+    time: string;
+    action: string;
+    actor_type: string;
+    detail: string;
+  }>;
 }
 
 // --- Integration Schemas ---

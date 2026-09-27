@@ -1,0 +1,338 @@
+EVENTRA
+Frontend V2 — Product Architecture & UX Specification
+Autonomous Event Operations: Discovery → Engagement → Execution → Recovery
+Implementation starting point • 27 September 2026
+1. Executive Summary
+EVENTRA’s current frontend is visually polished but its information architecture does not communicate the actual product. It currently reads primarily as a live-event command/control dashboard. The product vision is broader: EVENTRA should understand an event, discover real venues and vendors, qualify and rank them against event requirements, contact shortlisted providers, understand provider responses, execute authorized actions, detect operational deviations, and recover from them.
+Frontend V2 must therefore be designed around one continuous operational loop rather than a collection of disconnected pages.
+EVENT SPECIFICATION      ↓AGENT DISCOVERY      ↓QUALIFICATION + DEDUPLICATION      ↓DETERMINISTIC CONSTRAINT CHECK      ↓SHORTLIST      ↓ENGAGEMENT: CALL / WHATSAPP / EMAIL      ↓RESPONSES + QUOTE EXTRACTION      ↓AGENT ANALYSIS      ↓DETERMINISTIC VALIDATION      ↓APPROVAL / AUTHORIZED EXECUTION      ↓LIVE EVENT OPERATIONS      ↓INCOMING SIGNALS / INCIDENTS      ↓IMPACT ENGINE + RECOVERY AGENT      ↓RECOVERY + VERIFICATION
+2. Core Product Principle
+The frontend must make the separation between the agentic AI layer and deterministic engine explicit. The user should be able to tell what the agent proposed, what the deterministic system verified, what came from an external source, and what action was actually executed.
+Layer
+Responsibility
+Frontend representation
+Agentic AI
+Understand intent, generate search strategy, adapt discovery, interpret conversations, propose actions, generate recovery options.
+✦ AGENT / AGENT PROPOSAL / AGENT ACTIVITY
+Deterministic engine
+Calculate facts, constraints, feasibility, dependencies, schedule, budget, impact and policy checks.
+✓ ENGINE / ENGINE VERIFIED / PASS / FAIL
+External integrations
+Maps/scraper, phone, WhatsApp, email and provider responses.
+SOURCE / EXECUTION STATUS / EVIDENCE
+Human control
+Approve, reject, override or authorize actions according to policy.
+APPROVAL REQUIRED / APPROVED / REJECTED
+Non-negotiable UX rule: the frontend must not invent business facts, availability, capacity, pricing, provider responses or execution status. It renders authoritative backend state and clearly labels unknown or unverified information.
+3. Frontend V2 Goals
+Make EVENTRA’s event lifecycle immediately understandable.
+Make agentic discovery visible and inspectable rather than hiding it behind a loading spinner.
+Show real map-based venue/vendor discovery with candidate counts and geographic context.
+Show the transformation from raw discoveries to qualified, matching and shortlisted candidates.
+Make calling, WhatsApp, email, quote collection and negotiation visible as actual execution workflows.
+Surface incoming provider messages in UX and allow those messages to trigger structured agent workflows.
+Connect provider communication directly to incidents, deterministic impact analysis and recovery.
+Expose provenance and evidence for important recommendations.
+Keep the existing deterministic backend engines authoritative.
+Keep the landing page and strong existing visual identity where appropriate.
+4. Explicit Non-Goals
+Do not rebuild the backend architecture merely to support the frontend redesign.
+Do not move deterministic calculations into React/frontend code.
+Do not turn EVENTRA into a generic chatbot.
+Do not fabricate provider facts when a source does not provide them.
+Do not make the live command-center experience the entire identity of EVENTRA; it is the execution phase of a larger lifecycle.
+Do not hide autonomous actions. Every consequential action should have a visible execution state and audit trail.
+5. New Information Architecture
+EVENTRA│├── OVERVIEW│├── DISCOVERY│   ├── Venue Discovery│   └── Vendor Discovery│├── PLANNING│   ├── Event Blueprint│   ├── Tasks│   ├── Timeline│   └── Budget│├── ENGAGEMENT│   ├── Conversations│   ├── Calls│   ├── WhatsApp│   ├── Outreach│   └── Quotes│├── OPERATIONS│   ├── Command Center│   ├── Incidents│   ├── Recovery│   └── Approvals│└── TRUST    ├── Activity    └── Audit
+Primary lifecycle navigation should communicate: DEFINE → DISCOVER → PLAN → READY → LIVE → RECOVER. The exact visual treatment can use a horizontal lifecycle stepper in the event header, while the sidebar remains the persistent information architecture.
+6. Overview / Event Home
+The Overview becomes the real home for an event. It should answer: What is this event? What stage is it in? What is complete? What needs attention? What is EVENTRA doing right now?
+Event identity: name, event type, dates, location, guest count.
+Operational readiness percentage derived from backend state.
+Lifecycle progress: Specification → Discovery → Planning → Readiness → Live.
+Agent activity panel showing current or recent autonomous work.
+Deterministic health panel showing feasibility/status of budget, schedule, capacity and critical dependencies.
+Open decisions / approvals.
+Active incidents or unresolved risks.
+Recent discovery and engagement results.
+7. Event Header / Lifecycle
+Delhi Corporate SummitCONFERENCE · 15–18 OCT 2026 · NEW DELHIDEFINE → DISCOVER → PLAN → READY → LIVE → RECOVER
+The lifecycle should be persistent across event pages. The current phase is highlighted. The user can understand the entire product from the header without opening a menu.
+8. Discovery — Signature Product Experience
+Discovery is a hero workflow and should not be buried under a simple Venue or Providers CRUD page. It is the visual proof that EVENTRA can search the real world, reason over results and produce event-specific matches.
+8.1 Discovery Page Structure
+┌───────────────────────────────────────────────────────────────────┐│ DISCOVERY                                                         ││ Venue / Vendor                                                    ││ Event: Delhi Corporate Conference · 500 guests · 20 km           │├───────────────────────────────────────────────────────────────────┤│                                                                   ││  REAL MAP                           MATCH ANALYSIS                 ││                                                                   ││   candidate markers               100 DISCOVERED                   ││                                      ↓                            ││                                   31 UNIQUE                        ││                                      ↓                            ││                                   18 RELEVANT                      ││                                      ↓                            ││                                   13 MATCHING                      ││                                      ↓                            ││                                    5 SHORTLISTED                   ││                                                                   │├───────────────────────────────────────────────────────────────────┤│ DISCOVERY PIPELINE                                                 ││ ✓ Search  ✓ Normalize  ✓ Deduplicate  ✓ Qualify  ✓ Match  ✓ Rank │└───────────────────────────────────────────────────────────────────┘
+8.2 Dynamic Discovery Funnel
+The UI must never hardcode the numbers. Backend returns a discovery run and the frontend renders the actual counts:
+{  "run_id": "disc_123",  "event_id": "...",  "category": "venue",  "discovered": 100,  "unique": 31,  "relevant": 18,  "matching": 13,  "shortlisted": 5,  "iterations": 2,  "status": "target_reached"}
+The numbers should be dynamic. One run may be 47 → 31 → 18 → 13 → 5; another may be 100 → 67 → 29 → 13 → 5.
+8.3 Agent Discovery Activity
+✦ AGENT DISCOVERY LOG12:21:04  Understanding event requirements...12:21:05  Required capacity: ≥50012:21:05  Location: New Delhi12:21:05  Search radius: 20 km12:21:06  Generating discovery queries...12:21:06  conference venues Delhi12:21:06  corporate event venues Delhi12:21:07  100 candidates discovered12:21:12  Running qualification...12:21:14  13 candidates satisfy event constraints12:21:14  Discovery target reached
+This is critical: replace generic 'Searching...' spinners with an operationally meaningful discovery stream.
+8.4 Adaptive Search / Retry
+TARGET = 5 matching vendorsITERATION 1 → 42 discovered → 6 relevant → 3 matching                 ↓ insufficientAGENT adapts search strategy                 ↓ITERATION 2 → 58 additional → 13 additional relevant → 5 additional matches                 ↓TARGET REACHED → STOP
+Show iteration number.
+Show why another search was needed.
+Show new query strategy.
+Show radius changes when applicable.
+Show target count and current count.
+Show explicit completion reason: target reached, max iterations reached, search exhausted, or source unavailable.
+Never allow an infinite discovery loop.
+8.5 Real Map Behavior
+Use the real discovered coordinates returned by the backend.
+Markers represent actual discovered candidates, not decorative sample points.
+Marker state can visually distinguish discovered, relevant, matching and shortlisted.
+Clicking a marker opens an evidence-rich candidate drawer.
+Map bounds/radius should reflect the actual discovery request.
+During recovery, the same map can become a recovery discovery map.
+8.6 Candidate Detail Drawer
+THE LEELA PALACEMATCH · 94 / 100Location       8.4 kmCapacity       ✓ 500+ required / verified if source supports itEvent type     ✓ Conference / corporateParking        ✓ / ? Not verifiedAV             ✓ / ? Not verifiedReviews        4.6 ★ · 2,800 reviewsWHY IT MATCHES✓ Capacity requirement✓ Geographic constraint✓ Event category✓ Commercial venueSOURCEGoogle Maps · discovered 12:21:11✦ AGENTStrong candidate for this event.[SHORTLIST] [VIEW EVIDENCE]
+9. Qualification, Matching & Ranking UX
+The UI must distinguish qualification from ranking. A high rating does not make a provider relevant. A candidate must first be the requested provider type, plausibly serve the event, and satisfy commercial/contactability rules where applicable.
+DISCOVERED   ↓QUALIFIED?   ↓ YESHARD CONSTRAINTS PASS?   ↓ YESRANK   ↓SHORTLIST
+Example ranking dimensions can include event fit, location, rating, review volume, contactability, data completeness and business legitimacy. Scores must be calculated from actual evidence, not invented by the LLM.
+Every recommendation should expose component reasoning rather than only a mysterious overall score.
+10. Venue Discovery
+Inputs: location, guest count, event type, date, radius, budget, required amenities and other hard requirements.
+Map-first discovery experience.
+Show discovered → unique → relevant → matching → shortlisted counts.
+Hard requirements such as capacity must be checked before ranking.
+Unknown data must remain unknown; never infer a factual capacity or price without evidence.
+Show venue suitability score with evidence.
+Allow shortlist, compare and proceed to engagement where contactable.
+11. Vendor Discovery
+Reuse the same discovery framework as venues.
+Provider category is explicit: catering, AV, photography, decoration, security, transport, etc.
+Show event fit and commercial relevance.
+Map displays actual provider locations.
+Show discovered → unique → relevant → matching → shortlisted funnel.
+Provider-specific constraints can affect qualification and ranking.
+Shortlisted vendors transition directly into Engagement.
+12. Engagement Center — From Shortlist to Real-World Action
+Discovery is not the endpoint. Once providers are shortlisted, EVENTRA should move into an Engagement Center where calls, WhatsApp, email, quotation requests and negotiation are visible as real execution workflows.
+5 SHORTLISTED      ↓5 CONTACTED      ↓4 RESPONDED      ↓3 QUOTES RECEIVED      ↓2 FEASIBLE      ↓1 RECOMMENDATION
+12.1 Engagement Dashboard
+ENGAGEMENT CENTERCATERING5 Shortlisted · 5 Contacted · 4 Responded · 3 Quotes · 2 FeasibleACTIVE OUTREACH● Delhi Regal Caterers   WhatsApp  ✓ Replied● Royal Feast             Call      ✓ Completed● Capital Catering        WhatsApp  ● Waiting● Grand Caterers          Call      ✗ No Answer● Event Kitchen            WhatsApp  ✓ Replied
+12.2 Calling State Machine
+QUEUED → INITIATING → RINGING → CONNECTED → IN PROGRESS → COMPLETED                         ↘ FAILED / NO ANSWER / BUSY / INVALID NUMBER
+Never show a successful call state unless the backend has actually confirmed it.
+12.3 WhatsApp State Machine
+QUEUED → SENT → DELIVERED → READ → REPLIED
+Also support failure/blocked/invalid-number states where the integration provides them.
+13. Conversation UX
+Provider conversations must be visible to the user. The conversation is part of the operational record, not a hidden integration log.
+WHATSAPP — DELHI REGAL CATERERS────────────────────────────────────EVENTRAHello, we're organizing a 500-person corporate conference...PROVIDERYes, we're available...EVENTRACould you share your quotation?PROVIDER₹850 per person. Setup included...
+The UI should show which messages were sent by EVENTRA, which were received from the provider, timestamps, delivery status where available, and the agent's extracted structured information.
+14. Agent Interpretation of Incoming Messages
+Incoming provider messages can be operational signals. The system should display the original message, then the structured interpretation produced by the agent.
+VENDOR MESSAGE"Sir, I'm stuck in traffic and I won't be able to come."✦ AGENT INTERPRETATIONIntent: PROVIDER_UNAVAILABLEConfidence: 96%Affected service: CATERINGSeverity: CRITICALRequires recovery: YES
+The original message remains visible and auditable. The interpretation is a separate layer and should never overwrite the source message.
+15. Incident → Impact → Recovery Workflow
+INCOMING PROVIDER MESSAGE        ↓AGENT INTERPRETATION        ↓STRUCTURED EVENT        ↓INCIDENT CREATED        ↓DETERMINISTIC IMPACT ENGINE        ↓RECOVERY AGENT        ↓DISCOVER BACKUPS        ↓CONTACT BACKUPS        ↓RECEIVE RESPONSES        ↓EXTRACT + VALIDATE        ↓APPROVAL / AUTHORIZED EXECUTION        ↓VERIFY RECOVERY        ↓RESUME EVENT
+15.1 Incident Screen
+PRIMARY CATERER UNAVAILABLECRITICALSOURCE: WhatsApp message"I'm stuck in traffic and won't be able to come."[VIEW CONVERSATION]IMPACT ENGINEAffected service     CateringGuests affected      500Tasks blocked        6Critical path        YESEstimated delay      45 minBudget exposure      ₹32,000Recovery required    YES
+15.2 Recovery Discovery
+✦ EVENTRA AGENTPrimary caterer unavailable.Searching for replacement providers that satisfy:• 500 guests• Delhi• Current location ≤ 20 km• Event catering• Service window• Remaining budget constraints47 providers discovered29 unique12 event-relevant6 constraint matches3 available candidates
+15.3 Recovery Outreach
+BACKUP CATERER A📞 Calling... ✓ Connected✓ Availability confirmed✓ Quote requestedBACKUP CATERER B💬 WhatsApp ✓ Sent · ● WaitingBACKUP CATERER C💬 WhatsApp ✓ Delivered · ✓ Provider replied
+15.4 Response Extraction + Engine Validation
+PROVIDER RESPONSE"We can reach the venue in 30 minutes for ₹85,000 and serve 500 guests."✦ EXTRACTED BY AGENTAvailability     ✓Capacity         500Arrival           30 minPrice             ₹85,000Service           Catering✓ ENGINE VALIDATIONCapacity          PASSTime              PASSBudget            PASSLocation          PASSDependencies      PASS
+16. Event Blueprint / Planning
+Planning should expose the deterministic dependency engine rather than behaving like a generic task list.
+EVENT BLUEPRINTEVENT│├── VENUE│   ├── Venue booking│   ├── Floor setup│   └── Loading access├── CATERING│   ├── Menu│   ├── Guest count│   └── Service setup├── AV│   ├── Sound│   ├── Screens│   └── Lighting├── SECURITY└── TRANSPORT
+Show dependencies, blocked tasks, critical path and readiness. The frontend renders backend calculations.
+17. Timeline / Run of Show
+Show critical path.
+Show dependencies and slack where available.
+Show feasibility status.
+Surface conflicts and blocked tasks.
+Show agent-proposed changes separately from engine-validated schedule state.
+CRITICAL PATHVenue confirmation      ↓AV installation      ↓Technical rehearsal      ↓Doors open      ↓Keynote
+18. Budget
+Show allocated, committed/spent and remaining values from the backend.
+Show category allocation and projected variance.
+Show budget ceiling feasibility.
+Show agent proposals separately from confirmed financial state.
+If a provider quote changes the budget, show the delta and affected constraints.
+Never treat an unverified quote as a confirmed spend.
+19. Live Operations / Command Center
+The existing dark command-center visual language can be retained here because it makes sense during the live event. It should become Phase 2 of the product rather than the entire product identity.
+Live capacity.
+Active staff.
+System health.
+Radio/communications channels where real data exists.
+Run of show.
+Active incidents.
+Command log.
+Emergency actions subject to authorization.
+20. Activity & Audit — Tell the Story of Autonomy
+Activity and Audit should not be generic logs. They should explain how EVENTRA arrived at actions.
+12:21:43  ✦ AGENTGenerated provider discovery strategy12:22:01  SYSTEM47 candidates discovered12:22:12  ENGINE31 duplicates removed12:22:18  ENGINE5 candidates passed hard constraints12:23:04  ORGANIZERShortlisted Delhi Regal Caterers12:25:42  ✦ AGENTProposed provider outreach12:26:01  ORGANIZERApproved outreach
+Audit should preserve source message IDs, discovery run IDs, provider IDs, action IDs, approval IDs and timestamps wherever available.
+21. Provenance & Trust System
+Badge
+Meaning
+Examples
+✦ AGENT
+AI-generated interpretation, strategy or proposal.
+Search strategy, recommendation, recovery option
+✓ ENGINE
+Deterministic backend result.
+Constraint pass, budget feasibility, impact
+SOURCE
+External evidence.
+Google Maps, WhatsApp message, provider quote
+HUMAN
+Organizer decision/action.
+Shortlist, approval, override
+EXECUTED
+Action confirmed by integration/backend.
+Call completed, WhatsApp sent, provider assigned
+UNKNOWN
+Data unavailable or unverified.
+Pricing not verified, capacity unknown
+22. Suggested Frontend Data Contracts
+The frontend should consume structured backend objects instead of reconstructing business logic.
+DiscoveryRun  run_id  event_id  category  status  target_count  discovered_count  unique_count  relevant_count  matching_count  shortlisted_count  iterations  current_query / query_history  radius  source_status  started_at / completed_atCandidate  provider_id  name  coordinates  category  qualification  qualification_confidence  hard_constraints_passed  score  score_breakdown  evidence  source  source_idEngagement  provider_id  channel  status  message_id / call_id  timestamps  response  extracted_factsIncident  incident_id  source_message_id  classification  severity  impact  recovery_status  recovery_options  approval_state
+23. Unified Event Stream
+A unified event stream should connect Discovery, Engagement, Operations and Audit.
+DISCOVERY_STARTEDDISCOVERY_ITERATION_STARTEDDISCOVERY_CANDIDATES_FOUNDDISCOVERY_QUALIFICATION_COMPLETEDPROVIDER_SHORTLISTEDOUTREACH_STARTEDCALL_INITIATEDCALL_CONNECTEDCALL_COMPLETEDWHATSAPP_SENTWHATSAPP_DELIVEREDPROVIDER_MESSAGE_RECEIVEDPROVIDER_RESPONSE_EXTRACTEDQUOTE_RECEIVEDCONSTRAINT_CHECK_COMPLETEDRECOMMENDATION_CREATEDAPPROVAL_REQUESTEDAPPROVEDPROVIDER_ASSIGNEDINCIDENT_CREATEDIMPACT_CALCULATEDRECOVERY_STARTEDRECOVERY_PROVIDER_CONTACTEDRECOVERY_COMPLETEDVERIFICATION_COMPLETED
+24. Autonomy & Authorization UX
+The frontend should make authorization policy visible. The agent can propose and orchestrate, but consequential actions must respect the configured autonomy policy.
+AGENT PROPOSES      ↓POLICY CHECK      ↓┌──────────────────────────────┐│ AUTO EXECUTE                 ││ or                           ││ APPROVAL REQUIRED            │└──────────────────────────────┘      ↓TOOL EXECUTION      ↓VERIFICATION
+Example: a recovery action below a configured budget threshold may be auto-executable; a higher-cost replacement may require organizer approval. The frontend should show the reason an approval is or is not required.
+25. Visual Design Direction
+Keep the strong dark visual identity, but move away from a purely sci-fi/military control-room aesthetic. The target is premium operational software with an AI-native layer.
+Keep dark foundation and strong contrast.
+Keep EVENTRA accent color for active/autonomous states.
+Reduce excessive glow, glass and decorative cards.
+Use clear information hierarchy and generous spacing.
+Use color semantically: agent, engine verified, warning, critical, success, unknown.
+Prefer evidence-rich panels over decorative dashboards.
+Maps should be real and functional.
+Animations should communicate state transitions, not exist only for visual effect.
+Use compact operational typography for metadata and larger typography for decisions/outcomes.
+Make the system feel trustworthy and explainable.
+26. Component System to Build
+EventShell
+EventLifecycleStepper
+EventHeader
+AgentPanel
+AgentActivityStream
+EngineStatusCard
+ProvenanceBadge
+DiscoveryMap
+DiscoveryFunnel
+DiscoveryRunPanel
+DiscoveryIteration
+CandidateMarker
+CandidateEvidenceDrawer
+CandidateScoreBreakdown
+ShortlistPanel
+EngagementDashboard
+ConversationPanel
+CallExecutionCard
+WhatsAppMessageBubble
+ResponseExtractionPanel
+QuoteComparison
+IncidentPanel
+ImpactAnalysisCard
+RecoveryOptions
+ApprovalCard
+ActionExecutionTimeline
+EventBlueprint
+CriticalPathTimeline
+BudgetHealth
+AuditTimeline
+27. Recommended Implementation Order
+Build the new global AppShell and event header/lifecycle navigation.
+Build Overview as the new event home.
+Build the reusable AgentPanel + AgentActivityStream + ProvenanceBadge system.
+Build the reusable Discovery Command architecture.
+Implement Venue Discovery map + funnel + candidate evidence.
+Implement Vendor Discovery map + funnel + candidate evidence.
+Connect shortlist state to Engagement Center.
+Build conversation UI for WhatsApp/provider messages.
+Build call execution and WhatsApp execution status components.
+Build quote/response extraction and comparison views.
+Connect incoming provider messages to Incident UI.
+Build Impact Engine visualization.
+Build Recovery workflow and recovery discovery map.
+Build approval/authorization UI.
+Refactor Plan, Timeline and Budget around deterministic engine outputs.
+Move existing Live Ops visuals into the Execute/Operations phase.
+Rebuild Activity and Audit around the unified event stream.
+Add responsive/mobile behavior for live operations, incidents, approvals, recovery and communications.
+Run end-to-end tests against real backend states and real integration outcomes.
+28. Frontend V2 Acceptance Criteria
+A new user can understand EVENTRA’s purpose within the first screen.
+The event lifecycle is visible without opening multiple menus.
+Venue discovery displays a real map and actual discovery counts.
+Vendor discovery displays a real map and actual discovery counts.
+The UI can show a funnel such as 100 discovered → 31 unique → 18 relevant → 13 matching → 5 shortlisted.
+Discovery iterations and adaptive search decisions are visible.
+A candidate can be opened to inspect evidence and why it matched.
+Agent proposals are visually distinct from deterministic engine results.
+Shortlisted providers can transition directly into outreach.
+Call and WhatsApp execution states are visible.
+Incoming provider WhatsApp messages are visible in the UX.
+A provider cancellation can become an incident through the backend workflow.
+The deterministic impact engine can show affected tasks, schedule and budget impact.
+Recovery discovery and backup-provider outreach are visible.
+Provider responses can be displayed with structured extracted facts.
+Deterministic validation can be shown after agent extraction.
+Approval state is visible before consequential actions.
+Every autonomous action has a visible execution/audit trail.
+Unknown/unverified facts remain explicitly unknown.
+No frontend business logic duplicates authoritative deterministic backend calculations.
+29. Recommended End-to-End Demo Story
+This is the story the frontend should make effortless to demonstrate:
+Create a 500-person corporate conference in New Delhi.
+Open Venue Discovery. Show the map and the discovery funnel.
+Let the agent perform multiple search iterations until enough matching venues are found.
+Select/shortlist a venue.
+Open Vendor Discovery for catering and show the same funnel.
+Shortlist five catering providers.
+Start engagement. Show WhatsApp/call execution status.
+Show provider responses arriving in the conversation UI.
+Show the agent extracting availability and quote information.
+Show deterministic constraint validation.
+Proceed with an approved provider.
+During live operations, inject a real provider message: 'I won't be able to come.'
+Show the original WhatsApp message in the UX.
+Show agent interpretation: PROVIDER_UNAVAILABLE.
+Show deterministic impact: affected tasks, critical path, schedule and budget.
+Show recovery discovery on the map.
+Show backup providers being contacted.
+Show a backup response arriving.
+Show extracted facts and deterministic validation.
+Request or execute approval according to policy.
+Show provider replacement and recovery verification.
+Show the complete story in Activity/Audit.
+30. Final Product Architecture
+                         EVENTRA                            │                    EVENT SPECIFICATION                            │                     ✦ AGENT PLANNER                            │             ┌──────────────┴──────────────┐             ▼                             ▼       VENUE DISCOVERY               VENDOR DISCOVERY             │                             │             └──────────────┬──────────────┘                            ▼                    QUALIFICATION                            │                    ✓ ENGINE CHECK                            │                         SHORTLIST                            │                    ✦ ENGAGEMENT AGENT                            │                 ┌──────────┼──────────┐                 ▼          ▼          ▼               CALL      WHATSAPP     EMAIL                 │          │          │                 └──────────┼──────────┘                            ▼                       RESPONSES                            │                      ✦ EXTRACTION                            │                      ✓ VALIDATION                            │                         APPROVAL                            │                         EXECUTE                            │                       LIVE EVENT                            │                    PROVIDER SIGNALS                            │                     ✦ INCIDENT AGENT                            │                     ✓ IMPACT ENGINE                            │                     ✦ RECOVERY AGENT                            │                       RECOVERY                            │                       VERIFY / RESUME
+31. North-Star UX Statement
+EVENTRA should feel like one continuous autonomous event-operation loop: Find → qualify → shortlist → contact → converse → extract → evaluate → recommend → approve → execute → monitor → recover.
+The frontend is successful when a user can watch that loop happen with real evidence, while always understanding the boundary between what the agent proposed, what the deterministic engine verified, what the external world reported, and what EVENTRA actually executed.
+32. Immediate Starting Checklist
+Freeze the existing landing page.
+Create a Frontend V2 branch before large UI changes.
+Inventory current API contracts and reusable backend response models.
+Define the shared frontend types for DiscoveryRun, Candidate, Engagement, Conversation, Incident and Recovery.
+Build the new AppShell and lifecycle navigation first.
+Build the AgentPanel and ProvenanceBadge primitives before individual pages.
+Build Discovery Command as the first major screen because it establishes the product’s core identity.
+Connect real backend discovery data before polishing animations.
+Then connect shortlist → engagement → incoming message → incident → recovery.
+Only after the core autonomous loop is visible, polish secondary pages such as Audit and Budget.
+Appendix A — Visual UX Reference
+These diagrams are implementation-oriented references. They describe information hierarchy and system behavior, not fixed pixel-perfect layouts. The visual baseline should remain clean, spacious and operational: light workspace for discovery/planning/engagement, with stronger high-alert treatment reserved for live operations and critical incidents.
+A1. Architecture Layers
+A2. Closed-Loop Product
+A3. Discovery Funnel
+A4. Adaptive Discovery
+A5. Engagement Flow
+A6. Provider Message → Recovery
+A7. UX Shell
+A8. Provenance
+A9. Unified Event Stream

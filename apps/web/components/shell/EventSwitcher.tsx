@@ -52,27 +52,27 @@ export function EventSwitcher() {
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-2.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-slate-700 transition text-left"
+        className="w-full flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 hover:border-slate-300 shadow-sm transition text-left"
       >
         <div className="flex items-center space-x-2.5 min-w-0">
-          <div className="p-1.5 rounded bg-blue-950/60 border border-blue-800 text-blue-400">
+          <div className="p-1.5 rounded-md bg-slate-100 border border-slate-200 text-[#D6003C]">
             <Calendar className="w-4 h-4" />
           </div>
           <div className="truncate">
-            <div className="text-xs font-semibold text-slate-200 truncate leading-tight">
+            <div className="text-xs font-semibold text-slate-800 truncate leading-tight">
               {activeEvent.name}
             </div>
-            <div className="text-[10px] text-slate-400 uppercase font-mono mt-0.5">
+            <div className="text-[10px] text-slate-500 uppercase font-mono mt-0.5">
               {activeEvent.event_type || "EVENT"} • ID: {activeEvent.id.slice(0, 8)}
             </div>
           </div>
         </div>
-        <ChevronDown className="w-4 h-4 text-slate-400 ml-2 flex-shrink-0" />
+        <ChevronDown className="w-4 h-4 text-slate-500 ml-2 flex-shrink-0" />
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-1.5 z-50 rounded-lg bg-slate-900 border border-slate-700 shadow-2xl p-1.5 backdrop-blur-md">
-          <div className="text-[10px] font-bold text-slate-400 uppercase px-2 py-1 tracking-wider">
+        <div className="absolute top-full left-0 right-0 mt-1.5 z-50 rounded-lg bg-white border border-slate-200 shadow-xl p-1.5">
+          <div className="text-[10px] font-bold text-slate-500 uppercase px-2 py-1 tracking-wider">
             Switch Operational Event
           </div>
           <div className="max-h-56 overflow-y-auto space-y-0.5">
@@ -80,10 +80,10 @@ export function EventSwitcher() {
               <button
                 key={ev.id}
                 onClick={() => handleSelect(ev.id)}
-                className={`w-full flex items-center justify-between p-2 rounded text-left text-xs transition ${
+                className={`w-full flex items-center justify-between p-2 rounded-md text-left text-xs transition ${
                   ev.id === currentEventId
-                    ? "bg-blue-600/20 text-blue-300 font-semibold border border-blue-600/40"
-                    : "hover:bg-slate-800 text-slate-300"
+                    ? "bg-slate-100 text-[#D6003C] font-semibold border border-slate-200"
+                    : "hover:bg-slate-50 text-slate-700"
                 }`}
               >
                 <span className="truncate">{ev.name}</span>
@@ -93,13 +93,13 @@ export function EventSwitcher() {
               </button>
             ))}
           </div>
-          <div className="border-t border-slate-800 mt-1 pt-1">
+          <div className="border-t border-slate-100 mt-1 pt-1">
             <button
               onClick={() => {
                 setIsOpen(false);
                 router.push("/events/new");
               }}
-              className="w-full flex items-center justify-center space-x-1.5 p-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+              className="w-full flex items-center justify-center space-x-1.5 p-1.5 rounded-md bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200 transition"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Create New Event</span>

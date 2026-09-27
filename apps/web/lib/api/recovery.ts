@@ -49,3 +49,26 @@ export async function getRecoveryDecisionTrace(
     `/events/${eventId}/incidents/${incidentId}/recovery/trace`
   );
 }
+
+export interface RecoveryExecutionResult {
+  execution_id: string;
+  action_id: string;
+  status: string;
+  action_type: string;
+  verification_id: string;
+  verification_status: string;
+  is_verified: boolean;
+}
+
+export async function executeRecoveryOption(
+  eventId: string,
+  incidentId: string,
+  recoveryOptionId: string
+): Promise<RecoveryExecutionResult> {
+  return apiClient.post<RecoveryExecutionResult>(
+    `/events/${eventId}/incidents/${incidentId}/recovery/execute`,
+    null,
+    { params: { recovery_option_id: recoveryOptionId } }
+  );
+}
+
