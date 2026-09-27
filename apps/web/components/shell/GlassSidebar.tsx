@@ -100,7 +100,7 @@ export function GlassSidebar({ onClose, className = "" }: GlassSidebarProps) {
     >
       {/* Brand Header */}
       <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-        <Link href="/dashboard" className="flex items-center space-x-2.5">
+        <Link href="/" className="flex items-center space-x-2.5">
           <div className="w-8 h-8 rounded-lg bg-[#D6003C] flex items-center justify-center text-white shadow-sm">
             <svg
               width="16"

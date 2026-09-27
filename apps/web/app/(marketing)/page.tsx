@@ -48,7 +48,7 @@ export default function LandingPage() {
           style={{ width: navWidth, maxWidth: navMaxWidth, padding: navPadding }}
           className="flex items-center justify-between gap-10 rounded-full bg-black/30 backdrop-blur-md border border-white/10 shadow-[4px_4px_0px_rgba(255,255,255,0.05)] text-white"
         >
-          <div className="flex items-center gap-3 font-bold tracking-widest uppercase text-sm pl-2 flex-shrink-0 group cursor-pointer">
+          <Link href="/" className="flex items-center gap-3 font-bold tracking-widest uppercase text-sm pl-2 flex-shrink-0 group cursor-pointer">
              <div className="w-8 h-8 rounded-full bg-[#D6003C] flex items-center justify-center border border-transparent shadow-[0_0_15px_rgba(214,0,60,0.5)] group-hover:scale-105 transition-transform">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="square" strokeLinejoin="miter">
                   <polygon points="12 2 2 7 2 17 12 22 22 17 22 7"></polygon>
@@ -56,7 +56,7 @@ export default function LandingPage() {
                 </svg>
              </div>
              <span className="group-hover:text-white transition-colors">Eventra</span>
-          </div>
+          </Link>
           <nav className="hidden md:flex items-center justify-center gap-8 text-[11px] font-bold uppercase tracking-widest text-gray-500 flex-1 whitespace-nowrap overflow-hidden">
             <Link href="#" className="hover:text-white transition-colors">Home</Link>
             <Link href="#" className="hover:text-white transition-colors">Projects</Link>

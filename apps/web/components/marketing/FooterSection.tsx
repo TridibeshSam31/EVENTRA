@@ -9,9 +9,9 @@ export default function FooterSection() {
     <footer className="w-full min-h-screen bg-[#FBFBFA] text-[#111] flex flex-col justify-between px-6 md:px-12 py-10 relative z-20 font-sans">
       {/* Top Bar */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center w-full mb-16 md:mb-0 gap-8 md:gap-0">
-        <div className="font-bold tracking-widest uppercase text-sm">
+        <Link href="/" className="font-bold tracking-widest uppercase text-sm hover:opacity-80 transition-opacity">
           EVENTRA
-        </div>
+        </Link>
       </div>
 
       {/* Huge Typography Section */}
