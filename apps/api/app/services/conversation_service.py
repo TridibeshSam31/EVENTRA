@@ -37,29 +37,45 @@ class ConversationService:
         recipient_contact: Optional[str] = None,
     ) -> Conversation:
         """Finds or creates a persistent conversation thread."""
+        actual_vendor_id: Optional[str] = None
+        resolved_name = vendor_name
+        resolved_contact = recipient_contact
+
+        if vendor_id:
+            v = self.db.query(Vendor).filter(Vendor.id == vendor_id).first()
+            if v:
+                actual_vendor_id = v.id
+                resolved_name = resolved_name or v.name
+                resolved_contact = resolved_contact or v.contact_phone
+            else:
+                try:
+                    from app.models.venue import Venue
+                    venue = self.db.query(Venue).filter(Venue.id == vendor_id).first()
+                    if venue:
+                        resolved_name = resolved_name or venue.name
+                        resolved_contact = resolved_contact or venue.contact_phone
+                except Exception:
+                    pass
+
         query = self.db.query(Conversation).filter(
             Conversation.event_id == event_id,
         )
-        if vendor_id:
-            query = query.filter(Conversation.vendor_id == vendor_id)
-        elif recipient_contact:
-            query = query.filter(Conversation.recipient_contact == recipient_contact)
+        if actual_vendor_id:
+            query = query.filter(Conversation.vendor_id == actual_vendor_id)
+        elif resolved_contact:
+            query = query.filter(Conversation.recipient_contact == resolved_contact)
+        elif resolved_name:
+            query = query.filter(Conversation.vendor_name == resolved_name)
 
         conv = query.first()
         if not conv:
-            if not vendor_name and vendor_id:
-                v = self.db.query(Vendor).filter(Vendor.id == vendor_id).first()
-                if v:
-                    vendor_name = v.name
-                    recipient_contact = recipient_contact or v.contact_phone
-
             conv = Conversation(
                 event_id=event_id,
-                vendor_id=vendor_id,
-                vendor_name=vendor_name or "Provider Contact",
+                vendor_id=actual_vendor_id,
+                vendor_name=resolved_name or "Provider Contact",
                 channel=channel,
                 status="active",
-                recipient_contact=recipient_contact,
+                recipient_contact=resolved_contact,
                 last_message_at=utc_now(),
             )
             self.db.add(conv)
@@ -89,11 +105,11 @@ class ConversationService:
         msg = Message(
             conversation_id=conv.id,
             event_id=event_id,
-            vendor_id=vendor_id,
+            vendor_id=conv.vendor_id,
             direction="outbound",
             channel=channel,
             sender=sender,
-            recipient=recipient,
+            recipient=recipient or conv.recipient_contact,
             raw_text=raw_text,
             status=status,
             extracted_facts={},

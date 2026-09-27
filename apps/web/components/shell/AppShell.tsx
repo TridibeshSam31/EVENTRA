@@ -3,13 +3,15 @@
 import React, { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { useEventStore, getActiveEventId } from "@/stores/eventStore";
 import { Menu, X, Bell, UserCircle, Radio, Sparkles } from "lucide-react";
 import { EventSwitcher } from "./EventSwitcher";
 import { GlassSidebar } from "./GlassSidebar";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const params = useParams();
-  const eventId = (params?.eventId as string) || "conference_demo";
+  const activeEventId = useEventStore((state) => state.activeEventId);
+  const eventId = (params?.eventId as string) || activeEventId || getActiveEventId() || "conference_demo";
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (

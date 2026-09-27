@@ -21,6 +21,7 @@ from app.schemas.vendor_binding import (
     BindingDecision,
     VendorTaskBindingResponse,
 )
+from app.schemas.task import TaskProviderReassignRequest, TaskProviderReassignResponse
 from app.schemas.execution_plan import FinalExecutionPlan
 from app.schemas.pause_resume import (
     PauseEventRequest,
@@ -533,6 +534,39 @@ def get_binding_feasibility_endpoint(
         validation_id=validation_id,
         force_override_unknown=force_override_unknown,
     )
+
+
+@router.patch(
+    "/{event_id}/tasks/{task_id}/provider",
+    response_model=TaskProviderReassignResponse,
+    status_code=status.HTTP_200_OK,
+)
+@router.post(
+    "/{event_id}/tasks/{task_id}/reassign-provider",
+    response_model=TaskProviderReassignResponse,
+    status_code=status.HTTP_200_OK,
+)
+def reassign_task_provider_endpoint(
+    event_id: str,
+    task_id: str,
+    payload: TaskProviderReassignRequest,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Dedicated authoritative endpoint to reassign a provider to an operational task (B4)."""
+    from app.services.vendor_task_binding_service import VendorTaskBindingService
+
+    service = VendorTaskBindingService(db)
+    res = service.reassign_task_provider(
+        event_id=event_id,
+        task_id=task_id,
+        provider_id=payload.provider_id,
+        agreed_cost=payload.agreed_cost,
+        notes=payload.notes,
+        current_user_id=current_user_id,
+        force_override=payload.force_override,
+    )
+    return TaskProviderReassignResponse(**res)
 
 
 # --- Phase 9: Real Final Execution Plan Endpoints (Task 9) ---

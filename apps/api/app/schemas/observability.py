@@ -28,6 +28,9 @@ class AuditRecordResponse(BaseModel):
 class AuditListResponse(BaseModel):
     total: int
     items: List[AuditRecordResponse]
+    next_cursor: Optional[str] = None
+    limit: Optional[int] = None
+    offset: Optional[int] = None
 
 
 class ActivityEntryResponse(BaseModel):

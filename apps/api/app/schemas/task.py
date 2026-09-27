@@ -14,6 +14,9 @@ class TaskBase(BaseModel):
     planned_end: Optional[datetime] = None
     actual_start: Optional[datetime] = None
     actual_end: Optional[datetime] = None
+    verification_status: str = "PENDING"
+    verified_at: Optional[datetime] = None
+    verification_notes: Optional[str] = None
 
 
 class TaskCreate(TaskBase):
@@ -29,6 +32,9 @@ class TaskUpdate(BaseModel):
     planned_end: Optional[datetime] = None
     actual_start: Optional[datetime] = None
     actual_end: Optional[datetime] = None
+    verification_status: Optional[str] = None
+    verified_at: Optional[datetime] = None
+    verification_notes: Optional[str] = None
 
 
 class TaskResponse(TaskBase):
@@ -38,6 +44,11 @@ class TaskResponse(TaskBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TaskVerificationUpdateRequest(BaseModel):
+    verification_status: str
+    verification_notes: Optional[str] = None
 
 
 class TaskDependencyCreate(BaseModel):
@@ -55,3 +66,23 @@ class TaskDependencyResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class TaskProviderReassignRequest(BaseModel):
+    """Payload to reassign a provider to an operational task (B4)."""
+    provider_id: str
+    agreed_cost: Optional[float] = None
+    notes: Optional[str] = None
+    force_override: bool = False
+
+
+class TaskProviderReassignResponse(BaseModel):
+    """Authoritative response confirming task provider reassignment (B4)."""
+    task_id: str
+    task_name: str
+    previous_provider_id: Optional[str] = None
+    new_provider_id: str
+    status: str
+    agreed_cost: Optional[float] = None
+    reassigned_at: datetime
+    audit_id: Optional[str] = None

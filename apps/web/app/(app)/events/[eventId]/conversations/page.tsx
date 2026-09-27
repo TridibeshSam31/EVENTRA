@@ -99,10 +99,16 @@ export default function ConversationsPage() {
       }
 
       if (convsRes.status === "fulfilled" && convsRes.value?.items) {
-        setConversations(convsRes.value.items);
-        if (convsRes.value.items.length > 0 && !selectedConv) {
-          setSelectedConv(convsRes.value.items[0]);
-        }
+        const items = convsRes.value.items;
+        setConversations(items);
+        setSelectedConv((prev) => {
+          if (!prev && items.length > 0) return items[0];
+          if (prev) {
+            const found = items.find((c) => c.id === prev.id);
+            return found || (items.length > 0 ? items[0] : null);
+          }
+          return null;
+        });
       }
 
       if (assignmentsRes.status === "fulfilled" && Array.isArray(assignmentsRes.value)) {
@@ -117,17 +123,16 @@ export default function ConversationsPage() {
     } finally {
       setLoading(false);
     }
-  }, [eventId, selectedConv]);
+  }, [eventId]);
 
   // 2. Load Messages for Selected Conversation
   const loadMessages = useCallback(
     async (convId: string) => {
       try {
         setLoadingMessages(true);
-        const res = await getMessages(eventId, convId);
-        if (res?.items) {
-          setMessages(res.items);
-        }
+        const res: any = await getMessages(eventId, convId);
+        const list = Array.isArray(res) ? res : (res?.items || []);
+        setMessages(list);
       } catch (err) {
         console.error("Failed to load messages:", err);
       } finally {
@@ -145,7 +150,7 @@ export default function ConversationsPage() {
     if (selectedConv) {
       loadMessages(selectedConv.id);
     }
-  }, [selectedConv, loadMessages]);
+  }, [selectedConv?.id, loadMessages]);
 
   // Polling for real-time thread messages with visibility guard
   useEffect(() => {
@@ -154,29 +159,51 @@ export default function ConversationsPage() {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
         loadMessages(selectedConv.id);
       }
-    }, 5000);
+    }, 4000);
     return () => clearInterval(interval);
-  }, [selectedConv, loadMessages]);
+  }, [selectedConv?.id, loadMessages]);
 
-  // Handle Outbound Message Send
+  // Handle Outbound Message Send with Optimistic Update
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!replyText.trim() || !selectedConv) return;
+    const textToSend = replyText.trim();
+    if (!textToSend || !selectedConv || sending) return;
+
+    const tempId = `temp-${Date.now()}`;
+    const optimisticMsg: Message = {
+      id: tempId,
+      conversation_id: selectedConv.id,
+      event_id: eventId,
+      vendor_id: selectedConv.vendor_id || undefined,
+      direction: "outbound",
+      channel: selectedConv.channel || "whatsapp",
+      sender: "EVENTRA Operator",
+      recipient: selectedConv.recipient_contact || undefined,
+      raw_text: textToSend,
+      status: "sending",
+      timestamp: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, optimisticMsg]);
+    setReplyText("");
 
     try {
       setSending(true);
       setSendError(null);
       await sendMessage(eventId, selectedConv.id, {
-        raw_text: replyText.trim(),
+        raw_text: textToSend,
         channel: selectedConv.channel || "whatsapp",
         direction: "outbound",
       });
-      setReplyText("");
       await loadMessages(selectedConv.id);
       loadConversationsAndEvent();
     } catch (err: any) {
       console.error("Failed to send message:", err);
       setSendError(err.message || "Failed to dispatch message to provider.");
+      setMessages((prev) =>
+        prev.map((m) => (m.id === tempId ? { ...m, status: "failed" } : m))
+      );
     } finally {
       setSending(false);
     }
@@ -468,7 +495,7 @@ export default function ConversationsPage() {
                           }}
                           className={`w-full text-left p-3 transition flex items-start gap-2.5 ${
                             isSelected
-                              ? "bg-slate-50 border-l-3 border-[#D6003C]"
+                              ? "bg-slate-50 border-l-4 border-[#D6003C]"
                               : "hover:bg-slate-50/60"
                           }`}
                         >

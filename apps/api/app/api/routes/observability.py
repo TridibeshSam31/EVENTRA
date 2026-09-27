@@ -1,6 +1,6 @@
 """API Endpoints: Observability (Audit, Activity Feed, Decision Traces, State History)"""
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user_id, get_db_session
@@ -48,14 +48,61 @@ def get_audit_trail_endpoint(
     event_id: str,
     action_type: Optional[str] = Query(None, description="Filter by action type"),
     limit: int = Query(50, ge=1, le=200),
+    cursor: Optional[str] = Query(None, description="Deterministic base64 cursor for pagination (B8)"),
+    offset: Optional[int] = Query(None, ge=0, description="Offset for pagination (backward compatibility)"),
     db: Session = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
 ):
-    """Retrieves immutable audit records for an event."""
+    """Retrieves immutable audit records for an event with deterministic cursor pagination (B8)."""
     _verify_observability_access(db, event_id, current_user_id)
     recorder = AuditRecorder(db)
-    items = recorder.list_records(event_id=event_id, action_type=action_type, limit=limit)
-    return AuditListResponse(total=len(items), items=items)
+    items, total, next_cursor = recorder.list_records_paginated(
+        event_id=event_id,
+        action_type=action_type,
+        limit=limit,
+        cursor=cursor,
+        offset=offset,
+    )
+    return AuditListResponse(
+        total=total,
+        items=items,
+        next_cursor=next_cursor,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/audit/export")
+def export_audit_endpoint(
+    event_id: str,
+    format: str = Query("json", description="Export format: json or csv (B7)"),
+    action_type: Optional[str] = Query(None, description="Filter by action type"),
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Authoritative export endpoint for event audit records (B7).
+    
+    Provides authoritative, sanitized JSON or CSV export with RBAC enforcement.
+    Secrets and tokens are strictly redacted.
+    """
+    _verify_observability_access(db, event_id, current_user_id)
+    fmt = format.lower()
+    if fmt not in ("json", "csv"):
+        fmt = "json"
+
+    recorder = AuditRecorder(db)
+    content = recorder.export_records(event_id=event_id, action_type=action_type, format_type=fmt)
+
+    media_type = "text/csv" if fmt == "csv" else "application/json"
+    filename = f"event_{event_id}_audit.{fmt}"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Audit-Record-Count": str(len(content.splitlines()) - 1 if fmt == "csv" else content.count('"id":')),
+        },
+    )
 
 
 @router.get("/activity", response_model=ActivityListResponse)

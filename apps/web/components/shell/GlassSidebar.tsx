@@ -3,6 +3,7 @@
 import React from "react";
 import Link from "next/link";
 import { usePathname, useParams } from "next/navigation";
+import { useEventStore, getActiveEventId } from "@/stores/eventStore";
 import {
   LayoutDashboard,
   PlusCircle,
@@ -29,11 +30,13 @@ interface GlassSidebarProps {
   className?: string;
 }
 
+
 export function GlassSidebar({ onClose, className = "" }: GlassSidebarProps) {
   const pathname = usePathname();
   const params = useParams();
-  const eventId = (params?.eventId as string) || "conference_demo";
-  const hasEventContext = Boolean(params?.eventId);
+  const activeEventId = useEventStore((state) => state.activeEventId);
+  const eventId = (params?.eventId as string) || activeEventId || getActiveEventId() || "conference_demo";
+  const hasEventContext = Boolean(params?.eventId) || Boolean(activeEventId);
 
   const navigationSections = [
     {

@@ -25,6 +25,7 @@ import { getPlan } from "@/lib/api/planning";
 import { getActivityFeed } from "@/lib/api/observability";
 import { listIncidents } from "@/lib/api/incidents";
 import { formatRelativeTime } from "@/lib/utils/time";
+import { useEventStore, getActiveEventId, setActiveEventId } from "@/stores/eventStore";
 
 export default function DashboardHome() {
   const [events, setEvents] = useState<any[]>([]);
@@ -34,6 +35,7 @@ export default function DashboardHome() {
   const [incidents, setIncidents] = useState<any[]>([]);
   const [liveState, setLiveState] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const activeEventId = useEventStore((state) => state.activeEventId);
 
   useEffect(() => {
     async function load() {
@@ -43,8 +45,12 @@ export default function DashboardHome() {
         setEvents(evList || []);
 
         if (evList && evList.length > 0) {
-          const currentEvent = evList[0];
+          const targetId = activeEventId || getActiveEventId();
+          const currentEvent = evList.find((e: any) => e.id === targetId) || evList[0];
           setActiveEvent(currentEvent);
+          if (currentEvent?.id && currentEvent.id !== activeEventId) {
+            setActiveEventId(currentEvent.id);
+          }
 
           try {
             const ls = await getLiveState(currentEvent.id);

@@ -46,9 +46,20 @@ class ImpactPropagation:
 
             for succ_id in sorted(successors):
                 lag = graph.get_lag(current_id, succ_id)
+                pred_t = tasks_by_id.get(current_id)
+                succ_t = tasks_by_id.get(succ_id)
+                pred_name = (pred_t.get("name") if isinstance(pred_t, dict) else getattr(pred_t, "name", None)) or current_id
+                succ_name = (succ_t.get("name") if isinstance(succ_t, dict) else getattr(succ_t, "name", None)) or succ_id
+
                 affected_deps.append({
+                    "edge_type": "TASK_TO_TASK",
+                    "predecessor_id": current_id,
+                    "successor_id": succ_id,
                     "predecessor_task_id": current_id,
                     "successor_task_id": succ_id,
+                    "predecessor_name": pred_name,
+                    "successor_name": succ_name,
+                    "dependency_type": "FINISH_TO_START",
                     "lag_minutes": lag,
                 })
 

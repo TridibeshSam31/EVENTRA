@@ -69,6 +69,8 @@ class PlanSummary(BaseModel):
     total_estimated_budget: float = 0.0
     critical_path_tasks: int = 0
     lifecycle_state: str = "PLANNED"
+    is_materialized: bool = True
+    planning_status: str = "MATERIALIZED"
 
 
 class EventPlan(BaseModel):
@@ -77,6 +79,9 @@ class EventPlan(BaseModel):
     event_name: str
     event_type: str
     lifecycle_state: str
+    is_materialized: bool = True
+    planning_status: str = "MATERIALIZED"
+    planning_error: Optional[str] = None
     summary: PlanSummary
     tasks: List[PlanTaskEntry] = []
     dependencies: List[PlanDependencyEntry] = []

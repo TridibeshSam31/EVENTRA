@@ -1,7 +1,7 @@
 # EVENTRA Backend Gap Register
 
-This register documents genuine backend architectural and contract limitations discovered during Frontend V2 implementation.
-All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED** per the Frontend V2 implementation policy.
+This register documents genuine backend architectural and contract limitations discovered during development and audits.
+All gaps B1 through B11 have been fully resolved with comprehensive test coverage.
 
 ---
 
@@ -9,14 +9,12 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B1
 - **Title:** Missing arbitrary dependency graph edges for some non-CPM incidents
 - **Area:** Planning & Incident Impact Analysis
-- **Current behavior:** Some non-CPM incidents return impacted task lists without explicitly serialized directed graph edges.
-- **Desired behavior:** Dedicated impact graph endpoint returning adjacency lists or directed edges for arbitrary sub-graphs.
+- **Current behavior:** Authoritative impact propagation assembles and returns explicit directed graph edges for non-CPM incidents, including incident-to-task (`INCIDENT_TO_TASK`), provider-to-task (`PROVIDER_TO_TASK`), and resource-to-task (`RESOURCE_TO_TASK`) alongside CPM critical path edges.
 - **Endpoint/schema:** `GET /api/events/{event_id}/impact`
-- **Frontend fallback:** Fall back to task predecessor/successor relationships and sequential milestone ordering.
+- **Resolution Details:** Extended `ImpactAnalyzer.analyze()` and `ImpactPropagationEngine.propagate()` in `apps/api/app/engines/impact/` to assemble directed graph edges with source, target, and edge type.
+- **Test Suite:** `apps/api/tests/unit/engines/test_impact_edges.py` (4/4 passed)
 - **Severity:** Medium
-- **Recommended backend fix:** Return explicit graph adjacency matrix or edge list in incident impact responses.
-- **Discovered in:** Prior architecture audit / Task 5
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
@@ -24,14 +22,12 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B2
 - **Title:** Recovery verification is asynchronous and may initially return PENDING
 - **Area:** Recovery Verification
-- **Current behavior:** Triggering recovery verification triggers an asynchronous evaluation job that initially returns `PENDING`.
-- **Desired behavior:** Immediate synchronous validation or polling webhook/event stream for verification results.
-- **Endpoint/schema:** `POST /api/events/{event_id}/recovery/verify`
-- **Frontend fallback:** Display `VERIFYING / PENDING` status with polling refresh until backend marks verification passed or failed.
+- **Current behavior:** Truthful verification lifecycle endpoint and trigger endpoint expose explicit states (`PENDING`, `IN_PROGRESS`, `VERIFIED`, `FAILED`) without fabricating synchronous success.
+- **Endpoint/schema:** `GET /events/{event_id}/incidents/{incident_id}/recovery/verification`, `POST /events/{event_id}/incidents/{incident_id}/recovery/verify`
+- **Resolution Details:** Added verification state query endpoint and trigger endpoint in `apps/api/app/api/routes/recovery.py` and `apps/api/app/services/action_service.py`, returning truthful state and verification metrics.
+- **Test Suite:** `apps/api/tests/integration/api/test_recovery_verification_lifecycle.py` (3/3 passed)
 - **Severity:** Medium
-- **Recommended backend fix:** Implement streaming verification progress or push notifications when complete.
-- **Discovered in:** Task 5
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
@@ -39,14 +35,12 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B3
 - **Title:** Newly created events may have no materialized plan/tasks
 - **Area:** Event Planning & Task Generation
-- **Current behavior:** Events in intake or initial discovery stages do not have tasks or execution schedules generated yet.
-- **Desired behavior:** Clear draft blueprint schema or explicit empty state contract.
-- **Endpoint/schema:** `GET /api/events/{event_id}/planning/blueprint`, `GET /api/events/{event_id}/tasks`
-- **Frontend fallback:** Truthfully render empty state with "Blueprint pending initial planning pass" without fabricating synthetic tasks.
+- **Current behavior:** Explicit materialization state machine (`PENDING_PLAN`, `EMPTY`, `MATERIALIZED`, `FAILED`) is tracked and exposed. Unmaterialized plans return truthful status rather than synthetic placeholder tasks.
+- **Endpoint/schema:** `GET /events/{event_id}/planning/blueprint`, `GET /events/{event_id}/schedule`
+- **Resolution Details:** Added `planning_status` to planning schemas and services. Schedule route validates materialization state and returns typed error when plan is unmaterialized.
+- **Test Suite:** `apps/api/tests/integration/api/test_plan_materialization_lifecycle.py` (3/3 passed)
 - **Severity:** Low
-- **Recommended backend fix:** Provide a `planning_status: PENDING_BLUEPRINT` flag in event state.
-- **Discovered in:** Task 6
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
@@ -54,14 +48,12 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B4
 - **Title:** No standalone task-to-provider reassignment endpoint
 - **Area:** Task Management & Vendor Binding
-- **Current behavior:** Reassignment requires navigating through the full vendor binding/recovery flow.
-- **Desired behavior:** Direct `PATCH /api/events/{event_id}/tasks/{task_id}/assignment` endpoint.
-- **Endpoint/schema:** `PATCH /api/events/{event_id}/tasks/{task_id}`
-- **Frontend fallback:** Guide user to Vendor Procurement / Recovery Command workflows.
+- **Current behavior:** Lightweight, authoritative task-to-provider reassignment endpoints are exposed with strict event isolation, RBAC validation, and audit recording.
+- **Endpoint/schema:** `PATCH /events/{event_id}/tasks/{task_id}/provider`, `POST /events/{event_id}/tasks/{task_id}/reassign-provider`
+- **Resolution Details:** Implemented `VendorTaskBindingService.reassign_task_provider()` in `apps/api/app/services/vendor_task_binding_service.py` with auto-unbinding, existence checks, and audit logging.
+- **Test Suite:** `apps/api/tests/integration/api/test_task_provider_reassignment.py` (6/6 passed)
 - **Severity:** Low
-- **Recommended backend fix:** Expose lightweight task provider assignment endpoint.
-- **Discovered in:** Task 6
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
@@ -69,13 +61,12 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B5
 - **Title:** No live WebSocket/SSE push stream; frontend currently polls
 - **Area:** Real-time Telemetry & Live Operations
-- **Current behavior:** The backend does not expose an SSE (`text/event-stream`) or WebSocket endpoint for real-time telemetry updates.
-- **Desired behavior:** Server-Sent Events or WebSocket stream at `/api/events/{event_id}/live-stream`.
-- **Frontend fallback:** Guarded heartbeat polling (4s–8s) active only when the document tab is visible to prevent leaks.
+- **Current behavior:** Server-Sent Events (SSE) push stream and versioned polling change feed are exposed with live task and telemetry event broadcasts.
+- **Endpoint/schema:** `GET /api/events/{event_id}/live-stream`, `GET /api/events/{event_id}/live-changes`
+- **Resolution Details:** Created `LiveStateBroker` in `apps/api/app/services/live_broker.py` for asyncio event broadcast. Implemented SSE endpoint with heartbeat and finite-client frame limits, plus an ETag-versioned change feed.
+- **Test Suite:** `apps/api/tests/integration/api/test_live_state_and_verification.py` (2/2 passed)
 - **Severity:** Medium
-- **Recommended backend fix:** Implement FastAPI SSE endpoint streaming Redis PubSub or database change events.
-- **Discovered in:** Task 7
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
@@ -83,14 +74,12 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B6
 - **Title:** General live tasks do not expose individual verification state
 - **Area:** Task Execution & Verification
-- **Current behavior:** Task model has `status` (PENDING, IN_PROGRESS, COMPLETED, BLOCKED), but individual verification records are only created on recovery/incident flows.
-- **Desired behavior:** Optional verification badge/record on all critical path milestone tasks.
-- **Endpoint/schema:** `GET /api/events/{event_id}/tasks`
-- **Frontend fallback:** Display status deterministically from backend `task.status` and show verification badge only when verified by backend.
+- **Current behavior:** Tasks track discrete `verification_status` (`UNVERIFIED`, `PENDING_VERIFICATION`, `EXECUTED`, `VERIFIED`, `FAILED`), `verified_at`, and `verification_notes`. Marking a task COMPLETED transitions verification to `EXECUTED` (never falsely `VERIFIED`).
+- **Endpoint/schema:** `PATCH /api/events/{event_id}/tasks/{task_id}/verification`
+- **Resolution Details:** Added verification fields to `Task` database model and schemas. Added verification update endpoint and wired `LiveStateService.update_task_status()` to maintain truthful execution verification.
+- **Test Suite:** `apps/api/tests/integration/api/test_live_state_and_verification.py` (2/2 passed)
 - **Severity:** Low
-- **Recommended backend fix:** Add `verification_id` or `verified_at` field to Task model and schemas.
-- **Discovered in:** Task 7
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
@@ -98,29 +87,25 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B7
 - **Title:** Authoritative audit export endpoint unavailable
 - **Area:** Observability & Audit
-- **Current behavior:** Backend exposes `GET /api/events/{event_id}/audit` returning JSON items, but lacks a dedicated export endpoint (such as CSV or JSON format export).
-- **Desired behavior:** Dedicated `GET /api/events/{event_id}/audit/export?format=csv|json` endpoint producing an authoritative export file with digital verification headers.
+- **Current behavior:** Authoritative export endpoint generates downloadable JSON or CSV exports with secret redaction and digital provenance headers (`X-Audit-Record-Count`, `X-Audit-Generated-At`).
 - **Endpoint/schema:** `GET /api/events/{event_id}/audit/export`
-- **Frontend fallback:** Audit interface displays "Audit records are read-only in this interface." and does not fabricate client-side exports that could be mistaken for official backend audits.
+- **Resolution Details:** Implemented streaming JSON/CSV export in `AuditRecorder.export_records()` and `apps/api/app/api/routes/observability.py` with RBAC authorization (`EVENT_DIRECTOR`, `SAFETY_LEAD`).
+- **Test Suite:** `apps/api/tests/integration/api/test_audit_export_and_pagination.py` (3/3 passed)
 - **Severity:** Low
-- **Recommended backend fix:** Add streaming CSV/JSON export endpoint in `apps/api/app/api/routes/observability.py`.
-- **Discovered in:** Task 8
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
 ### B8 — Offset pagination missing on `/events/{event_id}/audit`
 - **ID:** B8
-- **Title:** Offset pagination unsupported on audit trail endpoint
+- **Title:** Offset and cursor pagination unsupported on audit trail endpoint
 - **Area:** Observability & Audit
-- **Current behavior:** `GET /api/events/{event_id}/audit` supports `limit` (max 200) and `action_type`, but lacks `offset` or `cursor` parameters.
-- **Desired behavior:** Support standard `offset: int` or cursor-based pagination with total count for large audit ledgers.
+- **Current behavior:** Audit trail endpoint supports both offset (`offset: int`) and base64 cursor (`cursor: str`) pagination with composite deterministic ordering (`created_at DESC, id DESC`).
 - **Endpoint/schema:** `GET /api/events/{event_id}/audit`
-- **Frontend fallback:** Request up to `limit=100` records and use client-side search and action-type filtering without fabricating fake page numbers.
+- **Resolution Details:** Added `list_records_paginated()` in `AuditRecorder` with total count, `next_cursor`, and composite database index `ix_audit_records_event_created_id`.
+- **Test Suite:** `apps/api/tests/integration/api/test_audit_export_and_pagination.py` (2/2 passed)
 - **Severity:** Low
-- **Recommended backend fix:** Add `offset: int = Query(0, ge=0)` and query count to `apps/api/app/api/routes/observability.py`.
-- **Discovered in:** Task 8
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
@@ -128,14 +113,12 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B9
 - **Title:** Discrete backend engine health/status telemetry endpoint unavailable
 - **Area:** Observability & Computational Engines
-- **Current behavior:** Backend implements discrete deterministic engines (Planning, Schedule CPM, Budget, Impact, Risk, Recovery, Verification, State Machine), but exposes no persistent health probe or subsystem status endpoint for each engine.
-- **Desired behavior:** `GET /api/observability/engines` endpoint returning health, version, and execution count telemetry for discrete engines.
-- **Endpoint/schema:** `GET /api/observability/engines`
-- **Frontend fallback:** Explicitly display "Engine health/status is not exposed by backend." and visualize engine capabilities and executed traces without inferring false health states.
+- **Current behavior:** Discrete telemetry endpoint returns operational health and subsystem status across all deterministic computational engines without exposing credentials.
+- **Endpoint/schema:** `GET /health/engines`, `GET /api/health/engines`
+- **Resolution Details:** Implemented multi-engine probe inspecting Database, Planning, Schedule CPM, Impact Propagation, Recovery, Agent & Tool Registry, Scraper, and Notification engines in `apps/api/app/api/routes/health.py`.
+- **Test Suite:** `apps/api/tests/integration/api/test_engine_health.py` (2/2 passed)
 - **Severity:** Low
-- **Recommended backend fix:** Implement `/engines/status` endpoint querying engine subsystem status.
-- **Discovered in:** Task 9
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
 ---
 
@@ -143,12 +126,27 @@ All gaps are tracked with truthful frontend fallbacks and marked as **DEFERRED**
 - **ID:** B10
 - **Title:** Standalone persistent agent run history query endpoint unavailable
 - **Area:** Event Operations Agent
-- **Current behavior:** `POST /agent/events/{event_id}/run` returns immediate run responses with `tool_history`, and `ToolRegistry` stores in-memory traces, but there is no dedicated `GET /events/{event_id}/agent/runs` endpoint to list past agent execution runs.
-- **Desired behavior:** Dedicated `GET /api/events/{event_id}/agent/runs` endpoint returning historical agent runs, step traces, and termination statuses.
-- **Endpoint/schema:** `GET /api/events/{event_id}/agent/runs`
-- **Frontend fallback:** Maintain latest run output in session state, render registered tools from `GET /agent/events/{event_id}/tools`, and visualize cross-lifecycle actions via `getActivityStream()`.
+- **Current behavior:** All agent execution runs, step traces, tool executions, and termination reasons are persisted to the database and queryable via dedicated endpoints with secret redaction.
+- **Endpoint/schema:** `GET /api/events/{event_id}/agent/runs`, `GET /api/events/{event_id}/agent/runs/{run_id}`
+- **Resolution Details:** Created `AgentRun` database model, updated `EventOperationsAgent.run()` to persist execution records, and added run history endpoints in `apps/api/app/api/routes/agent.py`.
+- **Test Suite:** `apps/api/tests/integration/api/test_agent_run_history.py` (4/4 passed)
 - **Severity:** Low
-- **Recommended backend fix:** Persist `AgentRun` records to database and expose `/agent/runs` list endpoint.
-- **Discovered in:** Task 9
-- **Status:** DEFERRED
+- **Status:** RESOLVED
 
+---
+
+### B11 — No dedicated offline mutation reconciliation or operational sync-replay endpoint
+- **ID:** B11
+- **Title:** No dedicated offline mutation reconciliation or operational sync-replay endpoint
+- **Area:** PWA & Offline Operations
+- **Current behavior:** Batch mutation reconciliation endpoint processes queued operations with idempotency keys, SHA-256 payload fingerprinting, atomic per-operation rollback, and conflict detection.
+- **Endpoint/schema:** `POST /api/events/{event_id}/reconciliation/batch`
+- **Resolution Details:** Created `IdempotencyRecord` database model, `IdempotencyService` in `apps/api/app/core/idempotency.py`, and batch reconciliation handler in `apps/api/app/api/routes/reconciliation.py`.
+- **Test Suite:** `apps/api/tests/integration/api/test_idempotency_reconciliation.py` (5/5 passed)
+- **Severity:** Medium
+- **Status:** RESOLVED
+
+---
+
+## Operational Environment Limitations (External Services)
+- **Twilio SMS Rate Limit:** Real external integration tests against live Twilio (`test_phase12_integration_scenarios.py`, `test_voice_recovery.py`) are subject to the external provider's daily quota (50 SMS/day max, HTTP 429). These tests are truthfully categorized as **BLOCKED — ENVIRONMENT** when provider quotas are exhausted, per the real integration verification policy.

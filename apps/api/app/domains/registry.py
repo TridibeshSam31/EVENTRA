@@ -27,15 +27,35 @@ class DomainRegistry:
         key = (raw_key.value if hasattr(raw_key, "value") else str(raw_key)).upper()
         cls._domains[key] = domain
 
+    ALIAS_MAP = {
+        "EXHIBITION": "CONFERENCE",
+        "EXPO": "CONFERENCE",
+        "CORPORATE": "CONFERENCE",
+        "SUMMIT": "CONFERENCE",
+        "HACKATHON": "CONFERENCE",
+        "MEETUP": "CONFERENCE",
+        "FESTIVAL": "COLLEGE_FEST",
+        "FEST": "COLLEGE_FEST",
+        "CULTURAL": "COLLEGE_FEST",
+        "CONCERT": "COLLEGE_FEST",
+        "PARTY": "COLLEGE_FEST",
+        "MARRIAGE": "WEDDING",
+        "RECEPTION": "WEDDING",
+        "GALA": "WEDDING",
+        "OTHER": "CONFERENCE",
+    }
+
     @classmethod
     def get(cls, event_type: Union[EventType, str]) -> BaseEventDomain:
-        """Retrieve the domain handler for a given event type."""
+        """Retrieve the domain handler for a given event type with alias normalization."""
         raw_key = event_type.value if hasattr(event_type, "value") else str(event_type)
         normalized = raw_key.strip().upper().replace("-", "_").replace(" ", "_")
-        if normalized not in cls._domains:
-            supported = list(cls._domains.keys())
-            raise UnsupportedEventTypeException(normalized, supported)
-        return cls._domains[normalized]
+        if normalized in cls._domains:
+            return cls._domains[normalized]
+        if normalized in cls.ALIAS_MAP and cls.ALIAS_MAP[normalized] in cls._domains:
+            return cls._domains[cls.ALIAS_MAP[normalized]]
+        supported = list(cls._domains.keys())
+        raise UnsupportedEventTypeException(normalized, supported)
 
     @classmethod
     def list_supported_event_types(cls) -> List[str]:

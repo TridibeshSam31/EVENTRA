@@ -38,14 +38,14 @@ type MapLayerType = "dark" | "streets" | "satellite";
 
 const LAYER_CONFIGS: Record<MapLayerType, { url: string; attribution: string; name: string }> = {
   streets: {
-    name: "Google Streets",
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
+    name: "Streets",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   },
   dark: {
     name: "Dark Radar",
-    url: "https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
-    attribution: '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap',
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: "&copy; Esri, HERE, Garmin, OpenStreetMap",
   },
   satellite: {
     name: "Satellite Hybrid",
@@ -53,6 +53,7 @@ const LAYER_CONFIGS: Record<MapLayerType, { url: string; attribution: string; na
     attribution: "&copy; Esri, Maxar, Earthstar Geographics",
   },
 };
+
 
 const CITY_COORDINATES: Record<string, [number, number]> = {
   seattle: [47.6062, -122.3321],

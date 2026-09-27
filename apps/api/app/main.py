@@ -25,6 +25,7 @@ from app.api.routes.intake import router as intake_router
 from app.api.routes.voice import router as voice_router
 from app.api.routes.discovery_runs import router as discovery_runs_router
 from app.api.routes.conversations import router as conversations_router
+from app.api.routes.reconciliation import router as reconciliation_router
 
 # Initialize application logging
 setup_logging()
@@ -153,6 +154,7 @@ register_exception_handlers(app)
 
 # Mount Health Routes
 app.include_router(health_router)
+app.include_router(health_router, prefix=settings.API_V1_STR)
 
 # Mount Phase 1 Events Routes
 app.include_router(events_router, prefix=settings.API_V1_STR)
@@ -208,5 +210,10 @@ app.include_router(conversations_router)
 # Exotel Connect Voice AI & AgentStream WebSocket Layer
 app.include_router(voice_router, prefix="/api/v1")
 app.include_router(voice_router)
+
+# Mutation Idempotency & Offline Batch Reconciliation (B11)
+app.include_router(reconciliation_router, prefix=settings.API_V1_STR)
+app.include_router(reconciliation_router)
+
 
 

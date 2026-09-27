@@ -187,6 +187,19 @@ class PlanningService:
         total_estimated = sum(float(b.estimated_amount) for b in budget_items)
         critical_count = sum(1 for t in tasks if t.is_critical_path)
 
+        has_tasks = len(tasks) > 0
+        is_materialized = has_tasks or event.lifecycle_state in (
+            EventLifecycleState.PLANNED.value,
+            EventLifecycleState.LIVE.value,
+            EventLifecycleState.CONCLUDED.value,
+        )
+        if has_tasks:
+            planning_status = "MATERIALIZED"
+        elif event.lifecycle_state == EventLifecycleState.PLANNED.value:
+            planning_status = "EMPTY"
+        else:
+            planning_status = "PENDING_PLAN"
+
         summary = PlanSummary(
             total_tasks=len(tasks),
             total_dependencies=len(deps),
@@ -195,6 +208,8 @@ class PlanningService:
             total_estimated_budget=round(total_estimated, 2),
             critical_path_tasks=critical_count,
             lifecycle_state=event.lifecycle_state,
+            is_materialized=is_materialized,
+            planning_status=planning_status,
         )
 
         return EventPlan(
@@ -202,6 +217,8 @@ class PlanningService:
             event_name=event.name,
             event_type=event.event_type,
             lifecycle_state=event.lifecycle_state,
+            is_materialized=is_materialized,
+            planning_status=planning_status,
             summary=summary,
             tasks=[PlanTaskEntry.model_validate(t) for t in tasks],
             dependencies=[PlanDependencyEntry.model_validate(d) for d in deps],

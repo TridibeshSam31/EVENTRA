@@ -18,6 +18,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { createEvent } from "@/lib/api/events";
+import { setActiveEventId } from "@/stores/eventStore";
 
 export default function NewEventPage() {
   const router = useRouter();
@@ -64,6 +65,7 @@ export default function NewEventPage() {
       });
 
       if (created?.id) {
+        setActiveEventId(created.id);
         router.push(`/events/${created.id}`);
       } else {
         router.push("/events");
@@ -240,10 +242,13 @@ export default function NewEventPage() {
                     className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 px-3 text-xs text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400"
                   >
                     <option value="conference">Conference / Summit</option>
-                    <option value="festival">Festival / Cultural</option>
+                    <option value="hackathon">Hackathon / Tech Sprint</option>
+                    <option value="wedding">Wedding / Social Gala</option>
+                    <option value="college_fest">College Fest / Campus Event</option>
                     <option value="corporate">Corporate Offsite</option>
                     <option value="exhibition">Exhibition / Expo</option>
                   </select>
+
                 </div>
               </div>
             </div>

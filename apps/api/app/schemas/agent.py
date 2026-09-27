@@ -48,3 +48,27 @@ class AgentRunResponse(BaseModel):
     provider_operation: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     step_count: Optional[int] = None
+
+
+class AgentRunRecordResponse(BaseModel):
+    id: str
+    run_id: str
+    event_id: str
+    user_id: Optional[str] = None
+    trigger_message: Optional[str] = None
+    objective: Optional[str] = None
+    status: str
+    termination_status: Optional[str] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    tool_history: Optional[List[Dict[str, Any]]] = None
+    decision_trace: Optional[Dict[str, Any]] = None
+    final_response: Optional[str] = None
+    error: Optional[str] = None
+
+
+class AgentRunListResponse(BaseModel):
+    total: int
+    items: List[AgentRunRecordResponse]
+    limit: int
+    offset: int

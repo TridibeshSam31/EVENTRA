@@ -9,8 +9,11 @@ from app.core.exceptions import (
     BadRequestException,
     NotFoundException,
     ConflictException,
+    ForbiddenException,
 )
 from app.models.event import Event
+from app.models.event_member import EventMember
+from app.models.approval import Approval
 from app.models.task import Task
 from app.models.vendor import Vendor
 from app.models.vendor_assignment import VendorAssignment
@@ -171,6 +174,16 @@ class ActionService:
                 "Recovery mutations are blocked until the event is resumed."
             )
 
+        # Authorization Check (B2)
+        if executor_id not in ("anonymous_operator", "system", "SYSTEM"):
+            if event.owner_id != executor_id:
+                member = self.db.query(EventMember).filter(
+                    EventMember.event_id == event_id,
+                    EventMember.user_id == executor_id,
+                ).first()
+                if not member:
+                    raise ForbiddenException(f"User '{executor_id}' is not authorized to execute recovery on event '{event_id}'.")
+
         recovery = (
             self.db.query(Recovery)
             .filter(Recovery.id == recovery_option_id, Recovery.event_id == event_id)
@@ -178,6 +191,18 @@ class ActionService:
         )
         if not recovery:
             raise NotFoundException(f"Recovery option '{recovery_option_id}' not found for event '{event_id}'.")
+
+        # Approval Gate Enforcement (B2)
+        if recovery.requires_approval:
+            approval = self.db.query(Approval).filter(
+                Approval.recovery_option_id == recovery_option_id,
+                Approval.event_id == event_id,
+                Approval.status == "APPROVED",
+            ).first()
+            if not approval:
+                raise ForbiddenException(
+                    f"APPROVAL_REQUIRED: Recovery option '{recovery_option_id}' requires an approved approval request before execution."
+                )
 
         # Recovery options are derived from Task 9's authoritative plan version.
         # Reject a request that was reasoned against an older operational plan.

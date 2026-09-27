@@ -14,7 +14,7 @@ class ExtractedFacts(BaseModel):
 
 
 class MessageCreate(BaseModel):
-    direction: str = Field(..., description="'inbound' or 'outbound'")
+    direction: str = Field("outbound", description="'inbound' or 'outbound'")
     channel: str = Field("whatsapp", description="'whatsapp', 'call', or 'email'")
     sender: Optional[str] = None
     recipient: Optional[str] = None

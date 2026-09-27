@@ -714,3 +714,152 @@ class VendorTaskBindingService:
             self.db.rollback()
             logger.error("Failed to bind vendor '%s' to task '%s': %s", provider_id, task_id, str(exc), exc_info=True)
             raise exc
+
+    def reassign_task_provider(
+        self,
+        event_id: str,
+        task_id: str,
+        provider_id: str,
+        agreed_cost: Optional[float] = None,
+        notes: Optional[str] = None,
+        current_user_id: Optional[str] = None,
+        force_override: bool = False,
+    ) -> Dict[str, Any]:
+        """Atomically reassigns a provider to a task with category validation and audit (B4)."""
+        from datetime import datetime, timezone
+        from app.models.approval import Approval
+
+        # 1. Authorization check
+        is_auth, auth_err = self._verify_authorization(event_id, current_user_id)
+        if not is_auth:
+            raise ForbiddenException(auth_err or "Unauthorized: missing VENDOR_ASSIGN permission.")
+
+        # 2. Validate event and task
+        event = self.db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            raise NotFoundException(f"Event with id '{event_id}' not found.")
+
+        task = self.db.query(Task).filter(Task.id == task_id, Task.event_id == event_id).first()
+        if not task:
+            raise NotFoundException(f"Task with id '{task_id}' not found for event '{event_id}'.")
+
+        # 3. Validate provider
+        provider = self.db.query(Vendor).filter(Vendor.id == provider_id).first()
+        if not provider:
+            raise NotFoundException(f"Provider with id '{provider_id}' not found.")
+
+        # 4. Validate category compatibility
+        if task.required_provider_category and provider.category:
+            task_cat = task.required_provider_category.strip().lower()
+            prov_cat = provider.category.strip().lower()
+            if task_cat != prov_cat and task_cat != "general" and prov_cat != "general":
+                raise BadRequestException(
+                    f"CATEGORY_MISMATCH: Provider category '{provider.category}' does not match required task category '{task.required_provider_category}'."
+                )
+
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # 5. Idempotency Check
+        if task.provider_id == provider_id:
+            logger.info("Idempotent reassignment: provider %s already assigned to task %s", provider_id, task_id)
+            return {
+                "task_id": task.id,
+                "task_name": task.name,
+                "previous_provider_id": provider_id,
+                "new_provider_id": provider_id,
+                "status": "ALREADY_ASSIGNED",
+                "agreed_cost": agreed_cost,
+                "reassigned_at": now,
+                "audit_id": None,
+            }
+
+        # 6. Check pending approval gate
+        if not force_override:
+            pending_approval = self.db.query(Approval).filter(
+                Approval.event_id == event_id,
+                Approval.target_id == task_id,
+                Approval.action_type == "REASSIGN_VENDOR",
+                Approval.status == "PENDING",
+            ).first()
+            if pending_approval:
+                raise ForbiddenException("REASSIGNMENT_APPROVAL_REQUIRED: Task reassignment is held pending operational approval.")
+
+        # 7. Atomic Mutation
+        previous_provider_id = task.provider_id
+        task.provider_id = provider_id
+        task.status = TaskStatus.ASSIGNED.value
+
+        cost_val = Decimal(str(agreed_cost)) if agreed_cost is not None else None
+
+        # Clean previous assignment if not used by other tasks
+        if previous_provider_id:
+            other_tasks = self.db.query(Task).filter(
+                Task.event_id == event_id,
+                Task.provider_id == previous_provider_id,
+                Task.id != task_id,
+            ).count()
+            if other_tasks == 0:
+                prev_assignment = self.db.query(VendorAssignment).filter(
+                    VendorAssignment.event_id == event_id,
+                    VendorAssignment.vendor_id == previous_provider_id,
+                ).first()
+                if prev_assignment:
+                    prev_assignment.status = "REPLACED"
+
+        # Update or create new assignment
+        assignment = self.db.query(VendorAssignment).filter(
+            VendorAssignment.event_id == event_id,
+            VendorAssignment.vendor_id == provider_id,
+        ).first()
+
+        category = task.required_provider_category or provider.category or "GENERAL"
+        if assignment:
+            assignment.status = "CONFIRMED"
+            if cost_val is not None:
+                assignment.agreed_cost = cost_val
+        else:
+            assignment = VendorAssignment(
+                event_id=event_id,
+                vendor_id=provider_id,
+                category=category,
+                status="CONFIRMED",
+                agreed_cost=cost_val,
+            )
+            self.db.add(assignment)
+
+        # 8. Record StateTransition and AuditRecord
+        transition = StateTransition(
+            event_id=event_id,
+            entity_type="TASK_PROVIDER_REASSIGNMENT",
+            entity_id=task_id,
+            previous_state=previous_provider_id or "UNASSIGNED",
+            new_state=provider_id,
+            reason=notes or f"Reassigned task '{task.name}' to provider '{provider.name}'.",
+        )
+        self.db.add(transition)
+
+        audit = AuditRecord(
+            event_id=event_id,
+            actor_id=current_user_id,
+            actor_type="USER" if current_user_id not in ("system", "anonymous_operator") else "SYSTEM",
+            action="REASSIGN_PROVIDER",
+            action_type="VENDOR_ASSIGNMENT",
+            target_type="TASK",
+            target_id=task_id,
+            before_state={"provider_id": previous_provider_id},
+            after_state={"provider_id": provider_id, "agreed_cost": float(cost_val) if cost_val else None},
+            impact_level="MEDIUM",
+        )
+        self.db.add(audit)
+        self.db.commit()
+
+        return {
+            "task_id": task.id,
+            "task_name": task.name,
+            "previous_provider_id": previous_provider_id,
+            "new_provider_id": provider_id,
+            "status": "REASSIGNED",
+            "agreed_cost": float(cost_val) if cost_val else None,
+            "reassigned_at": now,
+            "audit_id": audit.id,
+        }

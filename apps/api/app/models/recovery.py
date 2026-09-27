@@ -44,6 +44,18 @@ class Recovery(Base):
     event = relationship("Event")
     incident = relationship("Incident")
 
+    @property
+    def requires_approval(self) -> bool:
+        if getattr(self, "_requires_approval", None) is not None:
+            return self._requires_approval
+        if self.status == "APPROVAL_REQUIRED":
+            return True
+        return bool((self.feasibility_result or {}).get("requires_approval", False))
+
+    @requires_approval.setter
+    def requires_approval(self, val: bool):
+        self._requires_approval = val
+
 
 # Alias for backward compatibility
 RecoveryOption = Recovery

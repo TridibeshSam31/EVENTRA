@@ -26,6 +26,7 @@ from app.schemas.live_state import (
     ProviderOperationalSummary,
 )
 from app.core.exceptions import NotFoundException, BadRequestException
+from app.services.live_broker import live_broker
 
 
 def utc_now():
@@ -140,6 +141,11 @@ class LiveStateService:
         elif new_status == TaskStatus.COMPLETED.value and not task.actual_end:
             task.actual_end = utc_now()
 
+        # Critical requirement: 'EXECUTED' is distinct from 'VERIFIED'
+        if new_status == TaskStatus.COMPLETED.value:
+            if getattr(task, "verification_status", None) not in ("VERIFIED", "VERIFYING"):
+                task.verification_status = "EXECUTED"
+
         self._record_transition(event_id, "TASK", task_id, old_status, new_status, "Manual status update")
 
         # When a task completes, check if downstream tasks become READY
@@ -148,6 +154,83 @@ class LiveStateService:
 
         self.db.commit()
         self.db.refresh(task)
+
+        # Broadcast live operational update to SSE subscribers
+        live_broker.publish_sync(
+            event_id,
+            {
+                "type": "TASK_UPDATED",
+                "task_id": task.id,
+                "status": task.status,
+                "verification_status": getattr(task, "verification_status", "UNKNOWN"),
+            },
+        )
+        return task
+
+    def update_task_verification(
+        self,
+        event_id: str,
+        task_id: str,
+        new_verification_status: str,
+        notes: Optional[str] = None,
+        actor_id: Optional[str] = None,
+    ) -> Task:
+        """Authoritatively update task verification state (B6).
+        
+        Enforces valid verification lifecycles:
+        PENDING, IN_PROGRESS, EXECUTED, VERIFYING, VERIFIED, FAILED, UNKNOWN.
+        """
+        valid_statuses = {
+            "PENDING",
+            "IN_PROGRESS",
+            "EXECUTED",
+            "VERIFYING",
+            "VERIFIED",
+            "FAILED",
+            "UNKNOWN",
+        }
+        if new_verification_status not in valid_statuses:
+            raise BadRequestException(
+                f"Invalid verification status: '{new_verification_status}'. "
+                f"Allowed: {sorted(valid_statuses)}"
+            )
+
+        task = self.db.query(Task).filter(
+            Task.id == task_id, Task.event_id == event_id
+        ).first()
+        if not task:
+            raise NotFoundException(f"Task with id '{task_id}' not found in event '{event_id}'")
+
+        old_verification = getattr(task, "verification_status", "PENDING")
+        task.verification_status = new_verification_status
+        if notes:
+            task.verification_notes = notes
+
+        if new_verification_status == "VERIFIED":
+            task.verified_at = utc_now()
+
+        self._record_transition(
+            event_id,
+            "TASK_VERIFICATION",
+            task_id,
+            old_verification,
+            new_verification_status,
+            notes or f"Verification state updated by {actor_id or 'operator'}",
+        )
+
+        self.db.commit()
+        self.db.refresh(task)
+
+        # Broadcast live verification change
+        live_broker.publish_sync(
+            event_id,
+            {
+                "type": "TASK_VERIFIED",
+                "task_id": task.id,
+                "verification_status": task.verification_status,
+                "notes": notes,
+            },
+        )
         return task
 
     def get_live_state(self, event_id: str) -> EventLiveState:

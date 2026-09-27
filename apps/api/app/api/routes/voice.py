@@ -77,6 +77,15 @@ def initiate_voice_call(payload: InitiateCallRequest):
             recipient_phone=payload.recipient_phone,
             task_id=payload.task_id or "task-briefing",
         )
+    elif settings.TWILIO_ENABLED:
+        from app.integrations.communication.twilio import TwilioVoiceAdapter
+        adapter = TwilioVoiceAdapter()
+        result = adapter.make_call(
+            event_id=payload.event_id or "default-event",
+            provider_id=payload.provider_id or payload.vendor_name or "vendor-1",
+            recipient_phone=payload.recipient_phone,
+            task_id=payload.task_id or "task-briefing",
+        )
     else:
         # Fall back to Exotel adapter directly if communication provider is OpenWA/mock
         from app.integrations.communication.exotel import ExotelVoiceAdapter

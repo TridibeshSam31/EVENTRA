@@ -6,6 +6,8 @@ import { ChevronDown, Calendar, Plus } from "lucide-react";
 import { listEvents } from "../../lib/api/events";
 import type { EventResponse } from "../../types/api";
 
+import { useEventStore, getActiveEventId } from "@/stores/eventStore";
+
 const DEMO_EVENTS_FALLBACK: Array<{ id: string; name: string; event_type: string }> = [
   { id: "conference_demo", name: "Tech Launch Keynote 2026", event_type: "CONFERENCE" },
   { id: "wedding_demo", name: "Grand Horizon Wedding", event_type: "WEDDING" },
@@ -15,10 +17,23 @@ const DEMO_EVENTS_FALLBACK: Array<{ id: string; name: string; event_type: string
 export function EventSwitcher() {
   const router = useRouter();
   const params = useParams();
-  const currentEventId = (params?.eventId as string) || "conference_demo";
+  const { activeEventId, setActiveEventId } = useEventStore();
+  const [currentEventId, setCurrentEventId] = useState<string>(activeEventId || "conference_demo");
 
   const [events, setEvents] = useState<Array<{ id: string; name: string; event_type?: string }>>(DEMO_EVENTS_FALLBACK);
   const [isOpen, setIsOpen] = useState(false);
+
+  useEffect(() => {
+    if (params?.eventId && typeof params.eventId === "string") {
+      setActiveEventId(params.eventId);
+      setCurrentEventId(params.eventId);
+    } else {
+      const stored = getActiveEventId();
+      if (stored) {
+        setCurrentEventId(stored);
+      }
+    }
+  }, [params?.eventId, activeEventId, setActiveEventId]);
 
   useEffect(() => {
     async function loadEvents() {
@@ -45,8 +60,11 @@ export function EventSwitcher() {
 
   const handleSelect = (eventId: string) => {
     setIsOpen(false);
+    setActiveEventId(eventId);
+    setCurrentEventId(eventId);
     router.push(`/events/${eventId}/live`);
   };
+
 
   return (
     <div className="relative">

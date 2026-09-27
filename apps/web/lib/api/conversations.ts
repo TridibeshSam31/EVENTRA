@@ -8,10 +8,17 @@ export async function getConversations(eventId: string): Promise<ConversationLis
 export async function getMessages(
   eventId: string,
   conversationId: string
-): Promise<{ items: Message[]; total: number }> {
-  return apiRequest<{ items: Message[]; total: number }>(
+): Promise<Message[]> {
+  const res = await apiRequest<any>(
     `/events/${eventId}/conversations/${conversationId}/messages`
   );
+  if (Array.isArray(res)) {
+    return res;
+  }
+  if (res && Array.isArray(res.items)) {
+    return res.items;
+  }
+  return [];
 }
 
 export async function sendMessage(

@@ -42,7 +42,9 @@ def compute_schedule(
 
     tasks = db.query(Task).filter(Task.event_id == event_id).all()
     if not tasks:
-        raise BadRequestException("No tasks found for this event — generate a plan first.")
+        raise BadRequestException(
+            "PLAN_NOT_MATERIALIZED: No tasks have been materialized for this event. Execute POST /events/{event_id}/plan to generate the operational plan first."
+        )
 
     deps = db.query(TaskDependency).filter(TaskDependency.event_id == event_id).all()
 

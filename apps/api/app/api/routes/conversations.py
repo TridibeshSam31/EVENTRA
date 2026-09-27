@@ -109,13 +109,31 @@ def send_conversation_message(
             sender=payload.sender or conv.vendor_name,
         )
     else:
-        msg = service.record_outbound_message(
+        from app.services.provider_communication_service import ProviderCommunicationService
+        comm_service = ProviderCommunicationService(db)
+        send_result = comm_service.send_message(
             event_id=event_id,
-            vendor_id=conv.vendor_id,
-            raw_text=payload.raw_text,
-            channel=payload.channel or conv.channel,
-            recipient=conv.recipient_contact,
-            sender=payload.sender or "EVENTRA Operator",
+            provider_id=conv.vendor_id or "provider",
+            message=payload.raw_text,
+            recipient_contact=conv.recipient_contact,
+            actor_id="operator",
+            actor_type="OPERATOR",
         )
+        msg = (
+            db.query(Message)
+            .filter(Message.conversation_id == conv.id)
+            .order_by(Message.timestamp.desc())
+            .first()
+        )
+        if not msg or msg.raw_text != payload.raw_text:
+            msg = service.record_outbound_message(
+                event_id=event_id,
+                vendor_id=conv.vendor_id,
+                raw_text=payload.raw_text,
+                channel=payload.channel or conv.channel,
+                recipient=conv.recipient_contact,
+                sender=payload.sender or "EVENTRA Operator",
+                status="sent" if send_result.success else "failed",
+            )
 
     return MessageResponse.model_validate(msg)

@@ -3,11 +3,14 @@
 Coordinates outbound and inbound communications with vendors/providers.
 Isolates third-party channels (mock, WhatsApp, SMS) from core business logic.
 """
+import logging
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.integrations.base import IntegrationResult
 from app.observability.audit import AuditRecorder
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderCommunicationService:
@@ -36,6 +39,28 @@ class ProviderCommunicationService:
             recipient_contact=recipient_contact,
         )
 
+        channel_val = "whatsapp"
+        if result.data and isinstance(result.data, dict):
+            channel_val = (result.data.get("channel") or "whatsapp").lower()
+
+        # Persist conversation thread and message to database
+        if self.db:
+            try:
+                from app.services.conversation_service import ConversationService
+                conv_service = ConversationService(self.db)
+                conv_service.record_outbound_message(
+                    event_id=event_id,
+                    vendor_id=provider_id,
+                    raw_text=message,
+                    channel=channel_val,
+                    recipient=recipient_contact,
+                    sender="EVENTRA Autonomous Agent" if (actor_type or "").upper() == "AGENT" else "EVENTRA Operations",
+                    status="sent" if result.success else "failed",
+                )
+            except Exception as conv_err:
+                self.db.rollback()
+                logger.warning(f"Could not record outbound message in ConversationService: {conv_err}")
+
         if self._audit:
             self._audit.record(
                 event_id=event_id,
@@ -49,7 +74,7 @@ class ProviderCommunicationService:
                     "provider_id": provider_id,
                     "recipient_contact": recipient_contact,
                     "success": result.success,
-                    "channel": result.data.get("channel") if result.data else "UNKNOWN",
+                    "channel": channel_val,
                 },
             )
 
@@ -70,6 +95,25 @@ class ProviderCommunicationService:
     ) -> IntegrationResult[Dict[str, Any]]:
         """Normalizes and processes inbound webhook message from a provider."""
         result = self._provider.receive_inbound(payload=payload, signature=signature)
+
+        if self.db and result.success and result.data:
+            try:
+                from app.services.conversation_service import ConversationService
+                conv_service = ConversationService(self.db)
+                ev_id = result.data.get("event_id") or "UNKNOWN"
+                prov_id = result.data.get("provider_id")
+                raw_txt = result.data.get("message") or ""
+                sender_num = result.data.get("sender") or ""
+                chan = (result.data.get("channel") or "whatsapp").lower()
+                conv_service.record_inbound_message(
+                    event_id=ev_id,
+                    vendor_id=prov_id if prov_id != "UNKNOWN" else None,
+                    raw_text=raw_txt,
+                    channel=chan,
+                    sender=sender_num,
+                )
+            except Exception as in_err:
+                logger.warning(f"Could not record inbound message in ConversationService: {in_err}")
 
         if self._audit and result.success and result.data:
             event_id = result.data.get("event_id") or "SYSTEM"

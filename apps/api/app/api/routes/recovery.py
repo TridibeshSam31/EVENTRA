@@ -99,3 +99,147 @@ def get_incident_recovery_trace(
     service = DecisionTraceService(db)
     trace = service.get_trace_by_incident_id(event_id=event_id, incident_id=incident_id)
     return trace or {}
+
+
+@router.get("/{event_id}/incidents/{incident_id}/recovery/verification", status_code=status.HTTP_200_OK)
+def get_incident_recovery_verification(
+    event_id: str,
+    incident_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Authoritative endpoint to query current recovery execution and verification lifecycle state (B2)."""
+    from app.models.recovery import Recovery
+    from app.models.action import ActionExecution
+    from app.models.verification import VerificationResult
+    from app.core.exceptions import NotFoundException
+
+    # Find recovery options for this incident
+    options = db.query(Recovery).filter(
+        Recovery.event_id == event_id,
+        Recovery.incident_id == incident_id,
+    ).all()
+    if not options:
+        raise NotFoundException(f"No recovery options found for incident '{incident_id}'.")
+
+    option_ids = [opt.id for opt in options]
+
+    # Find latest verification result for any of these options
+    latest_verification = (
+        db.query(VerificationResult)
+        .filter(
+            VerificationResult.event_id == event_id,
+            VerificationResult.recovery_option_id.in_(option_ids),
+        )
+        .order_by(VerificationResult.verified_at.desc())
+        .first()
+    )
+
+    # Find latest action execution
+    latest_execution = (
+        db.query(ActionExecution)
+        .filter(
+            ActionExecution.event_id == event_id,
+            ActionExecution.recovery_option_id.in_(option_ids),
+        )
+        .order_by(ActionExecution.executed_at.desc())
+        .first()
+    )
+
+    if latest_verification:
+        is_verified = latest_verification.status == "VERIFIED"
+        lifecycle_state = "VERIFIED" if is_verified else ("VERIFICATION_FAILED" if latest_verification.status == "FAILED" else latest_verification.status)
+        return {
+            "incident_id": incident_id,
+            "has_execution": True,
+            "execution_id": latest_verification.action_execution_id,
+            "execution_status": latest_execution.status if latest_execution else "UNKNOWN",
+            "verification_id": latest_verification.id,
+            "verification_status": latest_verification.status,
+            "is_verified": is_verified,
+            "lifecycle_state": lifecycle_state,
+            "actual_outcome": latest_verification.actual_outcome,
+            "failure_reasons": latest_verification.failure_reasons or [],
+            "warnings": latest_verification.warnings or [],
+            "verified_at": latest_verification.verified_at.isoformat() if latest_verification.verified_at else None,
+        }
+
+    if latest_execution:
+        return {
+            "incident_id": incident_id,
+            "has_execution": True,
+            "execution_id": latest_execution.id,
+            "execution_status": latest_execution.status,
+            "verification_id": None,
+            "verification_status": "PENDING",
+            "is_verified": False,
+            "lifecycle_state": "EXECUTED",
+            "failure_reasons": [],
+            "warnings": ["Verification pending or in progress"],
+            "verified_at": None,
+        }
+
+    has_approval_required = any(opt.requires_approval for opt in options)
+    return {
+        "incident_id": incident_id,
+        "has_execution": False,
+        "execution_id": None,
+        "execution_status": None,
+        "verification_id": None,
+        "verification_status": "UNVERIFIED",
+        "is_verified": False,
+        "lifecycle_state": "APPROVAL_REQUIRED" if has_approval_required else "PROPOSED",
+        "failure_reasons": [],
+        "warnings": [],
+        "verified_at": None,
+    }
+
+
+@router.post("/{event_id}/incidents/{incident_id}/recovery/verify", status_code=status.HTTP_200_OK)
+def trigger_incident_recovery_verification(
+    event_id: str,
+    incident_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Explicitly executes authoritative post-action verification on an executed recovery action (B2)."""
+    from app.models.recovery import Recovery
+    from app.models.action import ActionExecution
+    from app.services.verification_service import VerificationService
+    from app.core.exceptions import NotFoundException, BadRequestException
+
+    options = db.query(Recovery).filter(
+        Recovery.event_id == event_id,
+        Recovery.incident_id == incident_id,
+    ).all()
+    if not options:
+        raise NotFoundException(f"No recovery options found for incident '{incident_id}'.")
+
+    option_ids = [opt.id for opt in options]
+
+    latest_execution = (
+        db.query(ActionExecution)
+        .filter(
+            ActionExecution.event_id == event_id,
+            ActionExecution.recovery_option_id.in_(option_ids),
+        )
+        .order_by(ActionExecution.executed_at.desc())
+        .first()
+    )
+    if not latest_execution:
+        raise BadRequestException(f"No executed recovery action found to verify for incident '{incident_id}'.")
+
+    ver_service = VerificationService(db)
+    verification = ver_service.verify_action(
+        event_id=event_id,
+        action_execution_id=latest_execution.id,
+        current_user_id=current_user_id,
+    )
+    return {
+        "execution_id": latest_execution.id,
+        "verification_id": verification.id,
+        "verification_status": verification.status,
+        "is_verified": verification.status == "VERIFIED",
+        "lifecycle_state": "VERIFIED" if verification.status == "VERIFIED" else "VERIFICATION_FAILED",
+        "verified_at": verification.verified_at.isoformat() if verification.verified_at else None,
+    }

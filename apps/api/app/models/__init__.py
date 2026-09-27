@@ -55,8 +55,12 @@ from app.models.constraint import Constraint
 from app.models.discovery_run import DiscoveryRun, DiscoveryRunEvent
 from app.models.communication import Conversation, Message
 from app.models.activity_log import EventActivityLog
+from app.models.agent_run import AgentRun
+from app.models.idempotency import IdempotencyRecord
 
 __all__ = [
+    "AgentRun",
+    "IdempotencyRecord",
     "EventType",
     "EventState",
     "EventLifecycleState",

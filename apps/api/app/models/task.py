@@ -31,6 +31,9 @@ class Task(Base):
     actual_start = Column(DateTime, nullable=True)
     actual_end = Column(DateTime, nullable=True)
     provider_id = Column(String(36), ForeignKey("vendors.id", ondelete="SET NULL"), nullable=True, index=True)
+    verification_status = Column(String(50), default="PENDING", nullable=False, index=True)
+    verified_at = Column(DateTime, nullable=True)
+    verification_notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=utc_now, nullable=False)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)
 

@@ -8,13 +8,41 @@ Adheres strictly to the architectural constraints:
 5. Authoritative verification after mutation.
 6. Execution tracing (operational facts, NOT chain-of-thought).
 """
+import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from sqlalchemy.orm import Session
 
 from app.agent.state import AgentState
 from app.agent.graph import EventOperationsAgentGraph, MAX_AGENT_STEPS
 from app.agent.provider import LLMProvider, get_default_llm_provider
+from app.models.agent_run import AgentRun
+
+logger = logging.getLogger(__name__)
+
+
+def utc_now():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _sanitize_agent_payload(data: Any) -> Any:
+    """Removes sensitive authentication tokens and ensures JSON serializability."""
+    if hasattr(data, "_mock_name") or "mock" in type(data).__name__.lower():
+        return str(data)
+    if isinstance(data, (str, int, float, bool)) or data is None:
+        return data
+    if isinstance(data, dict):
+        sanitized = {}
+        for k, v in data.items():
+            if any(sec in k.lower() for sec in ("password", "token", "secret", "auth", "credential", "private_key", "chain_of_thought")):
+                sanitized[k] = "[REDACTED]"
+            else:
+                sanitized[k] = _sanitize_agent_payload(v)
+        return sanitized
+    elif isinstance(data, (list, tuple, set)):
+        return [_sanitize_agent_payload(item) for item in data]
+    return str(data)
 
 
 class EventOperationsAgent:
@@ -95,14 +123,44 @@ class EventOperationsAgent:
             "error": None,
         }
 
+        start_time = utc_now()
         # Invoke LangGraph StateGraph with DB and LLM injected through configuration
         final_state: AgentState = self.graph.invoke(
             initial_state,
             config={"configurable": {"db": self.db, "llm_provider": self.llm_provider}},
         )
 
+        completed_time = utc_now()
+        resolved_run_id = final_state.get("run_id", run_id)
+
+        # Persist AgentRun record to DB (B10)
+        try:
+            agent_run = AgentRun(
+                run_id=resolved_run_id,
+                event_id=event_id,
+                user_id=user_id,
+                trigger_message=message,
+                objective=objective,
+                status=final_state.get("status", "COMPLETED"),
+                termination_status=final_state.get("termination_status"),
+                started_at=start_time,
+                completed_at=completed_time,
+                tool_history=_sanitize_agent_payload(final_state.get("tool_history", [])),
+                decision_trace=_sanitize_agent_payload(final_state.get("decision_trace")),
+                final_response=final_state.get("final_response"),
+                error=str(final_state.get("error")) if final_state.get("error") else None,
+            )
+            self.db.add(agent_run)
+            self.db.commit()
+        except Exception as exc:
+            logger.warning("Failed to persist AgentRun %s: %s", resolved_run_id, exc)
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
         return {
-            "run_id": final_state.get("run_id", run_id),
+            "run_id": resolved_run_id,
             "event_id": final_state.get("event_id", event_id),
             "objective": final_state.get("objective"),
             "status": final_state.get("status"),

@@ -307,6 +307,64 @@ class ImpactAnalyzer:
                 })
 
         # 9. Severity
+        # Build canonical authoritative dependency blast radius (B1)
+        all_authoritative_dependencies = list(affected_deps)
+        incident_title = incident.get("title") if isinstance(incident, dict) else getattr(incident, "title", incident_id)
+
+        # 1. Incident -> Direct Task Causation Edges
+        for dt in direct_tasks_data:
+            dt_id = dt.get("id")
+            dt_name = dt.get("name", dt_id)
+            if dt_id:
+                all_authoritative_dependencies.insert(0, {
+                    "edge_type": "INCIDENT_TO_TASK",
+                    "predecessor_id": incident_id,
+                    "successor_id": dt_id,
+                    "predecessor_task_id": incident_id,
+                    "successor_task_id": dt_id,
+                    "predecessor_name": incident_title or "Incident Root",
+                    "successor_name": dt_name,
+                    "dependency_type": "CAUSATION",
+                    "lag_minutes": 0,
+                })
+
+        # 2. Provider -> Task Assignment Edges for affected tasks
+        for tid in sorted(all_affected_ids):
+            t = tasks_by_id.get(tid)
+            if t:
+                prov_id = t.get("provider_id") if isinstance(t, dict) else getattr(t, "provider_id", None)
+                if prov_id:
+                    t_name = t.get("name") if isinstance(t, dict) else getattr(t, "name", tid)
+                    all_authoritative_dependencies.append({
+                        "edge_type": "PROVIDER_TO_TASK",
+                        "predecessor_id": prov_id,
+                        "successor_id": tid,
+                        "predecessor_task_id": prov_id,
+                        "successor_task_id": tid,
+                        "predecessor_name": f"Provider ({prov_id[:8]})",
+                        "successor_name": t_name,
+                        "dependency_type": "ASSIGNMENT",
+                        "lag_minutes": 0,
+                    })
+
+        # 3. Resource -> Task Allocation Edges for affected resources
+        for r in affected_resources:
+            r_tid = r.get("allocated_task_id")
+            if r_tid and r_tid in all_affected_ids:
+                t = tasks_by_id.get(r_tid)
+                t_name = t.get("name") if isinstance(t, dict) else getattr(t, "name", r_tid)
+                all_authoritative_dependencies.append({
+                    "edge_type": "RESOURCE_TO_TASK",
+                    "predecessor_id": r.get("id"),
+                    "successor_id": r_tid,
+                    "predecessor_task_id": r.get("id"),
+                    "successor_task_id": r_tid,
+                    "predecessor_name": r.get("name") or "Resource",
+                    "successor_name": t_name,
+                    "dependency_type": "ALLOCATION",
+                    "lag_minutes": 0,
+                })
+
         calculated_severity = self._severity_calculator.calculate_severity(
             incident_type=incident_type,
             direct_tasks=direct_tasks_data,
@@ -322,7 +380,7 @@ class ImpactAnalyzer:
             "directly_affected_tasks": direct_tasks_data,
             "indirectly_affected_tasks": indirect_tasks_data,
             "blocked_tasks": blocked_tasks_data,
-            "affected_dependencies": affected_deps,
+            "affected_dependencies": all_authoritative_dependencies,
             "dependency_depth": max_depth,
             "affected_resources": affected_resources,
             "affected_providers": affected_providers,

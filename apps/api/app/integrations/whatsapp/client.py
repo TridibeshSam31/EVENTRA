@@ -37,6 +37,8 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
         self.verify_token = verify_token or settings.WHATSAPP_WEBHOOK_VERIFY_TOKEN
         self.phone_number_id = phone_number_id or settings.WHATSAPP_PHONE_NUMBER_ID
         self._fallback = MockCommunicationProvider()
+        self._cached_health: Optional[Dict[str, Any]] = None
+        self._last_health_check: float = 0.0
 
     def _normalize_chat_id(self, recipient_contact: Optional[str]) -> str:
         """Converts recipient contact into OpenWA WhatsApp chatId format (e.g. 919876543210@c.us)."""
@@ -100,9 +102,15 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
                     except Exception:
                         data = resp.text
 
-                    # Validate that OpenWA did not return an explicit failure boolean
-                    if data is False or data == "false" or (isinstance(data, dict) and data.get("error")):
-                        err_text = data.get("error") if isinstance(data, dict) else "OpenWA rejected dispatch (recipient unreachable or session not ready)."
+                    # Validate that OpenWA did not return an explicit failure or error message
+                    has_error = (
+                        data is False
+                        or data == "false"
+                        or (isinstance(data, dict) and bool(data.get("error")))
+                        or (isinstance(data, str) and ("ERROR:" in data or "Error:" in data or "error" in data.lower()[:20]))
+                    )
+                    if has_error:
+                        err_text = data.get("error") if isinstance(data, dict) else str(data)
                         res = self._fallback.send_message(event_id, provider_id, message, recipient_contact)
                         res.source = IntegrationSource.REAL
                         res.success = False
@@ -238,21 +246,36 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
         """Performs a non-leaking health check against the OpenWA gateway."""
         if not settings.OPENWA_ENABLED:
             return {"configured": False, "enabled": False, "status": "DISABLED"}
-        headers = {}
+        
+        now = time.time()
+        if self._cached_health is not None and (now - self._last_health_check) < 10.0:
+            return self._cached_health
+
+        headers = {"Content-Type": "application/json", "Connection": "close"}
         if self.api_key:
             headers["api_key"] = self.api_key
             headers["X-API-Key"] = self.api_key
         try:
-            with httpx.Client(timeout=3) as client:
-                resp = client.get(self.base_url, headers=headers)
-                return {
-                    "configured": True,
-                    "enabled": True,
-                    "status": "HEALTHY" if resp.status_code in (200, 201) else f"HTTP_{resp.status_code}",
-                    "base_url": self.base_url,
-                }
+            with httpx.Client(timeout=2.0) as client:
+                resp = client.post(f"{self.base_url}/getHostNumber", headers=headers, json={})
+                if resp.status_code == 200 and resp.json().get("success"):
+                    host_num = resp.json().get("response", "")
+                    health_res = {
+                        "configured": True,
+                        "enabled": True,
+                        "status": "HEALTHY",
+                        "base_url": self.base_url,
+                        "account_suffix": host_num[-4:] if host_num else None,
+                    }
+                else:
+                    health_res = {
+                        "configured": True,
+                        "enabled": True,
+                        "status": "HEALTHY" if resp.status_code in (200, 302) else f"HTTP_{resp.status_code}",
+                        "base_url": self.base_url,
+                    }
         except Exception as err:
-            return {
+            health_res = {
                 "configured": True,
                 "enabled": True,
                 "status": "UNREACHABLE",
@@ -260,17 +283,34 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
                 "error": str(err),
             }
 
+        self._cached_health = health_res
+        self._last_health_check = now
+        return health_res
+
     def get_session_status(self) -> Dict[str, Any]:
         """Queries session status from OpenWA for the configured session_id."""
         if not self.session_id:
             return {"session_id": None, "status": "NOT_CONFIGURED", "connected": False}
-        headers = {}
+        headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["api_key"] = self.api_key
             headers["X-API-Key"] = self.api_key
         try:
-            with httpx.Client(timeout=3) as client:
-                # 1. Check if QR code is actively awaiting scan
+            with httpx.Client(timeout=5) as client:
+                # 1. Check if host number is active
+                resp = client.post(f"{self.base_url}/getHostNumber", headers=headers, json={})
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data.get("success") and data.get("response"):
+                        host_num = data.get("response", "")
+                        return {
+                            "session_id": self.session_id,
+                            "status": "ACTIVE",
+                            "connected": True,
+                            "account_suffix": host_num[-4:] if host_num else None,
+                        }
+
+                # 2. Check if QR code is actively awaiting scan
                 qr_resp = client.get(f"{self.base_url}/qr", headers=headers)
                 if qr_resp.status_code == 200 and len(qr_resp.content) > 100:
                     return {
@@ -278,15 +318,6 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
                         "status": "QR_READY",
                         "connected": False,
                         "qr_available": True,
-                    }
-                # 2. Check session endpoint if already paired
-                resp = client.get(f"{self.base_url}/sessions/{self.session_id}", headers=headers)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    return {
-                        "session_id": self.session_id,
-                        "status": data.get("status") or "ACTIVE",
-                        "connected": data.get("connected", True),
                     }
                 return {"session_id": self.session_id, "status": f"HTTP_{resp.status_code}", "connected": False}
         except Exception as err:
