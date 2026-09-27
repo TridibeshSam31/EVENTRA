@@ -150,6 +150,9 @@ class RankedVenueItem(BaseModel):
     pros: List[str] = Field(default_factory=list)
     cons: List[str] = Field(default_factory=list)
     capacity_status: str = "FIT"
+    qualification: str = "qualified"
+    qualification_reason: Optional[str] = None
+    tier: str = "top_matches"
 
 
 class VenueRecommendationResponse(BaseModel):

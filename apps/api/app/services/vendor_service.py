@@ -35,6 +35,8 @@ from app.services.provider_classifier import ProviderClassifier
 from app.services.deduplication import ProviderDeduplicator
 from app.integrations.google_maps_scraper.models import NormalizedProvider
 from app.integrations.google_maps_scraper.queries import build_discovery_query
+from app.integrations.google_maps_scraper.mapper import ProviderNormalizer
+from app.services.discovery_qualification_engine import QualificationEngine
 
 
 def haversine_distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -425,6 +427,24 @@ class VendorService:
                 continue
 
             vendor, is_new = deduplicator.upsert_provider(norm_p, commit=False)
+
+            # Check institution / non-commercial disqualification
+            is_non_comm, non_comm_reason = QualificationEngine.check_institution_disqualification(norm_p)
+            if not is_non_comm:
+                is_non_comm = ProviderNormalizer.is_non_commercial_entity(norm_p.name, norm_p.raw_category, norm_p.category)
+                if is_non_comm:
+                    non_comm_reason = "Institution/PSU — excluded by default"
+
+            if is_non_comm:
+                vendor.qualification = "rejected"
+                vendor.qualification_reason = non_comm_reason or "Institution/PSU — excluded by default"
+                vendor.reasons = [non_comm_reason or "Institution/PSU — excluded by default"]
+                vendor.score = 25.0
+            else:
+                vendor.qualification = "qualified"
+                vendor.qualification_reason = None
+                vendor.reasons = [f"Verified {norm_p.category} provider"]
+                vendor.score = round(norm_p.rating * 20.0, 1) if norm_p.rating else 85.0
 
             # Set assignment status
             vendor.is_assigned = (vendor.id in assigned_vendor_ids)

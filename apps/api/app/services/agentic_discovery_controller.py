@@ -58,6 +58,7 @@ class TieredShortlistResult(BaseModel):
     top_matches: List[RankedCandidate] = Field(default_factory=list)
     other_available_options: List[RankedCandidate] = Field(default_factory=list)
     backup_waitlist: List[RankedCandidate] = Field(default_factory=list)
+    rejected_candidates: List[RankedCandidate] = Field(default_factory=list)
     funnel_stats: FunnelTransparencyStats = Field(default_factory=FunnelTransparencyStats)
     target_count_met: bool = False
     diagnosis_message: Optional[str] = None
@@ -165,6 +166,7 @@ class AgenticDiscoveryController:
         raw_candidates_pool: List[NormalizedProvider] = []
         qualified_pool: List[RankedCandidate] = []
         confirmed_pool: List[RankedCandidate] = []
+        rejected_pool: List[RankedCandidate] = []
 
         total_scraped_count = 0
         total_deduped_count = 0
@@ -283,6 +285,8 @@ class AgenticDiscoveryController:
                 if r.qualification in ("qualified", "uncertain"):
                     deduplicator.upsert_provider(r.candidate, commit=True)
                     qualified_pool.append(r)
+                else:
+                    rejected_pool.append(r)
 
             _log_event(
                 "qualification_passed",
@@ -408,6 +412,7 @@ class AgenticDiscoveryController:
             top_matches=top_matches,
             other_available_options=other_available,
             backup_waitlist=backup_waitlist,
+            rejected_candidates=rejected_pool,
             funnel_stats=funnel_stats,
             target_count_met=target_met,
             diagnosis_message=diag_msg,

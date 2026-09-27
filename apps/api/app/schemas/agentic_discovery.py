@@ -54,6 +54,7 @@ class AgenticDiscoveryResponse(BaseModel):
     top_matches: List[CandidateCardResponse] = Field(default_factory=list)
     other_available_options: List[CandidateCardResponse] = Field(default_factory=list)
     backup_waitlist: List[CandidateCardResponse] = Field(default_factory=list)
+    rejected_candidates: List[CandidateCardResponse] = Field(default_factory=list)
     funnel_stats: FunnelTransparencyStats
     target_count_met: bool
     diagnosis_message: Optional[str] = None

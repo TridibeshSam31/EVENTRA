@@ -87,6 +87,7 @@ def run_agentic_provider_discovery(
         top_matches=[map_ranked_candidate_to_card(c) for c in result.top_matches],
         other_available_options=[map_ranked_candidate_to_card(c) for c in result.other_available_options],
         backup_waitlist=[map_ranked_candidate_to_card(c) for c in result.backup_waitlist],
+        rejected_candidates=[map_ranked_candidate_to_card(c) for c in result.rejected_candidates],
         funnel_stats=result.funnel_stats,
         target_count_met=result.target_count_met,
         diagnosis_message=result.diagnosis_message,

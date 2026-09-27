@@ -488,6 +488,11 @@ class VenueService:
             if v.address:
                 match_reasons.append(f"Location: {v.address}")
 
+            is_rejected = cap_status == "EXCEEDED" or overall_score < 60
+            qual_status = "rejected" if is_rejected else "qualified"
+            qual_reason = "; ".join(cons) if is_rejected and cons else None
+            tier = "rejected" if is_rejected else ("top_matches" if overall_score >= 80 else "other_available_options")
+
             scored_venues.append({
                 "id": v.id,
                 "name": v.name,
@@ -504,6 +509,9 @@ class VenueService:
                 "pros": pros,
                 "cons": cons,
                 "capacity_status": cap_status,
+                "qualification": qual_status,
+                "qualification_reason": qual_reason,
+                "tier": tier,
             })
 
         # Sort descending by suitability score

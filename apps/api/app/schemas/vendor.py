@@ -58,6 +58,10 @@ class VendorResponse(VendorBase):
     updated_at: datetime
     distance_km: Optional[float] = None
     is_assigned: Optional[bool] = None
+    qualification: Optional[str] = "qualified"
+    qualification_reason: Optional[str] = None
+    score: Optional[float] = None
+    reasons: Optional[List[str]] = None
 
     model_config = ConfigDict(from_attributes=True)
 
