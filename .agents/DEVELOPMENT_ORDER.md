@@ -120,3 +120,74 @@ The implementation of EVENTRA follows a strict 20-phase dependency-ordered seque
 ### Phase 20: Simulation / Demo Hardening
 - Realistic scenario injectors: Vendor No-Show, Venue Issue, Supply Shortage.
 - Verification that inputs flow through the authentic pipeline without mocked shortcuts.
+
+
+---
+
+# Frontend V2 Implementation Order
+
+The canonical backend/domain development order above remains authoritative.
+
+Frontend V2 is a presentation-layer implementation sequence built on top of the existing backend capabilities.
+
+Frontend V2 must not replace or reorder the backend dependency architecture.
+
+## Frontend V2 Sequence
+
+1. Frontend V2 Design System
+2. EventShell + EventHeader + Lifecycle
+3. Overview
+4. AgentPanel + AgentActivityStream + ProvenanceBadge
+5. Discovery Command Architecture
+6. Venue Discovery
+7. Vendor Discovery
+8. Shortlist → Engagement
+9. Conversation UI
+10. Call + WhatsApp Execution Status
+11. Response Extraction + Quote Comparison
+12. Provider Signal → Incident
+13. Impact Visualization
+14. Recovery Workflow
+15. Approval / Authorization UX
+16. Event Blueprint
+17. Timeline + Budget
+18. Live Operations Migration
+19. Activity
+20. Audit
+21. Responsive / PWA
+22. Fake / Demo Data Audit
+23. API Contract Audit
+24. Full E2E Validation
+25. Final Cleanup
+
+## Frontend V2 Gates
+
+### Gate 1
+
+Before Discovery implementation, these must work:
+
+- Design System
+- EventShell
+- Overview
+- Agent primitives
+
+### Gate 2
+
+Before Engagement implementation, these must work using real backend state:
+
+- Discovery architecture
+- Venue Discovery
+- Vendor Discovery
+
+### Gate 3
+
+Before secondary pages receive final polish, this core loop must work:
+
+DISCOVERY
+→ SHORTLIST
+→ ENGAGEMENT
+→ RESPONSE
+→ VALIDATION
+→ INCIDENT
+→ IMPACT
+→ RECOVERY

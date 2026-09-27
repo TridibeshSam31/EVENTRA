@@ -295,6 +295,67 @@ export async function getBindingFeasibility(
   );
 }
 
+export interface AgenticDiscoveryParams {
+  category: string;
+  location: string;
+  event_type?: string;
+  guest_count?: number;
+  max_budget?: number;
+  base_radius_km?: number;
+  required_amenities?: string[];
+  target_count?: number;
+  max_iterations?: number;
+  simulate_outreach?: boolean;
+}
+
+export interface CandidateCardResponse {
+  id: string;
+  name: string;
+  category: string;
+  city: string;
+  address?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  phone?: string | null;
+  email?: string | null;
+  website?: string | null;
+  maps_url?: string | null;
+  rating?: number | null;
+  review_count?: number | null;
+  base_cost?: number | null;
+  capacity?: number | null;
+  qualification: "qualified" | "rejected" | "uncertain" | string;
+  availability: string;
+  score: number;
+  rank: number;
+  confidence: number;
+  reasons: string[];
+  field_sources?: Record<string, string>;
+  distance_km?: number | null;
+  qualification_reason?: string | null;
+}
+
+export interface AgenticDiscoveryResponse {
+  top_matches: CandidateCardResponse[];
+  other_available_options: CandidateCardResponse[];
+  backup_waitlist: CandidateCardResponse[];
+  rejected_candidates: CandidateCardResponse[];
+  funnel_stats: any;
+  target_count_met: boolean;
+  diagnosis_message?: string | null;
+  search_queries_used: string[];
+}
+
+export async function runAgenticDiscovery(
+  eventId: string | null,
+  payload: AgenticDiscoveryParams
+): Promise<AgenticDiscoveryResponse> {
+  const endpoint = eventId
+    ? `/events/${eventId}/providers/agentic-discovery`
+    : `/vendors/agentic-discovery`;
+  return apiClient.post<AgenticDiscoveryResponse>(endpoint, payload);
+}
+
 
 
 

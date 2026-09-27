@@ -47,6 +47,7 @@ class CandidateCardResponse(BaseModel):
     reasons: List[str] = Field(default_factory=list)
     field_sources: Dict[str, str] = Field(default_factory=dict)
     distance_km: Optional[float] = None
+    qualification_reason: Optional[str] = None
 
 
 class AgenticDiscoveryResponse(BaseModel):
@@ -64,6 +65,9 @@ class AgenticDiscoveryResponse(BaseModel):
 def map_ranked_candidate_to_card(rc: Any) -> CandidateCardResponse:
     """Helper to convert a RankedCandidate instance to CandidateCardResponse."""
     cand = rc.candidate
+    qual_reason = None
+    if rc.qualification == "rejected" and rc.reasons:
+        qual_reason = rc.reasons[0]
     return CandidateCardResponse(
         id=cand.source_id or cand.name,
         name=cand.name,
@@ -88,4 +92,5 @@ def map_ranked_candidate_to_card(rc: Any) -> CandidateCardResponse:
         reasons=rc.reasons or [],
         field_sources=rc.field_sources or {},
         distance_km=rc.distance_km,
+        qualification_reason=qual_reason,
     )

@@ -78,3 +78,60 @@ Simulations in EVENTRA are not faked UI mockups or pre-scripted animations. They
 7. VERIFY: Courier tracking webhook confirms dispatched status; on-site collaborator marks physical receipt.
 8. UPDATED STATE: Resource inventory balanced; tasks unblocked; state reconciled.
 ```
+---
+
+# Frontend V2 Demo Story
+
+## Scenario
+
+500-person corporate conference
+New Delhi
+
+## Demo Flow
+
+1. Create / open event
+2. Open Overview
+3. Open Venue Discovery
+4. Show real discovery map
+5. Show real discovery funnel
+6. Show adaptive discovery iterations
+7. Shortlist venue
+8. Open Vendor Discovery
+9. Discover catering providers
+10. Show discovery funnel
+11. Shortlist providers
+12. Start engagement
+13. Show WhatsApp / call execution state
+14. Show provider response
+15. Show original provider message
+16. Show agent-extracted facts
+17. Show deterministic validation
+18. Proceed according to approval policy
+19. Provider becomes operationally confirmed
+20. Receive provider cancellation
+21. Show original provider message
+22. Show agent interpretation
+23. Show incident
+24. Show deterministic impact
+25. Show affected tasks / schedule / budget
+26. Open Recovery
+27. Show backup provider discovery
+28. Show backup provider outreach
+29. Show backup response
+30. Show extracted facts
+31. Show deterministic validation
+32. Request / execute approval according to policy
+33. Execute replacement
+34. Verify recovery
+35. Show updated event state
+36. Show complete Activity / Audit trail
+
+## Frontend Requirements
+
+The demo must use real backend state wherever the corresponding integration is configured.
+
+The frontend must not simulate success merely through UI state.
+
+If an integration is running in a legitimate mock/test mode, the UI must preserve the backend-provided mock/source indication.
+
+The frontend must never present mock data as real external-world data.

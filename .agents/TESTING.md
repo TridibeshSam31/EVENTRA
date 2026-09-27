@@ -61,3 +61,82 @@ RECOVERED EVENT STATE CONFIRMED
 4. **Resource Shortage:** Missing tables or audio equipment. System checks inventory, identifies procurement alternatives, and orders replacements without delaying opening remarks.
 5. **Recovery Failure:** Proposed recovery rejected by human organizer or backup vendor declines. System re-evaluates, sheds lowest-priority flexible objective, and presents alternate recovery.
 6. **Schedule Deviation Cascade:** Multi-task chain slippage tested to ensure topological order remains consistent after automated rescheduling.
+
+
+---
+
+# Frontend V2 Testing
+
+Frontend V2 testing must verify that the UI correctly represents authoritative backend state without duplicating domain logic.
+
+## Component Requirements
+
+Major V2 components must correctly handle:
+
+- real data
+- loading state
+- empty state
+- error state
+- unknown state
+- provenance
+- backend status transitions
+
+## No Fabricated Operational State
+
+The frontend must never fabricate:
+
+- discovery counts
+- provider availability
+- venue availability
+- pricing
+- quotes
+- provider responses
+- communication state
+- approval state
+- incident state
+- recovery state
+- execution state
+- verification state
+- audit events
+
+## Frontend V2 E2E Flow
+
+EVENT
+→ DISCOVERY
+→ SHORTLIST
+→ ENGAGEMENT
+→ PROVIDER RESPONSE
+→ EXTRACTION
+→ VALIDATION
+→ APPROVAL
+→ EXECUTE
+→ INCIDENT
+→ IMPACT
+→ RECOVERY
+→ VERIFY
+→ ACTIVITY / AUDIT
+
+## Acceptance Checks
+
+Verify that:
+
+1. Event lifecycle is visible.
+2. Venue discovery uses real backend state.
+3. Vendor discovery uses real backend state.
+4. Discovery funnel counts are authoritative.
+5. Discovery iterations are visible where provided.
+6. Candidate evidence is inspectable.
+7. Provenance is visible.
+8. Agent proposals are distinct from engine results.
+9. Shortlisted providers transition into engagement.
+10. Communication execution state is authoritative.
+11. Provider messages are visible.
+12. Provider responses can reach incident workflows.
+13. Deterministic impact results are displayed.
+14. Recovery discovery is visible.
+15. Approval state is visible before consequential actions.
+16. Execution and verification are visible.
+17. Activity and audit reflect real backend events.
+18. No frontend business logic duplicates backend calculations.
+19. Unknown information remains unknown.
+20. No fabricated operational state exists.

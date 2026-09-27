@@ -45,9 +45,12 @@ export interface CandidateEvidenceData {
   score?: number | null;
   score_breakdown?: Record<string, number | string>;
   qualification_status?: string;
+  qualification_reason?: string | null;
   matching_reasons?: string[];
+  tier?: "top_matches" | "other_available_options" | "backup_waitlist" | "rejected" | string;
   is_shortlisted?: boolean;
   is_assigned?: boolean;
+  is_manual_override?: boolean;
   raw?: any;
 }
 
@@ -131,20 +134,58 @@ export function CandidateEvidenceDrawer({
             <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
               Qualification & Match Score
             </h4>
-            <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200 flex items-center justify-between">
+            <div className={`rounded-xl p-3.5 border flex items-center justify-between ${
+              candidate.qualification_status === "rejected"
+                ? "bg-rose-50/70 border-rose-200"
+                : candidate.qualification_status === "uncertain"
+                ? "bg-amber-50/70 border-amber-200"
+                : "bg-slate-50 border-slate-200"
+            }`}>
               <div>
                 <div className="text-2xl font-bold text-slate-900">{scoreDisplay}</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">
-                  {candidate.qualification_status || "Constraint Satisfied"}
+                <div className="text-[11px] text-slate-500 mt-0.5 capitalize">
+                  {candidate.qualification_status
+                    ? `Status: ${candidate.qualification_status}`
+                    : "Constraint Satisfied"}
                 </div>
               </div>
               <div className="text-right">
-                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  Qualified Fit
-                </span>
+                {candidate.qualification_status === "rejected" ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-300">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                    Disqualified by Engine
+                  </span>
+                ) : candidate.qualification_status === "uncertain" ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                    Uncertain Match
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                    Qualified Fit
+                  </span>
+                )}
               </div>
             </div>
+
+            {/* If Rejected, show dedicated Disqualification Reason box */}
+            {candidate.qualification_status === "rejected" && (
+              <div className="mt-2.5 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-900">
+                <div className="font-bold flex items-center gap-1.5 text-xs text-rose-700 mb-1">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  Engine Disqualification Reason
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  {candidate.qualification_reason ||
+                    candidate.matching_reasons?.[0] ||
+                    "Institution/PSU — excluded by default"}
+                </p>
+                <p className="text-[10px] text-rose-600/80 mt-1 italic">
+                  Candidate was filtered out during automated multi-gate qualification. Shortlisting requires explicit manual override.
+                </p>
+              </div>
+            )}
 
             {/* Score Breakdown if provided */}
             {candidate.score_breakdown && Object.keys(candidate.score_breakdown).length > 0 && (
@@ -310,12 +351,22 @@ export function CandidateEvidenceDrawer({
             <button
               onClick={() => onToggleShortlist(candidate)}
               className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border transition ${
-                isShortlisted
+                candidate.qualification_status === "rejected"
+                  ? isShortlisted
+                    ? "bg-amber-700 text-white border-amber-800 hover:bg-amber-800"
+                    : "bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100"
+                  : isShortlisted
                   ? "bg-slate-900 text-white border-slate-900 hover:bg-slate-800"
                   : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100"
               }`}
             >
-              {isShortlisted ? "✓ Shortlisted" : "+ Add to Shortlist"}
+              {candidate.qualification_status === "rejected"
+                ? isShortlisted
+                  ? "⚠️ Overridden (Shortlisted)"
+                  : "Force Shortlist (Override)"
+                : isShortlisted
+                ? "✓ Shortlisted"
+                : "+ Add to Shortlist"}
             </button>
           )}
 

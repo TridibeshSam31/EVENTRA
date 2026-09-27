@@ -268,6 +268,21 @@ class AgenticDiscoveryController:
                     required_amenities=required_amenities,
                 )
                 iter_qual_results[cand_id] = qual
+                if qual.qualification == "rejected":
+                    rejected_pool.append(
+                        RankedCandidate(
+                            candidate=cand,
+                            qualification="rejected",
+                            availability="unconfirmed",
+                            score=0.25,
+                            rank=999,
+                            confidence=qual.confidence,
+                            reasons=qual.reasons or [qual.disqualification_reason or "Excluded by qualification engine"],
+                            field_sources=cand.field_sources or {},
+                            distance_km=dist,
+                            qual_result=qual,
+                        )
+                    )
 
             # Step E: Ranking Engine with Per-Event-Type Weight Profiles
             ranked_new = DiscoveryRankingEngine.rank_candidates(

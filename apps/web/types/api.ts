@@ -259,6 +259,11 @@ export interface VendorResponse {
   status: string;
   created_at: string;
   updated_at: string;
+  qualification?: "qualified" | "rejected" | "uncertain" | string;
+  qualification_reason?: string | null;
+  score?: number | null;
+  reasons?: string[];
+  tier?: "top_matches" | "other_available_options" | "backup_waitlist" | "rejected" | string;
 }
 
 export type DiscoveryEntityType = "VENUE" | "PROVIDER";

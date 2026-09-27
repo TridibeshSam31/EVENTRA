@@ -99,6 +99,9 @@ export interface RankedVenue {
   pros: string[];
   cons: string[];
   capacity_status: string;
+  qualification?: string;
+  qualification_reason?: string | null;
+  tier?: string;
 }
 
 export interface VenueRecommendationResult {

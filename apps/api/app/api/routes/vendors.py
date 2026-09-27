@@ -1,7 +1,7 @@
 """API Route: Vendors (Provider Network Discovery, Availability, and Assignment)"""
 from typing import Any, List, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, Body
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db_session
@@ -49,7 +49,7 @@ def discover_providers(
 
 @router.post("/agentic-discovery", status_code=status.HTTP_200_OK)
 def run_agentic_provider_discovery(
-    request_in: Any,
+    request_in: dict = Body(...),
     db: Session = Depends(get_db_session),
 ):
     """Executes multi-iteration agentic provider discovery pipeline with qualification,

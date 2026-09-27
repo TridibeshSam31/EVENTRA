@@ -1,7 +1,7 @@
 """API Route: Events (Phase 1 Foundational Endpoints + Phase 2 Specification Preview)"""
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, Query, status, BackgroundTasks
+from fastapi import APIRouter, Depends, Query, status, BackgroundTasks, Body
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db_session, get_current_user_id
@@ -263,7 +263,7 @@ def discover_providers_for_event(
 @router.post("/{event_id}/providers/agentic-discovery", status_code=status.HTTP_200_OK)
 def run_agentic_provider_discovery_for_event(
     event_id: str,
-    request_in: Any,
+    request_in: dict = Body(...),
     db: Session = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
 ):

@@ -78,3 +78,92 @@ Never invent a parallel directory, helper layer, or abstraction without inspecti
 
 ### RULE 25: Prefer small composable modules over abstraction for abstraction's sake.
 Avoid over-engineered class hierarchies, generic repository anti-patterns, and layers of indirection that add no concrete runtime value. Keep code readable, direct, and testable.
+
+
+---
+
+## Frontend V2 Rules
+
+### RULE 26: Frontend must never fabricate operational state.
+
+The frontend must never fabricate:
+
+- provider availability
+- venue availability
+- capacity
+- pricing
+- quotes
+- provider responses
+- call outcomes
+- WhatsApp delivery state
+- discovery counts
+- approval state
+- incident state
+- recovery outcomes
+- execution state
+- verification state
+- audit events
+
+If authoritative backend state is unavailable, render `UNKNOWN`, `NOT AVAILABLE`, loading, empty, or error state as appropriate.
+
+---
+
+### RULE 27: Frontend must preserve provenance.
+
+Important operational information must retain its provenance where available.
+
+Supported provenance categories:
+
+- `AGENT`
+- `ENGINE`
+- `SOURCE`
+- `HUMAN`
+- `EXECUTED`
+- `UNKNOWN`
+
+The frontend must not silently convert agent proposals or external reports into deterministic truth.
+
+---
+
+### RULE 28: Frontend must not duplicate authoritative deterministic calculations.
+
+React/frontend code must not independently calculate or decide:
+
+- critical path
+- schedule feasibility
+- budget totals
+- dependency validity
+- provider ranking
+- venue feasibility
+- impact
+- risk
+- recovery feasibility
+- approval policy
+
+The frontend renders authoritative backend results.
+
+---
+
+### RULE 29: Frontend V2 must use the canonical Event Operations Agent model.
+
+Frontend UX must represent one Event Operations Agent with specialized tools.
+
+Do not introduce separate frontend concepts that imply independent Planning Agents, Budget Agents, Venue Agents, Recovery Agents, or other artificial autonomous agents.
+
+---
+
+### RULE 30: The main Frontend V2 workspace uses a clean light operational UI.
+
+The primary V2 workspace must use:
+
+- light background
+- white cards
+- subtle borders
+- clear typography
+- generous spacing
+- semantic status colors
+- evidence-rich panels
+
+Do not reintroduce the previous dark/glass/sci-fi command-center aesthetic into the main V2 workspace.
+
+Live operations and critical incidents may use stronger semantic alert treatment without turning the entire workspace dark.

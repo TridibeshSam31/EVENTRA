@@ -1,5 +1,89 @@
 # UI & PWA Guidelines: EVENTRA
 
+# Frontend V2 Visual Baseline
+
+EVENTRA Frontend V2 uses a clean, light operational SaaS workspace.
+
+## Primary Visual Direction
+
+Use:
+
+- light page background
+- white cards
+- subtle borders
+- dark readable typography
+- generous whitespace
+- restrained accent color
+- semantic status colors
+- evidence-rich operational panels
+- compact metadata
+- clear information hierarchy
+
+Avoid:
+
+- dark primary workspace
+- dark sidebar
+- glassmorphism
+- excessive blur
+- excessive glow
+- blueprint grids
+- background beams
+- sci-fi control-room styling
+- military command-center styling
+- giant decorative gradients
+- decorative cards without operational information
+
+Live operations and critical incidents may use stronger warning/critical treatment while preserving the overall light workspace.
+
+The landing/marketing page is outside the V2 migration and must remain unchanged.
+
+---
+
+# Frontend V2 Information Architecture
+
+EVENTRA
+
+├── OVERVIEW
+│
+├── DISCOVERY
+│   ├── Venue Discovery
+│   └── Vendor Discovery
+│
+├── PLANNING
+│   ├── Event Blueprint
+│   ├── Tasks
+│   ├── Timeline
+│   └── Budget
+│
+├── ENGAGEMENT
+│   ├── Conversations
+│   ├── Calls
+│   ├── WhatsApp
+│   ├── Outreach
+│   └── Quotes
+│
+├── OPERATIONS
+│   ├── Command Center
+│   ├── Incidents
+│   ├── Recovery
+│   └── Approvals
+│
+└── TRUST
+    ├── Activity
+    └── Audit
+
+---
+
+# Frontend V2 Operational UI Rules
+
+1. Backend state is authoritative.
+2. No frontend business logic may replace deterministic backend calculations.
+3. No fabricated provider, venue, quote, availability, communication, approval, incident, recovery, or execution state.
+4. Important operational facts should expose provenance.
+5. Unknown/unverified information must remain explicitly unknown.
+6. Critical actions must remain unavailable when authoritative backend connectivity is lost.
+7. Mobile live operations must prioritize live state, incidents, approvals, recovery, provider contact, location, timeline, and notifications.
+
 The EVENTRA frontend is an operational Progressive Web App (PWA) designed for desktop planning and high-stress on-the-ground mobile execution.
 
 ---
