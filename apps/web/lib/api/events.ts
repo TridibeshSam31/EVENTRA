@@ -99,6 +99,8 @@ export async function confirmVoiceIntake(payload: {
   accepted_suggestions: string[];
   detected_language?: string;
   original_transcript?: string;
+  explicit_defaults_accepted?: boolean;
+  idempotency_key?: string;
 }): Promise<any> {
   return apiClient.post<any>("/events/intake/voice/confirm", payload);
 }

@@ -3,6 +3,8 @@
 Orchestrates the full planning pipeline: EventSpecification → Tasks →
 Dependencies → Resources → Budget Items → PLANNED lifecycle state.
 """
+import uuid
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
@@ -19,6 +21,7 @@ from app.engines.planning.task_generator import TaskGenerator
 from app.engines.planning.dependency_builder import DependencyBuilder
 from app.engines.planning.resource_planner import ResourcePlanner
 from app.engines.planning.budget_planner import BudgetPlanner
+from app.engines.schedule.scheduler import ScheduleEngine
 from app.schemas.planning import (
     EventPlan,
     PlanSummary,
@@ -92,10 +95,10 @@ class PlanningService:
         persisted_tasks: List[Task] = []
 
         for td in task_dicts:
-            task = Task(event_id=event_id, **td)
+            task_id = str(uuid.uuid4())
+            task = Task(id=task_id, event_id=event_id, **td)
             self.db.add(task)
-            self.db.flush()
-            key_to_id[td["key"]] = task.id
+            key_to_id[td["key"]] = task_id
             persisted_tasks.append(task)
 
         # 4-5. Build and persist dependencies
@@ -105,8 +108,22 @@ class PlanningService:
         for dd in dep_dicts:
             dep = TaskDependency(event_id=event_id, **dd)
             self.db.add(dep)
-            self.db.flush()
             persisted_deps.append(dep)
+
+        # 5b. Schedule tasks with concrete planned_start and planned_end
+        schedule_engine = ScheduleEngine()
+        event_start = event.start_datetime or datetime.now(timezone.utc)
+        if hasattr(event_start, "tzinfo") and event_start.tzinfo is not None:
+            event_start = event_start.replace(tzinfo=None)
+        schedule_result = schedule_engine.schedule_tasks(event_start, persisted_tasks, persisted_deps)
+        for task in persisted_tasks:
+            entry = schedule_result.entries.get(task.id)
+            if entry:
+                task.planned_start = entry.planned_start
+                task.planned_end = entry.planned_end
+            else:
+                task.planned_start = event_start
+                task.planned_end = event_start + timedelta(minutes=task.duration_minutes or 30)
 
         # 6-7. Plan and persist resources
         resource_dicts = self._resource_planner.plan_resources(specification)
@@ -115,7 +132,6 @@ class PlanningService:
         for rd in resource_dicts:
             res = Resource(event_id=event_id, **rd)
             self.db.add(res)
-            self.db.flush()
             persisted_resources.append(res)
 
         # 8-9. Plan and persist budget items
@@ -125,8 +141,9 @@ class PlanningService:
         for bd in budget_dicts:
             item = BudgetItem(event_id=event_id, **bd)
             self.db.add(item)
-            self.db.flush()
             persisted_budget.append(item)
+
+        self.db.flush()
 
         # 10. Transition lifecycle state
         previous_state = event.lifecycle_state

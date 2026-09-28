@@ -41,15 +41,19 @@ class BudgetPlanner:
         if not categories:
             return items
 
-        # Calculate allocation per category
+        # Reserve operations/contingency budget line (10% of total)
+        contingency = (total_budget * Decimal("0.10")).quantize(Decimal("0.01"))
+        allocatable_budget = max(total_budget - contingency, Decimal("0.00"))
+
+        # Calculate allocation per category from allocatable budget
         # Categories with known vendor costs use those; remainder is distributed equally
         known_total = sum(vendor_costs.get(cat, Decimal("0")) for cat in categories)
-        remaining = max(total_budget - known_total, Decimal("0"))
+        remaining = max(allocatable_budget - known_total, Decimal("0.00"))
         unknown_categories = [c for c in categories if c not in vendor_costs]
         per_category = (
             remaining / Decimal(str(len(unknown_categories)))
             if unknown_categories
-            else Decimal("0")
+            else Decimal("0.00")
         )
 
         for category in categories:
@@ -63,8 +67,6 @@ class BudgetPlanner:
                 "status": "PLANNED",
             })
 
-        # Add operations/contingency budget line (10% of total or remainder)
-        contingency = (total_budget * Decimal("0.10")).quantize(Decimal("0.01"))
         items.append({
             "name": "Operations & Contingency",
             "category": "OPERATIONS",

@@ -794,11 +794,14 @@ def end_failed_node(state: AgentState, config: Optional[RunnableConfig] = None) 
     _, llm = _get_context(config)
     err = (
         state.get("error")
-        or state.get("authorization_result", {}).get("reason")
+        or (state.get("authorization_result") or {}).get("reason")
         or "Operational recovery action could not proceed."
     )
     context = {"error": err, "status": "FAILED"}
-    final_resp = llm.format_operational_response("FAILED", context)
+    try:
+        final_resp = llm.format_operational_response("FAILED", context)
+    except Exception:
+        final_resp = f"Operational action halted: {err}"
 
     status = "RECOVERY_FAILED" if state.get("status") == "RECOVERY_FAILED" or state.get("termination_status") == "RECOVERY_FAILED" else "FAILED"
     term_status = state.get("termination_status") or "FAILED"

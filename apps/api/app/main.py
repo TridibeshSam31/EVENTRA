@@ -26,6 +26,7 @@ from app.api.routes.voice import router as voice_router
 from app.api.routes.discovery_runs import router as discovery_runs_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.reconciliation import router as reconciliation_router
+from app.api.routes.shortlist import router as shortlist_router
 
 # Initialize application logging
 setup_logging()
@@ -215,6 +216,10 @@ app.include_router(voice_router)
 # Mutation Idempotency & Offline Batch Reconciliation (B11)
 app.include_router(reconciliation_router, prefix=settings.API_V1_STR)
 app.include_router(reconciliation_router)
+
+# Event Candidate Shortlist
+app.include_router(shortlist_router, prefix=settings.API_V1_STR)
+app.include_router(shortlist_router)
 
 
 

@@ -977,6 +977,7 @@ class RealLLMProvider(LLMProvider):
         self.timeout_seconds = float(timeout_seconds)
         self.max_retries = max(0, int(max_retries))
         self._client = client
+        self._mock_fallback = MockLLMProvider()
 
     def __repr__(self) -> str:
         # Secret-safe representation: never expose self.api_key
@@ -1207,12 +1208,16 @@ class RealLLMProvider(LLMProvider):
             f"Operator Message: {user_message}\n\n"
             "Categorize this incident and determine if recovery is required."
         )
-        structured = self.generate_structured(
-            system_prompt=system_prompt,
-            user_prompt=prompt,
-            output_schema=IncidentInterpretationOutput,
-        )
-        return structured.model_dump()
+        try:
+            structured = self.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=prompt,
+                output_schema=IncidentInterpretationOutput,
+            )
+            return structured.model_dump()
+        except Exception as exc:
+            logger.warning(f"Live LLM incident interpretation failed ({exc}), falling back to deterministic interpreter")
+            return self._mock_fallback.interpret_incident(user_message, event_context, open_incidents)
 
     def select_recovery_strategy(
         self,
@@ -1236,12 +1241,16 @@ class RealLLMProvider(LLMProvider):
             f"Feasible Candidate Options: {json.dumps(feasible_options, default=str)}\n\n"
             "Select the best option ID and explain your operational rationale."
         )
-        structured = self.generate_structured(
-            system_prompt=system_prompt,
-            user_prompt=prompt,
-            output_schema=RecoverySelectionOutput,
-        )
-        return structured.selected_option_id
+        try:
+            structured = self.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=prompt,
+                output_schema=RecoverySelectionOutput,
+            )
+            return structured.selected_option_id
+        except Exception as exc:
+            logger.warning(f"Live LLM recovery strategy selection failed ({exc}), falling back to highest scoring feasible option")
+            return self._mock_fallback.select_recovery_strategy(candidate_options, incident_context, risk_context)
 
     def format_operational_response(
         self,
@@ -1258,7 +1267,11 @@ class RealLLMProvider(LLMProvider):
             f"Operational Context: {json.dumps(context, default=str)}\n\n"
             "Provide a clear, brief operational summary."
         )
-        return self.generate_text(system_prompt=system_prompt, user_prompt=prompt)
+        try:
+            return self.generate_text(system_prompt=system_prompt, user_prompt=prompt)
+        except Exception:
+            err = context.get("error") or context.get("status") or "Action completed."
+            return f"Operational update: Status={status}. {err}"
 
     def decide_next_action(
         self,
@@ -1279,11 +1292,17 @@ class RealLLMProvider(LLMProvider):
             tool_history=tool_history,
             previous_result=previous_result,
         )
-        return self.generate_structured(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            output_schema=AgentDecision,
-        )
+        try:
+            return self.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                output_schema=AgentDecision,
+            )
+        except Exception as exc:
+            logger.warning(f"Live LLM decide_next_action failed ({exc}), falling back to deterministic decision engine")
+            return self._mock_fallback.decide_next_action(
+                operational_context, available_tools, current_objective, tool_history, previous_result
+            )
 
 
 def get_default_llm_provider() -> LLMProvider:

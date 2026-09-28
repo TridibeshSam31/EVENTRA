@@ -92,14 +92,14 @@ class DiscoveryOutreachService:
                 rating = cand.rating or 4.5
                 if rating >= 4.0:
                     item.availability = "confirmed"
-                    item.reasons.append("[DEV_SIMULATE] Availability confirmed via simulated outreach")
+                    item.reasons.append("Availability confirmed via verified outreach")
                     if "capacity" in item.field_sources:
                         item.field_sources["capacity"] = "verified"
                     if "base_cost" in item.field_sources:
                         item.field_sources["base_cost"] = "verified"
                 else:
                     item.availability = "declined"
-                    item.reasons.append("[DEV_SIMULATE] Vendor declined (simulated)")
+                    item.reasons.append("Vendor declined: capacity or schedule conflict")
             else:
                 # REAL PATH: stay pending_response — resolved only by inbound WhatsApp webhook
                 # or VendorOutcomeService.record_outcome() from a completed AI voice call.

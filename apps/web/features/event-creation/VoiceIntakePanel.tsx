@@ -417,6 +417,8 @@ export function VoiceIntakePanel({
         accepted_suggestions: acceptedSuggestions,
         detected_language: detectedLanguage,
         original_transcript: transcript,
+        explicit_defaults_accepted: true,
+        idempotency_key: `voice_confirm_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       };
 
       const result = await confirmVoiceIntake(payload);

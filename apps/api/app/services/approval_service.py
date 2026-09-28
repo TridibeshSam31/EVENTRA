@@ -10,6 +10,7 @@ from app.core.exceptions import (
     ConflictException,
 )
 from app.models.event import Event
+from app.models.user import User
 from app.models.approval import Approval
 from app.models.action import ActionExecution
 from app.models.enums import RoleType
@@ -39,6 +40,25 @@ class ApprovalService:
             raise NotFoundException(f"Event with id '{event_id}' not found.")
         return event
 
+    def _ensure_user_exists(self, user_id: Optional[str]) -> Optional[str]:
+        if not user_id:
+            return None
+        user = self.db.query(User).filter(User.id == user_id).first()
+        if not user:
+            email = f"{user_id.lower().replace('-', '_')}@eventra.ai"
+            user = self.db.query(User).filter(User.email == email).first()
+            if not user:
+                user = User(
+                    id=user_id,
+                    name=user_id.replace("_", " ").title(),
+                    email=email,
+                )
+                self.db.add(user)
+                self.db.flush()
+            else:
+                user_id = user.id
+        return user_id
+
     def create_request(
         self,
         event_id: str,
@@ -47,6 +67,7 @@ class ApprovalService:
     ) -> Approval:
         """Evaluates policy and creates an immutable, snapshot-anchored ApprovalRequest."""
         event = self._get_event(event_id)
+        requester_id = self._ensure_user_exists(requester_id)
 
         # 1. Authorize action and determine impact level
         decision = self._auth_service.authorize_action(
@@ -100,6 +121,8 @@ class ApprovalService:
         )
         if not approval:
             raise NotFoundException(f"Approval request '{approval_id}' not found for event '{event_id}'.")
+
+        approver_id = self._ensure_user_exists(approver_id)
 
         if approval.status != "PENDING":
             raise BadRequestException(f"Approval request is '{approval.status}', only PENDING requests can be approved.")

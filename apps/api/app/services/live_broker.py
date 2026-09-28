@@ -20,6 +20,7 @@ class LiveEventBroker:
         # Map event_id -> Set of asyncio.Queue
         self._subscribers: Dict[str, Set[asyncio.Queue]] = {}
         self._lock = asyncio.Lock()
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     @classmethod
     def get_instance(cls) -> "LiveEventBroker":
@@ -27,8 +28,16 @@ class LiveEventBroker:
             cls._instance = cls()
         return cls._instance
 
+    def set_loop(self, loop: asyncio.AbstractEventLoop):
+        """Authoritative main event loop setter."""
+        self._loop = loop
+
     async def subscribe(self, event_id: str) -> asyncio.Queue:
         """Register a new subscriber queue for an event."""
+        try:
+            self._loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
         queue: asyncio.Queue = asyncio.Queue(maxsize=100)
         async with self._lock:
             if event_id not in self._subscribers:
@@ -63,8 +72,10 @@ class LiveEventBroker:
             loop = asyncio.get_running_loop()
             loop.create_task(self.broadcast(event_id, message))
         except RuntimeError:
-            # No running loop in this thread
-            pass
+            if self._loop and self._loop.is_running():
+                asyncio.run_coroutine_threadsafe(self.broadcast(event_id, message), self._loop)
+            else:
+                logger.debug("No active loop for publish_sync broadcast to event %s", event_id)
 
 
 live_broker = LiveEventBroker.get_instance()

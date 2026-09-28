@@ -25,6 +25,19 @@ export async function getDiscoveryRunEvents(
   return [];
 }
 
+export async function startCategoryDiscovery(
+  eventId: string,
+  payload: { category: string; radius_km?: number; target_count?: number }
+): Promise<{ status: string; run_id?: string; category: string; message: string }> {
+  return apiRequest<{ status: string; run_id?: string; category: string; message: string }>(
+    `/events/${eventId}/discovery/start`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
 export async function startOperations(
   eventId: string
 ): Promise<{ status: string; run_id?: string; message: string }> {
@@ -35,3 +48,4 @@ export async function startOperations(
     }
   );
 }
+

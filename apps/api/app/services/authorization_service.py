@@ -15,6 +15,7 @@ from app.models.vendor_assignment import VendorAssignment
 from app.models.resource import Resource
 from app.models.budget import BudgetItem
 from app.models.venue import Venue
+from app.models.vendor import Vendor
 from app.models.enums import RoleType
 from app.engines.auth.permissions import (
     Permissions,
@@ -53,7 +54,13 @@ class AuthorizationService:
 
     def get_user_role(self, event: Event, user_id: str) -> str:
         """Resolves the user's authoritative role within the event."""
-        if not user_id or user_id in ("system", "anonymous_operator") or user_id.startswith("system") or user_id.startswith("agent"):
+        if (
+            not user_id
+            or user_id in ("system", "anonymous_operator")
+            or user_id.startswith("system")
+            or user_id.startswith("agent")
+            or user_id.startswith("autonomous")
+        ):
             # System/dev override treated as Main Organizer
             return RoleType.MAIN_ORGANIZER.value
 
@@ -92,6 +99,9 @@ class AuthorizationService:
                 if va.event_id != event_id:
                     raise BadRequestException(f"Target vendor assignment '{target_id}' does not belong to event '{event_id}'.")
                 return va
+            v = self.db.query(Vendor).filter(Vendor.id == target_id).first()
+            if v:
+                return v
             return None
 
         elif target_type_upper == "RESOURCE":

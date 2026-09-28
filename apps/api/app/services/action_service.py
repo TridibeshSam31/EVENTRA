@@ -110,6 +110,10 @@ class ActionService:
                 affected_entities, execution_result_data = self._execute_provider_engagement(
                     event_id, target_id, payload
                 )
+            elif action_type == "CONTRACT_VENDOR":
+                affected_entities, execution_result_data = self._execute_contract_vendor(
+                    event_id, target_id, payload
+                )
             else:
                 raise BadRequestException(f"Unknown operational action type '{action_type}'.")
 
@@ -384,9 +388,15 @@ class ActionService:
         # Update or create vendor assignment
         assignment = (
             self.db.query(VendorAssignment)
-            .filter(VendorAssignment.event_id == event_id, VendorAssignment.category == category)
+            .filter(VendorAssignment.event_id == event_id, VendorAssignment.vendor_id == vendor.id)
             .first()
         )
+        if not assignment:
+            assignment = (
+                self.db.query(VendorAssignment)
+                .filter(VendorAssignment.event_id == event_id, VendorAssignment.category == category)
+                .first()
+            )
         if assignment:
             assignment.vendor_id = vendor.id
             assignment.status = "CONFIRMED"
@@ -402,6 +412,10 @@ class ActionService:
             )
             self.db.add(assignment)
             self.db.flush()
+
+        # Ensure any duplicate or existing assignments for this vendor in this event are marked CONFIRMED
+        for a in self.db.query(VendorAssignment).filter(VendorAssignment.event_id == event_id, VendorAssignment.vendor_id == vendor.id).all():
+            a.status = "CONFIRMED"
 
         task.required_provider_category = category
         task.provider_id = vendor.id
@@ -527,4 +541,133 @@ class ActionService:
             "negotiation_status": "APPROVED",
             "quoted_amount": assignment.quoted_amount,
         }
+
+    def _execute_contract_vendor(
+        self, event_id: str, target_id: Optional[str], payload: Dict[str, Any]
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        vendor_id = target_id or payload.get("vendor_id")
+        assignment_id = payload.get("assignment_id")
+        task_id = payload.get("task_id")
+        category = payload.get("category")
+        cost = Decimal(str(payload.get("agreed_cost") or payload.get("cost") or 0.0))
+
+        assignment = None
+        if assignment_id:
+            assignment = self.db.query(VendorAssignment).filter(
+                VendorAssignment.id == assignment_id,
+                VendorAssignment.event_id == event_id,
+            ).first()
+
+        if not assignment and vendor_id and category:
+            assignment = self.db.query(VendorAssignment).filter(
+                VendorAssignment.event_id == event_id,
+                VendorAssignment.vendor_id == vendor_id,
+                VendorAssignment.category == category,
+            ).first()
+
+        if not assignment and category:
+            assignment = self.db.query(VendorAssignment).filter(
+                VendorAssignment.event_id == event_id,
+                VendorAssignment.category == category,
+            ).first()
+
+        if not assignment and vendor_id:
+            assignment = self.db.query(VendorAssignment).filter(
+                VendorAssignment.event_id == event_id,
+                VendorAssignment.vendor_id == vendor_id,
+            ).first()
+
+        affected = []
+        if assignment:
+            assignment.status = "CONFIRMED"
+            assignment.negotiation_status = "APPROVED"
+            if cost > 0:
+                assignment.agreed_cost = float(cost)
+            affected.append({"entity_type": "VENDOR_ASSIGNMENT", "id": assignment.id})
+        elif vendor_id and category:
+            # Ensure vendor exists in vendors table to satisfy foreign key constraint
+            existing_vendor = self.db.query(Vendor).filter(Vendor.id == vendor_id).first()
+            if not existing_vendor:
+                event_obj = self.db.query(Event).filter(Event.id == event_id).first()
+                city = (event_obj.location if event_obj and event_obj.location else "Delhi")
+                v_name = payload.get("vendor_name") or "Contracted Vendor"
+                new_vendor = Vendor(
+                    id=vendor_id,
+                    name=v_name,
+                    category=category,
+                    city=city,
+                    base_cost=float(cost) if cost > 0 else None,
+                    status="ACTIVE",
+                    source="DISCOVERY",
+                )
+                self.db.add(new_vendor)
+                self.db.flush()
+
+            assignment = VendorAssignment(
+                event_id=event_id,
+                vendor_id=vendor_id,
+                category=category,
+                status="CONFIRMED",
+                negotiation_status="APPROVED",
+                agreed_cost=float(cost) if cost > 0 else None,
+            )
+            self.db.add(assignment)
+            self.db.flush()
+            affected.append({"entity_type": "VENDOR_ASSIGNMENT", "id": assignment.id})
+
+        # Update task status and binding if relevant
+        task = None
+        if task_id:
+            task = self.db.query(Task).filter(Task.id == task_id, Task.event_id == event_id).first()
+        elif category:
+            task = self.db.query(Task).filter(
+                Task.event_id == event_id,
+                Task.required_provider_category == category,
+            ).first()
+
+        if task:
+            if vendor_id:
+                task.provider_id = vendor_id
+            task.status = "ASSIGNED"
+            affected.append({"entity_type": "TASK", "id": task.id})
+
+        # Update budget item if relevant
+        if category and cost > 0:
+            budget_item = self.db.query(BudgetItem).filter(
+                BudgetItem.event_id == event_id,
+                BudgetItem.category == category,
+            ).first()
+            if budget_item:
+                budget_item.actual_amount = cost
+                budget_item.status = "COMMITTED"
+                affected.append({"entity_type": "BUDGET_ITEM", "id": budget_item.id})
+
+        # Broadcast live assignment status update
+        try:
+            from app.services.live_broker import live_broker
+            live_broker.publish_sync(
+                event_id,
+                {
+                    "type": "assignment.updated",
+                    "event_id": event_id,
+                    "data": {
+                        "assignment_id": assignment.id if assignment else None,
+                        "vendor_id": vendor_id,
+                        "category": category,
+                        "status": "CONFIRMED",
+                        "agreed_cost": float(cost),
+                    },
+                },
+            )
+        except Exception:
+            pass
+
+        return affected, {
+            "vendor_id": vendor_id,
+            "category": category,
+            "assignment_id": assignment.id if assignment else None,
+            "agreed_cost": float(cost),
+            "status": "CONFIRMED",
+        }
+
 

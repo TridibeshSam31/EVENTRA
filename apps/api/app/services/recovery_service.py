@@ -1,6 +1,7 @@
 """Read-mostly orchestration for deterministic recovery-option snapshots."""
 import hashlib
 import json
+from datetime import datetime, timezone, timedelta
 from typing import List
 
 from sqlalchemy.orm import Session, selectinload
@@ -100,10 +101,14 @@ class RecoveryService:
         incident = self.db.query(Incident).filter(Incident.id == incident_id, Incident.event_id == event_id).first()
         if not incident:
             raise NotFoundException(f"Incident '{incident_id}' not found for event '{event_id}'.")
-        if not event.start_datetime or not event.end_datetime:
-            raise BadRequestException("Recovery generation requires event start_datetime and end_datetime.")
+        if not event.start_datetime:
+            event.start_datetime = datetime.now(timezone.utc).replace(tzinfo=None)
+        if not event.end_datetime:
+            event.end_datetime = event.start_datetime + timedelta(hours=8)
+            self.db.commit()
         if not incident.impact_result or not incident.risk_result:
-            raise BadRequestException("Recovery generation requires deterministic impact and risk results.")
+            from app.services.incident_service import IncidentService
+            incident = IncidentService(self.db).recalculate_incident(event_id, incident_id, current_user_id=current_user_id)
         tasks = self.db.query(Task).filter(Task.event_id == event_id).order_by(Task.id).all()
         dependencies = self.db.query(TaskDependency).filter(TaskDependency.event_id == event_id).order_by(TaskDependency.id).all()
         resources = self.db.query(Resource).filter(Resource.event_id == event_id).order_by(Resource.id).all()

@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { getEvent, getEventOperationsStatus } from "@/lib/api/events";
+import { useEventWorkspace } from "@/hooks/useEventWorkspace";
 import { EventShell } from "@/components/v2/EventShell";
 import { AgentPanel } from "@/components/v2/AgentPanel";
 import { AgentActivityStream } from "@/components/v2/AgentActivityStream";
@@ -38,6 +39,13 @@ const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>
 export default function EventOverviewPage() {
   const params = useParams();
   const eventId = params.eventId as string;
+
+  const {
+    event: storeEvent,
+    opsStatus: storeOps,
+    isAgentRunning,
+    refreshWorkspace,
+  } = useEventWorkspace(eventId);
 
   const [eventData, setEventData] = useState<any>(null);
   const [opsStatus, setOpsStatus] = useState<any>(null);
@@ -88,18 +96,21 @@ export default function EventOverviewPage() {
     );
   }
 
-  const name = eventData?.name || "Event Overview";
-  const totalBudget = Number(eventData?.total_budget) || 0;
-  const committedBudget = Number(opsStatus?.committed_budget) || 0;
-  const currency = eventData?.currency || "INR";
+  const effectiveEvent = storeEvent || eventData;
+  const effectiveOps = storeOps || opsStatus;
+
+  const name = effectiveEvent?.name || "Event Overview";
+  const totalBudget = Number(effectiveEvent?.total_budget) || 0;
+  const committedBudget = Number(effectiveOps?.committed_budget) || 0;
+  const currency = effectiveEvent?.currency || "INR";
   const currencySym = currency === "INR" ? "₹" : "$";
-  const lifecycleState = eventData?.lifecycle_state || "PLANNED";
-  const state = eventData?.state || opsStatus?.state || "NORMAL";
+  const lifecycleState = effectiveEvent?.lifecycle_state || "PLANNED";
+  const state = effectiveEvent?.state || effectiveOps?.state || "NORMAL";
 
   const budgetPct = totalBudget > 0 ? Math.min(100, Math.round((committedBudget / totalBudget) * 100)) : 0;
-  const assignments = opsStatus?.assignments || [];
-  const pendingApprovals = opsStatus?.pending_approvals || [];
-  const tasks = opsStatus?.tasks || [];
+  const assignments = effectiveOps?.assignments || [];
+  const pendingApprovals = effectiveOps?.pending_approvals || [];
+  const tasks = effectiveOps?.tasks || [];
 
   const completedTasks = tasks.filter((t: any) => t.status === "COMPLETED").length;
   const blockedTasks = tasks.filter((t: any) => t.status === "BLOCKED").length;
@@ -108,7 +119,7 @@ export default function EventOverviewPage() {
     lifecycleState === "LIVE" ? "LIVE" : state === "DEGRADED" ? "RECOVER" : "DISCOVER";
 
   return (
-    <EventShell eventId={eventId} currentStage={currentStage} event={eventData}>
+    <EventShell eventId={eventId} currentStage={currentStage} event={effectiveEvent}>
       {/* Incident Alert Banner if in DEGRADED or DISRUPTED state */}
       {state !== "NORMAL" && (
         <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between gap-4">
@@ -139,10 +150,14 @@ export default function EventOverviewPage() {
         eventId={eventId}
         eventName={name}
         lifecycleState={lifecycleState}
+        isRunning={isAgentRunning}
         pendingApprovalsCount={pendingApprovals.length}
-        latestOperation={opsStatus?.activity_feed?.[0]?.action || null}
-        latestResult={opsStatus?.activity_feed?.[0]?.detail || null}
-        onOperationsStarted={() => fetchData()}
+        latestOperation={effectiveOps?.activity_feed?.[0]?.action || null}
+        latestResult={effectiveOps?.activity_feed?.[0]?.detail || null}
+        onOperationsStarted={() => {
+          fetchData();
+          refreshWorkspace(eventId);
+        }}
       />
 
       {/* 4 Metric Cards Grid */}

@@ -32,7 +32,7 @@ class ActionImpactClassifier:
                 return "CRITICAL"
 
         # 3. Action-Specific Classifications
-        if action_type == "REASSIGN_VENDOR":
+        if action_type in ("REASSIGN_VENDOR", "CONTRACT_VENDOR"):
             # Reassigning vendor on a HIGH priority task is CRITICAL, otherwise MAJOR
             if task:
                 priority = getattr(task, "priority", None) or (task.get("priority") if isinstance(task, dict) else None)

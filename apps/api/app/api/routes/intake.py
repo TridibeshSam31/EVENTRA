@@ -1,8 +1,9 @@
 import logging
 import re
 import time
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, UploadFile, File, Form, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -135,6 +136,12 @@ class VoiceConfirmRequest(BaseModel):
     accepted_suggestions: List[str] = Field(default_factory=list, description="IDs or values of accepted suggestions")
     detected_language: Optional[str] = "en"
     original_transcript: Optional[str] = None
+    explicit_defaults_accepted: bool = Field(default=False, description="Explicit acknowledgment if defaults are used for unspecified parameters")
+    idempotency_key: Optional[str] = Field(default=None, description="Client idempotency token to prevent double-click duplicates")
+
+
+_PROCESSED_INTAKE_CACHE: Dict[str, Tuple[datetime, Dict[str, Any]]] = {}
+
 
 
 # ---------------------------------------------------------------------------
@@ -428,11 +435,36 @@ def confirm_voice_intake(
     """Applies organizer-approved voice attributes, generates authoritative plan, and logs activity."""
     fields = req.fields or {}
 
+    # 1. Idempotency protection against rapid double-clicks
+    now = datetime.now(timezone.utc)
+    if req.idempotency_key and req.idempotency_key in _PROCESSED_INTAKE_CACHE:
+        cached_time, cached_res = _PROCESSED_INTAKE_CACHE[req.idempotency_key]
+        if (now - cached_time).total_seconds() < 120:
+            return cached_res
+
+    # 2. Require explicit acceptance if mandatory parameters are missing
+    missing_fields = []
+    if not fields.get("location"):
+        missing_fields.append("location")
+    if not fields.get("guest_count"):
+        missing_fields.append("guest_count")
+    if not fields.get("total_budget"):
+        missing_fields.append("total_budget")
+
+    if missing_fields and not req.explicit_defaults_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Missing required event parameters: {', '.join(missing_fields)}. "
+                "Please provide these fields or set explicit_defaults_accepted=True to accept standard defaults."
+            ),
+        )
+
     name = fields.get("name") or "New Event Operation"
     event_type = fields.get("event_type") or "CONFERENCE"
     location = fields.get("location") or "Delhi"
-    guest_count = fields.get("guest_count") or 100
-    total_budget = fields.get("total_budget") or 500000.0
+    guest_count = int(fields.get("guest_count") or 100)
+    total_budget = float(fields.get("total_budget") or 500000.0)
     currency = fields.get("currency") or "INR"
     date_expr = fields.get("date_expression") or fields.get("start_datetime") or "Upcoming"
 
@@ -472,6 +504,9 @@ def confirm_voice_intake(
         user_id=current_user_id,
         structured_overrides=structured_overrides,
     )
+
+    if req.idempotency_key:
+        _PROCESSED_INTAKE_CACHE[req.idempotency_key] = (now, result)
 
     # Activity stream logging
     event_id = result.get("event_id") or (result.get("event", {}).get("id") if result.get("event") else None)

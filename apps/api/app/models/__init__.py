@@ -57,6 +57,7 @@ from app.models.communication import Conversation, Message
 from app.models.activity_log import EventActivityLog
 from app.models.agent_run import AgentRun
 from app.models.idempotency import IdempotencyRecord
+from app.models.shortlist import EventShortlistEntry
 
 __all__ = [
     "AgentRun",
@@ -121,4 +122,5 @@ __all__ = [
     "Conversation",
     "Message",
     "EventActivityLog",
+    "EventShortlistEntry",
 ]

@@ -40,6 +40,8 @@ from app.schemas.approval import ApprovalRequestCreate
 from app.observability.audit import AuditRecorder
 from app.core.exceptions import NotFoundException, BadRequestException
 from app.models.discovery_run import DiscoveryRun
+from app.models.agent_run import AgentRun
+from app.services.live_broker import live_broker
 from app.services.agentic_discovery_controller import AgenticDiscoveryController
 import uuid
 import logging
@@ -82,29 +84,59 @@ class AutonomousOperationsService:
         if not event:
             raise NotFoundException(f"Event with ID '{event_id}' not found.")
 
+        # 0. Concurrency & Idempotency Check: Prevent duplicate concurrent operation runs
+        active_agent_run = (
+            self.db.query(AgentRun)
+            .filter(
+                AgentRun.event_id == event_id,
+                AgentRun.status.in_(["RUNNING", "INITIALIZED"]),
+            )
+            .first()
+        )
+        if active_agent_run:
+            return {
+                "status": "ALREADY_RUNNING",
+                "message": f"Autonomous operations run '{active_agent_run.run_id}' is already active.",
+                "event_id": event.id,
+                "run_id": active_agent_run.run_id,
+                "lifecycle_state": event.lifecycle_state,
+            }
+
         # 1. Ensure operational plan exists
         existing_tasks = self.db.query(Task).filter(Task.event_id == event.id).all()
         if not existing_tasks or event.lifecycle_state == EventLifecycleState.DRAFT.value:
             self._planning_service.generate_plan(event.id)
             self.db.refresh(event)
 
-        # 2. Transition lifecycle state to LIVE
+        # 2. Transition lifecycle state to LIVE (Do NOT force LIVE if validation fails)
         if event.lifecycle_state in (EventLifecycleState.PLANNED.value, EventLifecycleState.DRAFT.value):
             try:
                 self._live_state.go_live(event.id, reason="Organizer started autonomous operations")
-            except Exception:
-                event.lifecycle_state = EventLifecycleState.LIVE.value
-                event.state = EventState.NORMAL.value
-                self.db.commit()
                 self.db.refresh(event)
+            except Exception as live_err:
+                logger.error(f"Cannot transition event '{event.id}' to LIVE: {live_err}")
+                raise BadRequestException(f"Failed to transition event to LIVE: {str(live_err)}")
 
-        # 3. Create initial DiscoveryRun in RUNNING state
+        # 3. Create canonical AgentRun in RUNNING state
+        agent_run_id = f"RUN-{uuid.uuid4().hex[:8].upper()}"
+        agent_run = AgentRun(
+            run_id=agent_run_id,
+            event_id=event.id,
+            user_id=user_id,
+            trigger_message="Organizer started autonomous operations",
+            objective=f"Execute autonomous operations for '{event.name}'",
+            status="RUNNING",
+            started_at=utc_now(),
+            tool_history=[{"step": 1, "tool": "initiate_operations", "status": "STARTED"}],
+        )
+        self.db.add(agent_run)
+
+        # 4. Create initial DiscoveryRun in RUNNING state
         requirements = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
         primary_category = requirements[0].type if requirements else "CATERING"
-        run_id = f"run_{uuid.uuid4().hex[:12]}"
 
         run = DiscoveryRun(
-            id=run_id,
+            id=f"disc_{uuid.uuid4().hex[:10]}",
             event_id=event.id,
             category=primary_category,
             status="RUNNING",
@@ -122,11 +154,23 @@ class AutonomousOperationsService:
         self.db.commit()
         self.db.refresh(run)
 
+        # 5. Broadcast agent started event across workspace
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "agent.started",
+                "event_id": event.id,
+                "run_id": agent_run_id,
+                "status": "RUNNING",
+                "current_step": "Autonomous operations started",
+            },
+        )
+
         return {
             "status": "STARTED",
-            "message": f"Autonomous operations initiated for '{event.name}'. Discovery and outreach running in background.",
+            "message": f"Autonomous operations initiated for '{event.name}'. Agent observing and executing operational plan.",
             "event_id": event.id,
-            "run_id": run.id,
+            "run_id": agent_run_id,
             "lifecycle_state": event.lifecycle_state,
         }
 
@@ -209,15 +253,46 @@ class AutonomousOperationsService:
             if cat_res.get("contacted"):
                 providers_contacted_count += 1
 
-        # Complete DiscoveryRun if active
+        # Complete DiscoveryRun and update AgentRun status
+        pending_apps = self._approval_service.get_pending_approvals(event_id=event.id)
         if run_id:
             try:
-                run = self.db.query(DiscoveryRun).filter(DiscoveryRun.id == run_id).first()
-                if run:
-                    run.status = "COMPLETED"
-                    self.db.commit()
+                # 1. Discovery run if exists
+                disc_run = self.db.query(DiscoveryRun).filter(DiscoveryRun.id == run_id).first()
+                if disc_run:
+                    disc_run.status = "COMPLETED"
+
+                # 2. Canonical AgentRun
+                agent_run = self.db.query(AgentRun).filter(AgentRun.run_id == run_id).first()
+                if agent_run:
+                    if pending_apps:
+                        agent_run.status = "WAITING_APPROVAL"
+                        live_broker.publish_sync(
+                            event.id,
+                            {
+                                "type": "agent.waiting_approval",
+                                "event_id": event.id,
+                                "run_id": run_id,
+                                "status": "WAITING_APPROVAL",
+                                "pending_approvals_count": len(pending_apps),
+                            },
+                        )
+                    else:
+                        agent_run.status = "COMPLETED"
+                        agent_run.completed_at = utc_now()
+                        live_broker.publish_sync(
+                            event.id,
+                            {
+                                "type": "agent.completed",
+                                "event_id": event.id,
+                                "run_id": run_id,
+                                "status": "COMPLETED",
+                            },
+                        )
+                self.db.commit()
             except Exception as r_err:
-                logger.warning(f"Could not mark DiscoveryRun completed: {r_err}")
+                logger.warning(f"Could not update AgentRun / DiscoveryRun completed status: {r_err}")
+
 
         # 6. Audit & Telemetry
         self._audit.record(
@@ -525,15 +600,11 @@ class AutonomousOperationsService:
             assignment = existing_assignment
 
         # Strict requirement (Decision 2): Every vendor-binding action strictly requires an ApprovalRequest via ApprovalService
-        cat_task = (
-            self.db.query(Task)
-            .filter(
-                Task.event_id == event.id,
-                (Task.required_provider_category.ilike(f"%{cat_lower}%"))
-                | (Task.name.ilike(f"%{cat_lower}%")),
-            )
-            .first()
-        )
+        approval_record = None
+        cat_task = self.db.query(Task).filter(
+            Task.event_id == event.id,
+            Task.required_provider_category.ilike(f"%{cat_lower}%"),
+        ).first()
         try:
             approval_in = ApprovalRequestCreate(
                 action_type="CONTRACT_VENDOR",
@@ -550,11 +621,48 @@ class AutonomousOperationsService:
                 },
                 notes=f"Approval required to contract {selected_vendor.name} for {category.title()}",
             )
-            self._approval_service.create_request(event.id, requester_id="autonomous_operations_engine", data=approval_in)
+            approval_record = self._approval_service.create_request(event.id, requester_id="autonomous_operations_engine", data=approval_in)
+            live_broker.publish_sync(
+                event.id,
+                {
+                    "type": "approval.created",
+                    "event_id": event.id,
+                    "approval_id": approval_record.id,
+                    "action_type": approval_record.action_type,
+                    "target_name": selected_vendor.name,
+                },
+            )
         except Exception as app_err:
-            logger.warning(f"Could not create approval request for vendor {selected_vendor.name}: {app_err}")
+            logger.error(f"Approval creation failed for vendor {selected_vendor.name}: {app_err}")
+            # HARD GATE STOP: Enter error/blocked state. DO NOT send outreach or assign!
+            assignment.status = "APPROVAL_FAILED"
+            self.db.commit()
 
-        # Dispatch outreach message
+            live_broker.publish_sync(
+                event.id,
+                {
+                    "type": "agent.failed",
+                    "event_id": event.id,
+                    "category": category,
+                    "error": f"Approval creation failed: {app_err}",
+                },
+            )
+
+            return {
+                "category": category,
+                "provider_id": selected_vendor.id,
+                "provider_name": selected_vendor.name,
+                "assignment_id": assignment.id,
+                "status": "APPROVAL_FAILED",
+                "error": f"Approval creation failed: {app_err}",
+                "contacted": False,
+            }
+
+        # Keep assignment strictly PENDING_CONFIRMATION until explicit human approval
+        assignment.status = "PENDING_CONFIRMATION"
+        self.db.commit()
+
+        # Dispatch outreach inquiry message tied to the actual event
         cat_title = category.replace("_", " ").title()
         outreach_msg = (
             f"Hello {selected_vendor.name}, EVENTRA Autonomous Operations is requesting availability and quotation "
@@ -662,7 +770,7 @@ class AutonomousOperationsService:
         # 4. Live recovery discovery via AgenticDiscoveryController
         backup_caterer = None
         try:
-            controller = AgenticDiscoveryController(self.db, max_iterations=2, target_count=3)
+            controller = AgenticDiscoveryController(self.db, max_iterations=1, target_count=2)
             recov_disc = controller.execute_discovery(
                 event_id=event.id,
                 category="CATERING",
