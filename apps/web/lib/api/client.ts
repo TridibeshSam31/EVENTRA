@@ -70,12 +70,15 @@ export async function apiRequest<T>(
     }
   }
 
+  const isFormData = typeof FormData !== "undefined" && rest.body instanceof FormData;
   const reqHeaders: Record<string, string> = {
-    "Content-Type": "application/json",
     Accept: "application/json",
     "x-user-id": getOperatorId(),
     ...(headers as Record<string, string>),
   };
+  if (!isFormData && !reqHeaders["Content-Type"]) {
+    reqHeaders["Content-Type"] = "application/json";
+  }
 
   try {
     const res = await fetch(url, {
@@ -130,7 +133,14 @@ export const apiClient = {
   post: <T>(endpoint: string, body?: unknown, options?: RequestOptions) =>
     apiRequest<T>(endpoint, {
       method: "POST",
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
+      ...options,
+    }),
+
+  postForm: <T>(endpoint: string, formData: FormData, options?: RequestOptions) =>
+    apiRequest<T>(endpoint, {
+      method: "POST",
+      body: formData,
       ...options,
     }),
 

@@ -69,6 +69,12 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
             res.error = "OpenWA not enabled or session not configured; captured in fallback."
             return res
 
+        if getattr(self, "_is_unreachable", False) and (time.time() - getattr(self, "_last_unreachable_time", 0) < 60):
+            res = self._fallback.send_message(event_id, provider_id, message, recipient_contact)
+            res.source = IntegrationSource.MOCK
+            res.error = "OpenWA daemon not reachable; captured in fallback."
+            return res
+
         start_time = time.time()
         chat_id = self._normalize_chat_id(recipient_contact)
         headers = {"Content-Type": "application/json"}
@@ -87,7 +93,7 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
         }
 
         try:
-            with httpx.Client(timeout=self.timeout_seconds) as client:
+            with httpx.Client(timeout=httpx.Timeout(self.timeout_seconds, connect=1.5)) as client:
                 resp = client.post(primary_url, headers=headers, json=primary_payload)
                 # Fallback to session-prefixed URL if standard endpoint returned 404
                 if resp.status_code == 404:
@@ -151,6 +157,13 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
                     res.source = IntegrationSource.MOCK
                     res.error = f"OpenWA dispatch returned HTTP {resp.status_code}; captured in fallback mock."
                     return res
+        except (httpx.ConnectError, httpx.ConnectTimeout) as conn_err:
+            self._is_unreachable = True
+            self._last_unreachable_time = time.time()
+            res = self._fallback.send_message(event_id, provider_id, message, recipient_contact)
+            res.source = IntegrationSource.MOCK
+            res.error = f"OpenWA offline ({conn_err}); captured in fallback mock."
+            return res
         except Exception as err:
             # Fall back safely to mock provider
             res = self._fallback.send_message(event_id, provider_id, message, recipient_contact)

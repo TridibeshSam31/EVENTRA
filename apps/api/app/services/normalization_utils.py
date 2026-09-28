@@ -165,12 +165,26 @@ def normalize_budget(
         curr = "USD" if "$" in expr_lower or "usd" in expr_lower else resolved_currency
         return val, curr
 
-    # Check general number regex
-    num_match = re.search(r"([\d,]+(?:\.\d+)?)", expr_lower)
-    if num_match:
+    # Check budget-labeled or currency-labeled number: "budget: 2500000", "2500000 inr", "₹2500000"
+    labeled_match = re.search(r"(?:budget|spend|cost)[\s:]*(?:₹|rs\.?|inr|\$|usd|eur|gbp)?\s*([\d,]+(?:\.\d+)?)", expr_lower)
+    if not labeled_match:
+        labeled_match = re.search(r"(?:₹|rs\.?|\$)\s*([\d,]+(?:\.\d+)?)", expr_lower)
+    if not labeled_match:
+        labeled_match = re.search(r"([\d,]+(?:\.\d+)?)\s*(?:inr|usd|eur|gbp|rupees|rs)", expr_lower)
+    if labeled_match:
         try:
-            val = float(num_match.group(1).replace(",", ""))
+            val = float(labeled_match.group(1).replace(",", ""))
             if val >= 0:
+                return val, resolved_currency
+        except ValueError:
+            pass
+
+    # Check general number regex (skipping 4-digit years like 2024..2035)
+    num_matches = re.finditer(r"([\d,]+(?:\.\d+)?)", expr_lower)
+    for m in num_matches:
+        try:
+            val = float(m.group(1).replace(",", ""))
+            if val >= 0 and not (2024 <= val <= 2035):
                 return val, resolved_currency
         except ValueError:
             pass

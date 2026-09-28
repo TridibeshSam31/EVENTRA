@@ -114,6 +114,10 @@ class Settings(BaseSettings):
     GEMINI_LIVE_MODEL: str = "gemini-3.8-live"
     GEMINI_LIVE_VOICE: str = "Aoede"
 
+    # Speech-to-text configuration
+    STT_PROVIDER: str = "gemini"  # "gemini", "whisper"
+    OPENAI_API_KEY: Union[str, None] = None
+
     @model_validator(mode="after")
     def sync_llm_credentials(self) -> "Settings":
         """Ensures single authoritative LLM_API_KEY path, syncing with GEMINI_API_KEY if needed."""

@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { ShieldCheck, Database, Radio, MapPin, AlertCircle } from "lucide-react";
+import { ShieldCheck, Database, Radio, MapPin, AlertCircle, Mic, Sparkles, SlidersHorizontal } from "lucide-react";
 
 export type ProvenanceType =
   | "AGENT"
@@ -16,6 +16,9 @@ export type ProvenanceType =
   | "VERIFIED_OUTREACH"
   | "SIMULATED"
   | "DEMO_FALLBACK"
+  | "STATED"
+  | "INFERRED"
+  | "DEFAULT"
   | string;
 
 interface ProvenanceBadgeProps {
@@ -43,7 +46,31 @@ export function ProvenanceBadge({
     dot: "bg-emerald-500",
   };
 
-  if (normSource === "AGENT" || normSource.includes("AGENT")) {
+  if (normSource === "STATED") {
+    config = {
+      label: "Stated",
+      detail: "Directly spoken by organizer",
+      icon: Mic,
+      bg: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      dot: "bg-emerald-500",
+    };
+  } else if (normSource === "INFERRED") {
+    config = {
+      label: "Inferred",
+      detail: "Inferred by AI from context",
+      icon: Sparkles,
+      bg: "bg-violet-50 text-violet-700 border-violet-200",
+      dot: "bg-violet-500",
+    };
+  } else if (normSource === "DEFAULT") {
+    config = {
+      label: "Default",
+      detail: "Standard platform default",
+      icon: SlidersHorizontal,
+      bg: "bg-slate-100 text-slate-700 border-slate-200",
+      dot: "bg-slate-400",
+    };
+  } else if (normSource === "AGENT" || normSource.includes("AGENT")) {
     config = {
       label: "Agent",
       detail: "Autonomous agent execution record",

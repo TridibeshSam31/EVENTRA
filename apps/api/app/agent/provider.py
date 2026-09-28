@@ -257,6 +257,22 @@ class MockLLMProvider(LLMProvider):
                     expression=k_match.group(0),
                     is_flexible="around" in text_lower,
                 )
+            else:
+                num_b_match = re.search(r"(?:budget|cost|spend)[\s:]*(?:₹|rs\.?|inr|\$|usd)?\s*([\d,]+(?:\.\d+)?)", text_lower)
+                if not num_b_match:
+                    num_b_match = re.search(r"([\d,]+(?:\.\d+)?)\s*(?:inr|rupees|rs)", text_lower)
+                if num_b_match:
+                    try:
+                        amt = float(num_b_match.group(1).replace(",", ""))
+                        curr = "USD" if "$" in num_b_match.group(0) or "usd" in num_b_match.group(0) else "INR"
+                        budget_obj = BudgetIntent(
+                            amount=amt,
+                            currency=curr,
+                            expression=num_b_match.group(0),
+                            is_flexible="around" in text_lower,
+                        )
+                    except ValueError:
+                        pass
 
         # 5. Date & Timing
         date_obj = None

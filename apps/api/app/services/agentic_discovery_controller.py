@@ -365,8 +365,12 @@ class AgenticDiscoveryController:
         for i, item in enumerate(confirmed_pool, start=1):
             item.rank = i
 
-        top_matches = confirmed_pool[:4]
-        other_available = confirmed_pool[4:]
+        if confirmed_pool:
+            top_matches = confirmed_pool[:3]
+            other_available = confirmed_pool[3:]
+        else:
+            top_matches = qualified_pool[:3]
+            other_available = qualified_pool[3:]
 
         backup_waitlist = [
             c for c in qualified_pool

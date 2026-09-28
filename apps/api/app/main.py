@@ -198,6 +198,7 @@ app.include_router(integrations_router, prefix=settings.API_V1_STR)
 
 # Conversational Intake & Autonomous Operations Execution
 app.include_router(intake_router, prefix=settings.API_V1_STR)
+app.include_router(intake_router)
 
 # Discovery Runs & Live Funnel Telemetry (Part A.1)
 app.include_router(discovery_runs_router, prefix=settings.API_V1_STR)

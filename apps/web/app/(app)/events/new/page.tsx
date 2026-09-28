@@ -16,15 +16,18 @@ import {
   Loader2,
   AlertCircle,
   Sparkles,
+  Mic,
 } from "lucide-react";
 import { createEvent } from "@/lib/api/events";
 import { setActiveEventId } from "@/stores/eventStore";
+import { VoiceIntakePanel } from "@/features/event-creation/VoiceIntakePanel";
 
 export default function NewEventPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [isDeploying, setIsDeploying] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [isVoiceMode, setIsVoiceMode] = useState(false);
 
   const [formData, setFormData] = useState({
     name: "",
@@ -79,25 +82,57 @@ export default function NewEventPage() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-10 space-y-8">
-        {/* Wizard Header */}
-        <div className="flex items-center justify-between border-b border-slate-100 pb-5">
-          <div>
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-              Protocol Initialization
-            </span>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-1">
-              Initialize New Event Operation
-            </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Step {step} of 3 • {step === 1 ? "Core Details" : step === 2 ? "Logistics & Capacity" : "Budget & Currency"}
-            </p>
-          </div>
+      {isVoiceMode ? (
+        <VoiceIntakePanel
+          onCancel={() => setIsVoiceMode(false)}
+          onFillFormWithValues={(prefilled) => {
+            setFormData((prev) => ({
+              ...prev,
+              name: prefilled.name !== undefined ? prefilled.name : prev.name,
+              description: prefilled.description !== undefined ? prefilled.description : prev.description,
+              start_datetime: prefilled.start_datetime !== undefined ? prefilled.start_datetime : prev.start_datetime,
+              end_datetime: prefilled.end_datetime !== undefined ? prefilled.end_datetime : prev.end_datetime,
+              location: prefilled.location !== undefined ? prefilled.location : prev.location,
+              guest_count: prefilled.guest_count !== undefined ? prefilled.guest_count : prev.guest_count,
+              event_type: prefilled.event_type !== undefined ? prefilled.event_type : prev.event_type,
+              total_budget: prefilled.total_budget !== undefined ? prefilled.total_budget : prev.total_budget,
+              currency: prefilled.currency !== undefined ? prefilled.currency : prev.currency,
+            }));
+            setIsVoiceMode(false);
+          }}
+        />
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-10 space-y-8">
+          {/* Wizard Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-5 gap-4">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                Protocol Initialization
+              </span>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-1">
+                Initialize New Event Operation
+              </h1>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Step {step} of 3 • {step === 1 ? "Core Details" : step === 2 ? "Logistics & Capacity" : "Budget & Currency"}
+              </p>
+            </div>
 
-          <div className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center font-bold text-xs text-[#D6003C]">
-            {step}/3
+            <div className="flex items-center gap-3 self-start sm:self-center">
+              <button
+                id="btn-voice-mode-trigger"
+                type="button"
+                onClick={() => setIsVoiceMode(true)}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 text-[#D6003C] hover:bg-rose-100 text-xs font-bold transition shadow-xs"
+              >
+                <Mic className="w-4 h-4 text-[#D6003C]" />
+                <span>Voice mode</span>
+              </button>
+
+              <div className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center font-bold text-xs text-[#D6003C]">
+                {step}/3
+              </div>
+            </div>
           </div>
-        </div>
 
         {/* Error Notice */}
         {errorMsg && (
@@ -343,6 +378,8 @@ export default function NewEventPage() {
           </div>
         </form>
       </div>
-    </div>
+    )}
+  </div>
   );
 }
+

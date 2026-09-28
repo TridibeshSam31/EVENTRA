@@ -46,6 +46,64 @@ export async function processEventIntake(payload: {
   return apiClient.post<any>("/events/intake", payload);
 }
 
+export interface TranscribeResponse {
+  text: string;
+  detected_language: string;
+  english_text: string;
+  confidence?: number;
+  provider: string;
+}
+
+export interface FieldProvenance {
+  value: any;
+  source: "stated" | "inferred" | "default" | string;
+  confidence: number;
+  evidence_quote?: string | null;
+}
+
+export interface VoiceIntakeSuggestion {
+  id: string;
+  type: string;
+  label: string;
+  value: string;
+  source: string;
+  reason: string;
+  accepted?: boolean;
+}
+
+export interface VoiceIntakePreview {
+  fields: Record<string, FieldProvenance>;
+  missing_fields: string[];
+  clarifying_questions: string[];
+  suggestions: VoiceIntakeSuggestion[];
+  detected_language: string;
+  original_transcript: string;
+  english_transcript: string;
+}
+
+export async function transcribeVoice(formData: FormData): Promise<TranscribeResponse> {
+  return apiClient.postForm<TranscribeResponse>("/events/intake/voice/transcribe", formData);
+}
+
+export async function previewVoiceIntake(payload: {
+  transcript: string;
+  english_text?: string;
+  detected_language?: string;
+  event_id?: string;
+}): Promise<VoiceIntakePreview> {
+  return apiClient.post<VoiceIntakePreview>("/events/intake/voice/preview", payload);
+}
+
+export async function confirmVoiceIntake(payload: {
+  fields: Record<string, any>;
+  accepted_suggestions: string[];
+  detected_language?: string;
+  original_transcript?: string;
+}): Promise<any> {
+  return apiClient.post<any>("/events/intake/voice/confirm", payload);
+}
+
+
 export async function modifyEventPlan(
   eventId: string,
   payload: { modification: string }

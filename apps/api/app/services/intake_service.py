@@ -107,7 +107,10 @@ class IntakeService:
         b_expr = intent_model.budget_expression or (intent_model.budget.expression if intent_model.budget else None)
         b_curr = intent_model.budget_currency or (intent_model.budget.currency if intent_model.budget else "INR")
 
-        total_budget, currency = normalize_budget(amount=b_amount, expression=b_expr or text, currency=b_curr)
+        has_budget_kw = any(k in text.lower() for k in ["budget", "lakh", "lac", "crore", "thousand", "rupees", "inr", "$", "dollar", "rs", "spend", "cost", "paisa", "rupaye", "rupiya", "paise", "रुपए", "लाख", "हजार", "करोड़", "बजट", "खर्च"])
+        effective_b_expr = b_expr if b_expr else (text if has_budget_kw else None)
+        effective_b_amount = b_amount if has_budget_kw else None
+        total_budget, currency = normalize_budget(amount=effective_b_amount, expression=effective_b_expr, currency=b_curr)
 
         # E. Services Needed Categorization into ProviderCategory Enums
         requirements: List[str] = []
@@ -269,6 +272,7 @@ class IntakeService:
         event_id: Optional[str] = None,
         user_id: str = "anonymous_operator",
         force_plan: bool = False,
+        structured_overrides: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Main entry point for natural language event intake with multi-turn context preservation."""
         # 1. Load existing event context if event_id is supplied
@@ -287,8 +291,47 @@ class IntakeService:
                     "requirements": [r.type for r in existing_reqs],
                 }
 
-        # 2. Extract structured intent via Gemini LLM & Deterministic Normalization
-        turn_intent = self.extract_intent(message, current_event_context=existing_context)
+        # 2. Extract structured intent via Gemini LLM or apply organizer-approved structured overrides
+        if structured_overrides:
+            s_start = structured_overrides.get("start_time") or structured_overrides.get("start_datetime")
+            s_end = structured_overrides.get("end_time") or structured_overrides.get("end_datetime")
+            if isinstance(s_start, str):
+                try:
+                    s_start = datetime.fromisoformat(s_start.replace("Z", "+00:00")).replace(tzinfo=None)
+                except Exception:
+                    s_start = None
+            if isinstance(s_end, str):
+                try:
+                    s_end = datetime.fromisoformat(s_end.replace("Z", "+00:00")).replace(tzinfo=None)
+                except Exception:
+                    s_end = None
+
+            turn_intent = {
+                "name": structured_overrides.get("name") or "New Event Operation",
+                "event_type": (structured_overrides.get("event_type") or EventType.CONFERENCE.value).upper(),
+                "location": structured_overrides.get("location") or "Delhi",
+                "city": structured_overrides.get("location") or "Delhi",
+                "guest_count": structured_overrides.get("guest_count") or 100,
+                "total_budget": float(structured_overrides.get("total_budget") or 500000.0),
+                "currency": structured_overrides.get("currency") or "INR",
+                "requirements": structured_overrides.get("requirements") or [],
+                "preferences": structured_overrides.get("preferences") or [],
+                "constraints": structured_overrides.get("constraints") or [],
+                "date_expression": structured_overrides.get("date_expression"),
+                "date_precision": "day",
+                "start_time": s_start,
+                "end_time": s_end,
+                "has_date": s_start is not None or bool(structured_overrides.get("date_expression")),
+                "has_location": bool(structured_overrides.get("location")),
+                "has_guest_count": structured_overrides.get("guest_count") is not None,
+                "has_budget": structured_overrides.get("total_budget") is not None,
+                "has_event_type": bool(structured_overrides.get("event_type")),
+                "missing_information": [],
+                "ambiguities": [],
+                "summary": message,
+            }
+        else:
+            turn_intent = self.extract_intent(message, current_event_context=existing_context)
 
         # 3. Merge existing event state with newly extracted intent
         merged_intent = dict(turn_intent)
