@@ -21,6 +21,7 @@ from app.models.budget import BudgetItem
 from app.models.approval import Approval
 from app.models.incident import Incident
 from app.models.audit import AuditRecord
+from app.models.shortlist import EventShortlistEntry
 from app.models.enums import EventLifecycleState, EventState, TaskStatus, ProviderCategory, IncidentSeverity
 from app.services.live_state_service import LiveStateService
 from app.services.venue_service import VenueService
@@ -227,9 +228,23 @@ class AutonomousOperationsService:
                 self.db.commit()
                 self.db.refresh(event)
 
-        # 3. Retrieve Active Requirements
+        # 3. Retrieve Active Requirements & Categories
         requirements = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
-        categories_to_source = [r.type for r in requirements] if requirements else ["VENUE", "CATERING", "AV_TECH"]
+        categories_to_source = []
+        if requirements:
+            for r in requirements:
+                if r.type and r.type.upper() not in categories_to_source:
+                    categories_to_source.append(r.type.upper())
+        for t in existing_tasks:
+            cat = getattr(t, "required_provider_category", None)
+            if cat:
+                c_up = cat.upper().replace("-", "_").strip()
+                if c_up and c_up not in categories_to_source:
+                    categories_to_source.append(c_up)
+        if not categories_to_source:
+            categories_to_source = ["VENUE", "CATERING", "AV_TECH"]
+        elif "VENUE" not in categories_to_source:
+            categories_to_source.insert(0, "VENUE")
 
         date_str = event.start_datetime.strftime("%d %B %Y") if event.start_datetime else "Upcoming Date"
         city = event.location or "Delhi"
@@ -382,6 +397,16 @@ class AutonomousOperationsService:
         date_str: str,
     ) -> Dict[str, Any]:
         """Discovers, scores, evaluates, and contacts suitable venues."""
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "agent.progress",
+                "event_id": event.id,
+                "message": f"Autonomous Agent: Scouting suitable venues in {city} for {pax} attendees...",
+                "step": "VENUE_SCOUTING",
+            },
+        )
+
         venues, total = self._venue_service.search_venues(city=city, min_capacity=int(pax * 0.8), limit=5)
         if not venues:
             venues, total = self._venue_service.search_venues(city=city, limit=5)
@@ -413,6 +438,47 @@ class AutonomousOperationsService:
         selected_venue, best_score = scored_candidates[0]
 
         venue_source = getattr(selected_venue, "source", None) or ("DEMO_FALLBACK" if is_simulated else "DATABASE")
+
+        # Auto-shortlist top venue candidates
+        for rank, (cand_venue, v_score) in enumerate(scored_candidates[:3], start=1):
+            cand_id = cand_venue.id or str(uuid.uuid4())
+            existing_sl = self.db.query(EventShortlistEntry).filter(
+                EventShortlistEntry.event_id == event.id,
+                (EventShortlistEntry.candidate_id == cand_id) | (EventShortlistEntry.candidate_name == cand_venue.name),
+            ).first()
+            if not existing_sl:
+                sl_entry = EventShortlistEntry(
+                    event_id=event.id,
+                    candidate_id=cand_id,
+                    provider_id=cand_venue.id,
+                    category="VENUE",
+                    candidate_name=cand_venue.name,
+                    status="SHORTLISTED",
+                    ranking=rank,
+                    notes=f"Autonomous score: {v_score} (Capacity: {cand_venue.capacity} pax in {city})",
+                    candidate_data={
+                        "id": cand_venue.id,
+                        "name": cand_venue.name,
+                        "capacity": cand_venue.capacity,
+                        "hourly_rate": cand_venue.hourly_rate,
+                        "address": cand_venue.address,
+                        "city": cand_venue.city,
+                        "contact_phone": cand_venue.contact_phone,
+                        "score": v_score,
+                    },
+                )
+                self.db.add(sl_entry)
+        self.db.commit()
+
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "shortlist.updated",
+                "event_id": event.id,
+                "action": "added",
+                "category": "VENUE",
+            },
+        )
 
         # Record candidate evaluation trace in Audit
         self._audit.record(
@@ -448,6 +514,16 @@ class AutonomousOperationsService:
             actor_type="AGENT",
         )
 
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "agent.progress",
+                "event_id": event.id,
+                "message": f"Autonomous Agent: Shortlisted {selected_venue.name} & dispatched availability inquiry via WhatsApp",
+                "step": "VENUE_CONTACTED",
+            },
+        )
+
         return {
             "category": "VENUE",
             "provider_id": selected_venue.id,
@@ -472,6 +548,17 @@ class AutonomousOperationsService:
     ) -> Dict[str, Any]:
         """Discovers, scores, assigns, and contacts providers for a specific category via AgenticDiscoveryController."""
         cat_lower = category.lower()
+        cat_title = category.replace("_", " ").title()
+
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "agent.progress",
+                "event_id": event.id,
+                "message": f"Autonomous Agent: Sourcing and qualifying {cat_title} candidates in {city}...",
+                "step": f"DISCOVERY_{category}",
+            },
+        )
 
         # 1. Run Agentic Discovery (Multi-iteration scraping + qualification + ranking)
         controller = AgenticDiscoveryController(
@@ -554,6 +641,74 @@ class AutonomousOperationsService:
                 self.db.add(selected_vendor)
                 self.db.commit()
                 self.db.refresh(selected_vendor)
+
+        # Auto-shortlist top vendor candidates
+        if discovery_res.top_matches:
+            for rank, tm in enumerate(discovery_res.top_matches[:3], start=1):
+                cand = tm.candidate
+                cand_id = getattr(cand, "id", None) or cand.name or str(uuid.uuid4())
+                existing_sl = self.db.query(EventShortlistEntry).filter(
+                    EventShortlistEntry.event_id == event.id,
+                    (EventShortlistEntry.candidate_id == cand_id) | (EventShortlistEntry.candidate_name == cand.name),
+                ).first()
+                if not existing_sl:
+                    sl_entry = EventShortlistEntry(
+                        event_id=event.id,
+                        candidate_id=cand_id,
+                        provider_id=selected_vendor.id if (selected_vendor and selected_vendor.name == cand.name) else None,
+                        category=category.upper(),
+                        candidate_name=cand.name,
+                        status="SHORTLISTED",
+                        ranking=rank,
+                        notes=f"Autonomous score: {tm.score} ({tm.tier})",
+                        candidate_data={
+                            "name": cand.name,
+                            "city": cand.city or city,
+                            "phone": cand.phone,
+                            "rating": cand.rating,
+                            "score": tm.score,
+                            "tier": tm.tier,
+                            "source": getattr(cand, "source", "LIVE_SCRAPE"),
+                        },
+                    )
+                    self.db.add(sl_entry)
+        elif selected_vendor:
+            existing_sl = self.db.query(EventShortlistEntry).filter(
+                EventShortlistEntry.event_id == event.id,
+                (EventShortlistEntry.candidate_id == selected_vendor.id) | (EventShortlistEntry.candidate_name == selected_vendor.name),
+            ).first()
+            if not existing_sl:
+                sl_entry = EventShortlistEntry(
+                    event_id=event.id,
+                    candidate_id=selected_vendor.id,
+                    provider_id=selected_vendor.id,
+                    category=category.upper(),
+                    candidate_name=selected_vendor.name,
+                    status="SHORTLISTED",
+                    ranking=1,
+                    notes=f"Autonomous score: {best_score}",
+                    candidate_data={
+                        "id": selected_vendor.id,
+                        "name": selected_vendor.name,
+                        "city": selected_vendor.city,
+                        "phone": selected_vendor.contact_phone,
+                        "rating": selected_vendor.rating,
+                        "score": best_score,
+                        "source": vendor_source,
+                    },
+                )
+                self.db.add(sl_entry)
+        self.db.commit()
+
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "shortlist.updated",
+                "event_id": event.id,
+                "action": "added",
+                "category": category,
+            },
+        )
 
         # Record candidate evaluation trace
         self._audit.record(
@@ -677,6 +832,16 @@ class AutonomousOperationsService:
             recipient_contact=selected_vendor.contact_phone,
             actor_id="autonomous_agent",
             actor_type="AGENT",
+        )
+
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "agent.progress",
+                "event_id": event.id,
+                "message": f"Autonomous Agent: Shortlisted {selected_vendor.name} for {cat_title} & dispatched RFQ via WhatsApp",
+                "step": f"RFQ_{category}",
+            },
         )
 
         return {

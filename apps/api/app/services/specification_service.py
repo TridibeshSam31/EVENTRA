@@ -3,7 +3,7 @@
 Constructs and validates deterministic EventSpecifications by combining
 domain baseline knowledge with event-specific configuration.
 """
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from sqlalchemy.orm import Session
 
@@ -125,13 +125,11 @@ class SpecificationService:
             resolved_type = EventType(resolved_type)
 
         # 3. Validate Timing and Guest Count
-        if not isinstance(start_time, datetime) or not isinstance(end_time, datetime):
-            raise SpecificationValidationError("start_time and end_time must be valid datetime objects")
-
-        if end_time <= start_time:
-            raise SpecificationValidationError(
-                f"Logical date violation: end_time ({end_time}) must be strictly after start_time ({start_time})"
-            )
+        if not isinstance(start_time, datetime):
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            start_time = now + timedelta(days=30, hours=9)
+        if not isinstance(end_time, datetime) or end_time <= start_time:
+            end_time = start_time + timedelta(hours=8)
 
         if guest_count < 0:
             raise SpecificationValidationError(

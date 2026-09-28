@@ -77,8 +77,8 @@ class GoogleMapsScraperClient:
     def poll_job(
         self,
         job_id: str,
-        timeout_seconds: int = 40,
-        interval_seconds: float = 3.0,
+        timeout_seconds: int = 8,
+        interval_seconds: float = 1.5,
     ) -> bool:
         """Polls the scraper job until completion or timeout."""
         import time

@@ -197,23 +197,19 @@ export function AgentPanel({
           </Link>
         </div>
 
-        {!isLive && (
+        {isRunning || starting ? (
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm animate-pulse">
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+            <span>Autonomous Loop Active • Sourcing & Contacting</span>
+          </div>
+        ) : (
           <button
             onClick={handleStartOperations}
             disabled={starting}
             className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-sm transition-all disabled:opacity-50"
           >
-            {starting ? (
-              <>
-                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                <span>Dispatching Operations...</span>
-              </>
-            ) : (
-              <>
-                <Zap className="w-3.5 h-3.5 fill-white" />
-                <span>Start Autonomous Operations</span>
-              </>
-            )}
+            <Zap className="w-3.5 h-3.5 fill-white" />
+            <span>{isLive ? "Dispatch Autonomous Sourcing" : "Start Autonomous Operations"}</span>
           </button>
         )}
       </div>

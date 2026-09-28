@@ -197,6 +197,13 @@ class PlanningService:
             raise NotFoundException(f"Event with id '{event_id}' not found.")
 
         tasks = self.db.query(Task).filter(Task.event_id == event_id).all()
+        if not tasks:
+            try:
+                return self.generate_plan(event_id)
+            except Exception as e:
+                import logging
+                logging.getLogger("eventra.api").warning(f"Auto plan fallback for {event_id}: {e}")
+
         deps = self.db.query(TaskDependency).filter(TaskDependency.event_id == event_id).all()
         resources = self.db.query(Resource).filter(Resource.event_id == event_id).all()
         budget_items = self.db.query(BudgetItem).filter(BudgetItem.event_id == event_id).all()

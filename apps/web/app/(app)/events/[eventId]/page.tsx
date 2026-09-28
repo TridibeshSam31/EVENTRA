@@ -44,6 +44,7 @@ export default function EventOverviewPage() {
     event: storeEvent,
     opsStatus: storeOps,
     isAgentRunning,
+    agentMessage,
     refreshWorkspace,
   } = useEventWorkspace(eventId);
 
@@ -152,7 +153,7 @@ export default function EventOverviewPage() {
         lifecycleState={lifecycleState}
         isRunning={isAgentRunning}
         pendingApprovalsCount={pendingApprovals.length}
-        latestOperation={effectiveOps?.activity_feed?.[0]?.action || null}
+        latestOperation={agentMessage || effectiveOps?.activity_feed?.[0]?.action || null}
         latestResult={effectiveOps?.activity_feed?.[0]?.detail || null}
         onOperationsStarted={() => {
           fetchData();

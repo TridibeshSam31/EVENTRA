@@ -80,6 +80,17 @@ class EventService:
         self.db.add(owner_member)
         self.db.commit()
         self.db.refresh(event)
+
+        # Automatically materialize operational plan (tasks, dependencies, schedule, and budget)
+        try:
+            from app.services.planning_service import PlanningService
+            planning_service = PlanningService(self.db)
+            planning_service.generate_plan(event.id)
+            self.db.refresh(event)
+        except Exception as plan_err:
+            import logging
+            logging.getLogger("eventra.api").warning(f"Auto plan generation for event {event.id}: {plan_err}")
+
         return event
 
     def get_event(self, event_id: str) -> Optional[Event]:
