@@ -56,9 +56,9 @@ class GoogleMapsScraperClient:
             "zoom": 15,
             "lat": str(lat),
             "lon": str(lon),
-            "fast_mode": False,
+            "fast_mode": True,
             "radius": radius_val,
-            "depth": min(depth, settings.GOOGLE_MAPS_SCRAPER_MAX_DEPTH),
+            "depth": min(depth, 2),
             "email": False,
             "max_time": max_time,
         }
@@ -155,10 +155,9 @@ class GoogleMapsScraperClient:
             return []
 
         success = self.poll_job(job_id=job_id, timeout_seconds=self.timeout_seconds)
-        if not success:
-            return []
-
         raw_rows = self.download_results(job_id)
+        if not raw_rows and not success:
+            return []
         results: List[RawScraperBusiness] = []
         for row in raw_rows:
             results.append(

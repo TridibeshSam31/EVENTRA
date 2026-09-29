@@ -72,6 +72,41 @@ class AutonomousOperationsService:
         self._verification_service = VerificationService(db)
         self._audit = AuditRecorder(db)
 
+    @staticmethod
+    def _resolve_categories_to_source(
+        requirements: List[Any],
+        tasks: List[Any],
+    ) -> List[str]:
+        """Resolves and normalizes canonical provider categories to source.
+        
+        Maps informal task categories (e.g. 'av' -> 'AV_TECH', 'stage' -> 'DECOR')
+        into controlled ProviderCategory taxonomy values, filtering out non-provider items.
+        """
+        from app.services.normalization_utils import SERVICE_CATEGORY_MAP
+        from app.models.enums import ProviderCategory
+        valid_cats = {pc.value for pc in ProviderCategory}
+
+        categories: List[str] = []
+        for r in requirements:
+            rtype = getattr(r, "type", None) or (r if isinstance(r, str) else "")
+            if rtype:
+                clean = str(rtype).lower().strip()
+                canonical = SERVICE_CATEGORY_MAP.get(clean, str(rtype).upper().replace("-", "_").strip())
+                if canonical in valid_cats and canonical not in categories:
+                    categories.append(canonical)
+
+        for t in tasks:
+            cat = getattr(t, "required_provider_category", None)
+            if cat:
+                clean = str(cat).lower().strip()
+                canonical = SERVICE_CATEGORY_MAP.get(clean, str(cat).upper().replace("-", "_").strip())
+                if canonical in valid_cats and canonical not in categories:
+                    categories.append(canonical)
+
+        if not categories:
+            categories = ["VENUE", "CATERING", "AV_TECH"]
+        return categories
+
     def initiate_operations_run(
         self,
         event_id: str,
@@ -103,11 +138,19 @@ class AutonomousOperationsService:
                 "lifecycle_state": event.lifecycle_state,
             }
 
-        # 1. Ensure operational plan exists
+        # 1. Ensure operational plan exists (skip if already LIVE - plan already generated)
         existing_tasks = self.db.query(Task).filter(Task.event_id == event.id).all()
-        if not existing_tasks or event.lifecycle_state == EventLifecycleState.DRAFT.value:
-            self._planning_service.generate_plan(event.id)
-            self.db.refresh(event)
+        if event.lifecycle_state in (
+            EventLifecycleState.DRAFT.value,
+            EventLifecycleState.SPECIFIED.value,
+            EventLifecycleState.PLANNED.value,
+        ):
+            try:
+                self._planning_service.generate_plan(event.id)
+                self.db.refresh(event)
+            except Exception as plan_err:
+                logger.warning(f"Planning skipped for event {event.id}: {plan_err}")
+                self.db.refresh(event)
 
         # 2. Transition lifecycle state to LIVE (Do NOT force LIVE if validation fails)
         if event.lifecycle_state in (EventLifecycleState.PLANNED.value, EventLifecycleState.DRAFT.value):
@@ -134,19 +177,9 @@ class AutonomousOperationsService:
 
         # 4. Create DiscoveryRun per required category (Requirement 9)
         requirements = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
-        categories_to_source = []
-        if requirements:
-            for r in requirements:
-                if r.type and r.type.upper() not in categories_to_source:
-                    categories_to_source.append(r.type.upper())
-        for t in existing_tasks:
-            cat = getattr(t, "required_provider_category", None)
-            if cat:
-                c_up = cat.upper().replace("-", "_").strip()
-                if c_up and c_up not in categories_to_source:
-                    categories_to_source.append(c_up)
-        if not categories_to_source:
-            categories_to_source = ["VENUE", "CATERING", "AV_TECH"]
+        categories_to_source = self._resolve_categories_to_source(requirements, existing_tasks)
+        from app.services.geospatial_service import geospatial_discovery
+        clean_city = geospatial_discovery.clean_city_name(event.location or "Delhi")
 
         for cat in categories_to_source:
             existing_disc = self.db.query(DiscoveryRun).filter(
@@ -166,7 +199,7 @@ class AutonomousOperationsService:
                     radius_km=10.0,
                     target_count=5,
                     parameters={
-                        "location": event.location or "Delhi",
+                        "location": clean_city,
                         "guest_count": event.guest_count or 100,
                         "agent_run_id": agent_run_id,
                     },
@@ -264,11 +297,20 @@ class AutonomousOperationsService:
                 },
             )
 
-        # 1. Ensure operational plan exists
+        # 1. Ensure operational plan exists (skip if already LIVE - plan already generated)
         existing_tasks = self.db.query(Task).filter(Task.event_id == event.id).all()
-        if not existing_tasks or event.lifecycle_state == EventLifecycleState.DRAFT.value:
-            self._planning_service.generate_plan(event.id)
-            self.db.refresh(event)
+        if event.lifecycle_state in (
+            EventLifecycleState.DRAFT.value,
+            EventLifecycleState.SPECIFIED.value,
+            EventLifecycleState.PLANNED.value,
+        ):
+            try:
+                self._planning_service.generate_plan(event.id)
+                self.db.refresh(event)
+            except Exception as plan_err:
+                # Planning may fail (e.g. missing spec) — log and continue to discovery
+                logger.warning(f"Planning skipped for event {event.id} during autonomous ops: {plan_err}")
+                self.db.refresh(event)
 
         # 2. Transition lifecycle state to LIVE (Requirement 12: Do NOT force LIVE on failure)
         if event.lifecycle_state in (EventLifecycleState.PLANNED.value, EventLifecycleState.DRAFT.value):
@@ -316,22 +358,11 @@ class AutonomousOperationsService:
 
         # 3. Retrieve Active Requirements & Categories
         requirements = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
-        categories_to_source = []
-        if requirements:
-            for r in requirements:
-                if r.type and r.type.upper() not in categories_to_source:
-                    categories_to_source.append(r.type.upper())
-        for t in existing_tasks:
-            cat = getattr(t, "required_provider_category", None)
-            if cat:
-                c_up = cat.upper().replace("-", "_").strip()
-                if c_up and c_up not in categories_to_source:
-                    categories_to_source.append(c_up)
-        if not categories_to_source:
-            categories_to_source = ["VENUE", "CATERING", "AV_TECH"]
+        categories_to_source = self._resolve_categories_to_source(requirements, existing_tasks)
 
         date_str = event.start_datetime.strftime("%d %B %Y") if event.start_datetime else "Upcoming Date"
-        city = event.location or "Delhi"
+        from app.services.geospatial_service import geospatial_discovery
+        city = geospatial_discovery.clean_city_name(event.location or "Delhi")
         pax = event.guest_count or 100
 
         operations_report: List[Dict[str, Any]] = []
@@ -777,9 +808,13 @@ class AutonomousOperationsService:
             cand_source = getattr(cand, "source", "LIVE_SCRAPE") or "LIVE_SCRAPE"
 
             # Register real vendor in DB if not existing
+            from sqlalchemy import or_
             vendor_record = (
                 self.db.query(Vendor)
-                .filter(Vendor.name == cand_name, Vendor.city.ilike(f"%{city}%"))
+                .filter(
+                    Vendor.name == cand_name,
+                    or_(Vendor.city.ilike(f"%{city}%"), Vendor.city.is_(None)),
+                )
                 .first()
             )
             if not vendor_record:
@@ -1406,7 +1441,7 @@ class AutonomousOperationsService:
             "total_budget": total_budget,
             "committed_budget": committed_budget,
             "currency": event.currency,
-            "live_state": live_state.model_dump(),
+            "live_state": live_state.model_dump(mode="json"),
             "agent": agent_data,
             "discovery": discovery_list,
             "assignments": assignment_list,
@@ -1439,10 +1474,16 @@ class AutonomousOperationsService:
         if not entry:
             raise NotFoundException(f"Candidate '{candidate_id}' not found in event '{event_id}' shortlist.")
 
+        from app.services.identity_service import resolve_requester_identity, ensure_user_exists
+
+        requester_id = resolve_requester_identity(self.db, event_id=event_id, candidate_user_id=user_id)
+        selected_by_actor = user_id or requester_id
+        ensure_user_exists(self.db, selected_by_actor)
+
         entry.status = "SELECTED"
         entry.selection_source = "ORGANIZER_SELECTION"
-        entry.selected_by = user_id
-        entry.selected_at = utc_now()
+        entry.selected_by = selected_by_actor
+        entry.selected_at = entry.selected_at or utc_now()
 
         # Check / create VendorAssignment
         existing_asg = (
@@ -1468,48 +1509,27 @@ class AutonomousOperationsService:
             if event:
                 event.venue_id = entry.provider_id
 
-        # Initialize pending communication approval (Consent is NOT implied by selection)
-        from app.models.approval import Approval
-        from app.engines.auth.snapshot import compute_event_state_snapshot
-        approval = (
-            self.db.query(Approval)
-            .filter(
-                Approval.event_id == event_id,
-                Approval.action_type == "COMMUNICATION_OUTREACH",
-                Approval.target_id == entry.candidate_id,
-            )
-            .first()
+        # Initialize pending communication approval via central ApprovalService boundary
+        from app.services.approval_service import ApprovalService
+        approval_svc = ApprovalService(self.db)
+        approval, is_new_approval = approval_svc.create_communication_outreach_approval(
+            event_id=event_id,
+            candidate_id=entry.candidate_id,
+            requester_id=entry.selected_by or requester_id,
+            candidate_name=entry.candidate_name,
+            category=entry.category,
+            provider_id=entry.provider_id,
         )
-        if not approval:
-            approval = Approval(
-                event_id=event_id,
-                requester_id=user_id or "organizer",
-                action_type="COMMUNICATION_OUTREACH",
-                target_type=(entry.category or "VENDOR").upper(),
-                target_id=entry.candidate_id,
-                impact_level="MAJOR",
-                requested_action={
-                    "candidate_id": entry.candidate_id,
-                    "candidate_name": entry.candidate_name,
-                    "category": entry.category,
-                    "provider_id": entry.provider_id,
-                },
-                status="PENDING",
-                state_snapshot=compute_event_state_snapshot(self.db, event_id),
-                created_at=utc_now(),
-            )
-            self.db.add(approval)
-            self.db.flush()
 
         c_data = dict(entry.candidate_data or {})
-        c_data["communication"] = {
-            "approval_id": approval.id,
-            "approval_status": "PENDING",
-            "call_status": "NOT_ATTEMPTED",
-            "whatsapp_status": "NOT_ATTEMPTED",
-            "overall_status": "PENDING_APPROVAL",
-            "updated_at": utc_now().isoformat(),
-        }
+        comm_data = dict(c_data.get("communication") or {})
+        comm_data["approval_id"] = approval.id
+        comm_data["approval_status"] = approval.status
+        comm_data["call_status"] = comm_data.get("call_status") or "NOT_ATTEMPTED"
+        comm_data["whatsapp_status"] = comm_data.get("whatsapp_status") or "NOT_ATTEMPTED"
+        comm_data["overall_status"] = "PENDING_APPROVAL" if approval.status == "PENDING" else approval.status
+        comm_data["updated_at"] = utc_now().isoformat()
+        c_data["communication"] = comm_data
         entry.candidate_data = c_data
 
         self.db.commit()
@@ -1529,19 +1549,20 @@ class AutonomousOperationsService:
                 "selected_at": entry.selected_at.isoformat() if entry.selected_at else None,
             },
         )
-        live_broker.publish_sync(
-            event_id,
-            {
-                "type": "approval.created",
-                "event_id": event_id,
-                "approval_id": approval.id,
-                "action_type": "COMMUNICATION_OUTREACH",
-                "target_id": entry.candidate_id,
-                "target_name": entry.candidate_name,
-                "status": "PENDING",
-                "impact_level": "MAJOR",
-            },
-        )
+        if is_new_approval:
+            live_broker.publish_sync(
+                event_id,
+                {
+                    "type": "approval.created",
+                    "event_id": event_id,
+                    "approval_id": approval.id,
+                    "action_type": "COMMUNICATION_OUTREACH",
+                    "target_id": entry.candidate_id,
+                    "target_name": entry.candidate_name,
+                    "status": "PENDING",
+                    "impact_level": "MAJOR",
+                },
+            )
         return {
             "status": "SELECTED",
             "candidate_id": entry.candidate_id,

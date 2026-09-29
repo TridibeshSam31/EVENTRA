@@ -307,7 +307,10 @@ class ProviderCommunicationService:
         )
         if approval:
             approval.status = "APPROVED"
-            approval.approver_id = approver_id
+            if approver_id:
+                from app.services.identity_service import ensure_user_exists
+                approver = ensure_user_exists(self.db, approver_id)
+                approval.approver_id = approver.id
             approval.decided_at = now_dt
             self.db.commit()
 

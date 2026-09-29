@@ -43,21 +43,76 @@ class ApprovalService:
     def _ensure_user_exists(self, user_id: Optional[str]) -> Optional[str]:
         if not user_id:
             return None
-        user = self.db.query(User).filter(User.id == user_id).first()
+        from app.services.identity_service import ensure_user_exists
+        return ensure_user_exists(self.db, user_id).id
+
+    def _resolve_and_verify_requester(self, event_id: str, candidate_user_id: Optional[str]) -> str:
+        """Centrally resolves and guarantees requester_id exists in the users table prior to INSERT."""
+        from app.services.identity_service import resolve_requester_identity, ensure_user_exists
+        from app.models.user import User
+
+        resolved_id = resolve_requester_identity(self.db, event_id=event_id, candidate_user_id=candidate_user_id)
+        user = self.db.query(User).filter(User.id == resolved_id).first()
         if not user:
-            email = f"{user_id.lower().replace('-', '_')}@eventra.ai"
-            user = self.db.query(User).filter(User.email == email).first()
-            if not user:
-                user = User(
-                    id=user_id,
-                    name=user_id.replace("_", " ").title(),
-                    email=email,
-                )
-                self.db.add(user)
-                self.db.flush()
-            else:
-                user_id = user.id
-        return user_id
+            user = ensure_user_exists(self.db, resolved_id)
+            self.db.flush()
+
+        db_user = self.db.query(User).filter(User.id == user.id).first()
+        if not db_user:
+            raise NotFoundException(
+                f"Referential integrity failure: resolved user '{resolved_id}' could not be verified in users table."
+            )
+        return db_user.id
+
+    def create_communication_outreach_approval(
+        self,
+        event_id: str,
+        candidate_id: str,
+        requester_id: Optional[str] = None,
+        candidate_name: Optional[str] = None,
+        category: Optional[str] = None,
+        provider_id: Optional[str] = None,
+    ) -> Tuple[Approval, bool]:
+        """Centrally creates or retrieves a COMMUNICATION_OUTREACH approval for a shortlist candidate.
+        
+        Guarantees that requester_id is resolved and verified to exist in the users table prior
+        to INSERT, strictly maintaining the approvals_requester_id_fkey constraint.
+        """
+        existing = (
+            self.db.query(Approval)
+            .filter(
+                Approval.event_id == event_id,
+                Approval.action_type == "COMMUNICATION_OUTREACH",
+                Approval.target_id == candidate_id,
+            )
+            .first()
+        )
+        if existing:
+            return existing, False
+
+        verified_requester_id = self._resolve_and_verify_requester(event_id, requester_id)
+
+        approval = Approval(
+            event_id=event_id,
+            requester_id=verified_requester_id,
+            approver_id=None,
+            action_type="COMMUNICATION_OUTREACH",
+            target_type=(category or "VENDOR").upper(),
+            target_id=candidate_id,
+            impact_level="MAJOR",
+            requested_action={
+                "candidate_id": candidate_id,
+                "candidate_name": candidate_name,
+                "category": category,
+                "provider_id": provider_id,
+            },
+            status="PENDING",
+            state_snapshot=compute_event_state_snapshot(self.db, event_id),
+            created_at=utc_now(),
+        )
+        self.db.add(approval)
+        self.db.flush()
+        return approval, True
 
     def create_request(
         self,
@@ -67,7 +122,7 @@ class ApprovalService:
     ) -> Approval:
         """Evaluates policy and creates an immutable, snapshot-anchored ApprovalRequest."""
         event = self._get_event(event_id)
-        requester_id = self._ensure_user_exists(requester_id)
+        requester_id = self._resolve_and_verify_requester(event_id, requester_id)
 
         # 1. Authorize action and determine impact level
         decision = self._auth_service.authorize_action(

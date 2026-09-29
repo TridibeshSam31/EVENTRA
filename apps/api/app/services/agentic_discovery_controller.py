@@ -287,6 +287,8 @@ class AgenticDiscoveryController:
                         for raw_item in res.data:
                             norm = NormalizedProvider.model_validate(raw_item)
                             iter_scraped_candidates.append(norm)
+                        if len(iter_scraped_candidates) >= self.target_count:
+                            break
 
             total_scraped_count += len(iter_scraped_candidates)
             _log_event(

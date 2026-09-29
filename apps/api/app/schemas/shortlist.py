@@ -19,7 +19,7 @@ class ShortlistEntryCreate(BaseModel):
 
 
 class ShortlistCandidateSelect(BaseModel):
-    selected_by: Optional[str] = Field("organizer", description="Identifier of organizer making selection")
+    selected_by: Optional[str] = Field(None, description="Identifier of organizer making selection")
 
 
 class ShortlistEntryResponse(BaseModel):

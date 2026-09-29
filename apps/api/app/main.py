@@ -126,6 +126,13 @@ async def lifespan(app: FastAPI):
         settings.API_PORT,
     )
     log_startup_adapter_status()
+    try:
+        from app.db.session import SessionLocal
+        from app.services.identity_service import ensure_canonical_users
+        with SessionLocal() as db:
+            ensure_canonical_users(db)
+    except Exception as e:
+        logger.warning("Could not initialize canonical users at startup: %s", e)
     yield
     logger.info("EVENTRA API shutting down.")
 

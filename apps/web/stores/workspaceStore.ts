@@ -284,8 +284,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
                 ...s,
                 status: "SELECTED",
                 selection_source: "ORGANIZER_SELECTION",
-                selected_by: "organizer",
-                selected_at: new Date().toISOString(),
+                selected_by: updated.selected_by || s.selected_by,
+                selected_at: updated.selected_at || new Date().toISOString(),
+                candidate_data: updated.candidate_data || s.candidate_data,
               }
             : s
         ),

@@ -94,7 +94,15 @@ class VenueService:
         query = self.db.query(Venue)
 
         if city:
-            query = query.filter(func.lower(Venue.city) == city.strip().lower())
+            clean_city = city.strip().lower()
+            base_city = clean_city.split(",")[0].strip() if "," in clean_city else clean_city
+            query = query.filter(
+                or_(
+                    func.lower(Venue.city) == clean_city,
+                    func.lower(Venue.city) == base_city,
+                    func.lower(Venue.city).ilike(f"%{base_city}%"),
+                )
+            )
 
         if min_capacity is not None:
             query = query.filter(Venue.capacity >= min_capacity)

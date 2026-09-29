@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_current_user_id, get_db_session
 from app.services.live_state_service import LiveStateService
 from app.services.live_broker import live_broker
+from app.core.serialization import eventra_json_dumps
 from app.schemas.live_state import (
     EventLiveState,
     GoLiveRequest,
@@ -131,7 +132,7 @@ async def live_stream(
         queue = await live_broker.subscribe(event_id)
         frames_sent = 0
         try:
-            init_data = json.dumps({
+            init_data = eventra_json_dumps({
                 "type": "CONNECTED",
                 "event_id": event_id,
                 "state": initial_state.model_dump(mode="json"),
@@ -146,7 +147,7 @@ async def live_stream(
                 try:
                     message = await asyncio.wait_for(queue.get(), timeout=15.0)
                     msg_type = message.get("type", "update")
-                    payload = json.dumps(message)
+                    payload = eventra_json_dumps(message)
                     yield f"event: {msg_type}\ndata: {payload}\n\n"
                     frames_sent += 1
                     if max_frames and frames_sent >= max_frames:

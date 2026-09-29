@@ -125,7 +125,9 @@ class QualificationEngine:
             )
 
         # Gate 3: Taxonomy & Category Compatibility
-        cat_clean = category.strip().upper() if category else "OTHER"
+        from app.services.normalization_utils import SERVICE_CATEGORY_MAP
+        cat_raw = category.strip().lower() if category else "other"
+        cat_clean = SERVICE_CATEGORY_MAP.get(cat_raw, cat_raw.upper())
         classification = ProviderClassifier.classify(
             name=candidate.name,
             raw_category=candidate.raw_category,
@@ -134,12 +136,17 @@ class QualificationEngine:
             website=candidate.website,
         )
         if cat_clean != "OTHER" and classification.category != cat_clean:
-            # Secondary check: search raw categories list or description
+            # Secondary check: check candidate's assigned category, raw categories list, or description
             alt_match = False
-            for raw_c in candidate.categories:
-                if cat_clean.lower() in raw_c.lower():
-                    alt_match = True
-                    break
+            cand_cat_norm = SERVICE_CATEGORY_MAP.get(str(candidate.category or "").strip().lower(), str(candidate.category or "").strip().upper())
+            if cand_cat_norm == cat_clean:
+                alt_match = True
+            if not alt_match:
+                for raw_c in candidate.categories:
+                    raw_norm = SERVICE_CATEGORY_MAP.get(raw_c.strip().lower(), raw_c.strip().upper())
+                    if cat_clean == raw_norm or cat_clean.lower() in raw_c.lower():
+                        alt_match = True
+                        break
             if not alt_match:
                 reason = f"Category mismatch (Requested: {cat_clean}, Classified: {classification.category})"
                 return QualificationResult(

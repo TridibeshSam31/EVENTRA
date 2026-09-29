@@ -7,7 +7,7 @@ import math
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from app.models.vendor import Vendor
 from app.models.provider_availability import ProviderAvailability
@@ -134,7 +134,15 @@ class VendorService:
             query = query.filter(func.lower(Vendor.category) == category.strip().lower())
 
         if city:
-            query = query.filter(func.lower(Vendor.city) == city.strip().lower())
+            clean_city = city.strip().lower()
+            base_city = clean_city.split(",")[0].strip() if "," in clean_city else clean_city
+            query = query.filter(
+                or_(
+                    func.lower(Vendor.city) == clean_city,
+                    func.lower(Vendor.city) == base_city,
+                    func.lower(Vendor.city).ilike(f"%{base_city}%"),
+                )
+            )
 
         if status:
             query = query.filter(Vendor.status == status.strip().upper())

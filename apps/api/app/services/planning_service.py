@@ -65,14 +65,16 @@ class PlanningService:
         if not event:
             raise NotFoundException(f"Event with id '{event_id}' not found.")
 
-        # Guard: only plan events in DRAFT or SPECIFIED states
+        # Guard: only plan events in non-concluded states
         if event.lifecycle_state not in (
             EventLifecycleState.DRAFT.value,
             EventLifecycleState.SPECIFIED.value,
+            EventLifecycleState.PLANNED.value,
+            EventLifecycleState.LIVE.value,
         ):
             raise BadRequestException(
                 f"Cannot generate plan: event is in '{event.lifecycle_state}' state. "
-                f"Planning requires DRAFT or SPECIFIED state."
+                f"Planning requires DRAFT, SPECIFIED, PLANNED, or LIVE state."
             )
 
         # Build specification

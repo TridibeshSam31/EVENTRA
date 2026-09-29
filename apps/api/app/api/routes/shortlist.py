@@ -224,15 +224,17 @@ def select_event_shortlist_candidate(
         )
 
     from app.models.shortlist import utc_now
-    selected_by_user = (
-        (payload.selected_by if payload and payload.selected_by else None)
-        or (current_user_id if current_user_id != "anonymous_operator" else None)
-        or "organizer"
-    )
+    from app.services.identity_service import resolve_requester_identity, ensure_user_exists
+
+    candidate_actor = (payload.selected_by if payload and payload.selected_by else None) or current_user_id
+    requester_id = resolve_requester_identity(db, event_id=event_id, candidate_user_id=candidate_actor)
+    selected_by_user = (payload.selected_by if payload and payload.selected_by else None) or requester_id
+    ensure_user_exists(db, selected_by_user)
+
     entry.status = "SELECTED"
     entry.selection_source = "ORGANIZER_SELECTION"
     entry.selected_by = selected_by_user
-    entry.selected_at = utc_now()
+    entry.selected_at = entry.selected_at or utc_now()
 
     from app.models.vendor_assignment import VendorAssignment
     existing_asg = (
@@ -255,48 +257,27 @@ def select_event_shortlist_candidate(
     if entry.category and entry.category.upper() == "VENUE" and entry.provider_id:
         event.venue_id = entry.provider_id
 
-    # Initialize pending communication approval (Consent is NOT implied by selection)
-    from app.models.approval import Approval
-    from app.engines.auth.snapshot import compute_event_state_snapshot
-    approval = (
-        db.query(Approval)
-        .filter(
-            Approval.event_id == event_id,
-            Approval.action_type == "COMMUNICATION_OUTREACH",
-            Approval.target_id == entry.candidate_id,
-        )
-        .first()
+    # Initialize pending communication approval via central ApprovalService boundary
+    from app.services.approval_service import ApprovalService
+    approval_svc = ApprovalService(db)
+    approval, is_new_approval = approval_svc.create_communication_outreach_approval(
+        event_id=event_id,
+        candidate_id=entry.candidate_id,
+        requester_id=entry.selected_by or requester_id,
+        candidate_name=entry.candidate_name,
+        category=entry.category,
+        provider_id=entry.provider_id,
     )
-    if not approval:
-        approval = Approval(
-            event_id=event_id,
-            requester_id=entry.selected_by or current_user_id or "organizer",
-            action_type="COMMUNICATION_OUTREACH",
-            target_type=(entry.category or "VENDOR").upper(),
-            target_id=entry.candidate_id,
-            impact_level="MAJOR",
-            requested_action={
-                "candidate_id": entry.candidate_id,
-                "candidate_name": entry.candidate_name,
-                "category": entry.category,
-                "provider_id": entry.provider_id,
-            },
-            status="PENDING",
-            state_snapshot=compute_event_state_snapshot(db, event_id),
-            created_at=utc_now(),
-        )
-        db.add(approval)
-        db.flush()
 
     c_data = dict(entry.candidate_data or {})
-    c_data["communication"] = {
-        "approval_id": approval.id,
-        "approval_status": "PENDING",
-        "call_status": "NOT_ATTEMPTED",
-        "whatsapp_status": "NOT_ATTEMPTED",
-        "overall_status": "PENDING_APPROVAL",
-        "updated_at": utc_now().isoformat(),
-    }
+    comm_data = dict(c_data.get("communication") or {})
+    comm_data["approval_id"] = approval.id
+    comm_data["approval_status"] = approval.status
+    comm_data["call_status"] = comm_data.get("call_status") or "NOT_ATTEMPTED"
+    comm_data["whatsapp_status"] = comm_data.get("whatsapp_status") or "NOT_ATTEMPTED"
+    comm_data["overall_status"] = "PENDING_APPROVAL" if approval.status == "PENDING" else approval.status
+    comm_data["updated_at"] = utc_now().isoformat()
+    c_data["communication"] = comm_data
     entry.candidate_data = c_data
 
     db.commit()
@@ -316,19 +297,20 @@ def select_event_shortlist_candidate(
             "selected_at": entry.selected_at.isoformat() if entry.selected_at else None,
         },
     )
-    live_broker.publish_sync(
-        event_id,
-        {
-            "type": "approval.created",
-            "event_id": event_id,
-            "approval_id": approval.id,
-            "action_type": "COMMUNICATION_OUTREACH",
-            "target_id": entry.candidate_id,
-            "target_name": entry.candidate_name,
-            "status": "PENDING",
-            "impact_level": "MAJOR",
-        },
-    )
+    if is_new_approval:
+        live_broker.publish_sync(
+            event_id,
+            {
+                "type": "approval.created",
+                "event_id": event_id,
+                "approval_id": approval.id,
+                "action_type": "COMMUNICATION_OUTREACH",
+                "target_id": entry.candidate_id,
+                "target_name": entry.candidate_name,
+                "status": "PENDING",
+                "impact_level": "MAJOR",
+            },
+        )
 
     return ShortlistEntryResponse.model_validate(entry)
 
@@ -389,40 +371,20 @@ def approve_candidate_communication(
             detail=f"Candidate '{candidate_id}' is in status '{entry.status}'. Communication approval requires candidate to be SELECTED first.",
         )
 
-    # Find or create Approval record
-    from app.models.approval import Approval
-    from app.engines.auth.snapshot import compute_event_state_snapshot
-    from app.models.shortlist import utc_now
-    approval = (
-        db.query(Approval)
-        .filter(
-            Approval.event_id == event_id,
-            Approval.action_type == "COMMUNICATION_OUTREACH",
-            Approval.target_id == entry.candidate_id,
-        )
-        .first()
+    # Find or create Approval record via central ApprovalService boundary
+    from app.services.approval_service import ApprovalService
+    approval_svc = ApprovalService(db)
+    approval, _ = approval_svc.create_communication_outreach_approval(
+        event_id=event_id,
+        candidate_id=entry.candidate_id,
+        requester_id=entry.selected_by or current_user_id,
+        candidate_name=entry.candidate_name,
+        category=entry.category,
+        provider_id=entry.provider_id,
     )
-    if not approval:
-        approval = Approval(
-            event_id=event_id,
-            requester_id=entry.selected_by or current_user_id or "organizer",
-            action_type="COMMUNICATION_OUTREACH",
-            target_type=(entry.category or "VENDOR").upper(),
-            target_id=entry.candidate_id,
-            impact_level="MAJOR",
-            requested_action={
-                "candidate_id": entry.candidate_id,
-                "candidate_name": entry.candidate_name,
-                "category": entry.category,
-                "provider_id": entry.provider_id,
-            },
-            status="PENDING",
-            state_snapshot=compute_event_state_snapshot(db, event_id),
-            created_at=utc_now(),
-        )
-        db.add(approval)
-        db.commit()
-        db.refresh(approval)
+
+    from app.services.identity_service import ensure_user_exists
+    approver = ensure_user_exists(db, current_user_id)
 
     # Execute approved communication via ProviderCommunicationService
     from app.services.provider_communication_service import ProviderCommunicationService
@@ -431,7 +393,7 @@ def approve_candidate_communication(
         event_id=event_id,
         candidate_id=entry.candidate_id,
         approval_id=approval.id,
-        approver_id=current_user_id,
+        approver_id=approver.id,
     )
 
     db.refresh(entry)
@@ -494,8 +456,10 @@ def dismiss_candidate_communication(
         .first()
     )
     if approval:
+        from app.services.identity_service import ensure_user_exists
+        approver = ensure_user_exists(db, current_user_id)
         approval.status = "REJECTED"
-        approval.approver_id = current_user_id
+        approval.approver_id = approver.id
         approval.rejection_reason = "Organizer dismissed communication outreach ('Not now')"
         approval.decided_at = utc_now()
 
