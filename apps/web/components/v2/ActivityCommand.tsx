@@ -23,12 +23,14 @@ import { OperationalTrace } from "./OperationalTrace";
 import { AgentToolExecution } from "./AgentToolExecution";
 import { EngineStatusCard } from "./EngineStatusCard";
 import type { ActivityLogItem } from "@/types/activityLog";
+import { useEventWorkspace } from "@/hooks/useEventWorkspace";
 
 interface ActivityCommandProps {
   eventId: string;
 }
 
 export function ActivityCommand({ eventId }: ActivityCommandProps) {
+  const { sseConnected } = useEventWorkspace(eventId);
   const [items, setItems] = useState<ActivityLogItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -69,6 +71,7 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
 
   useEffect(() => {
     fetchActivity();
+    if (sseConnected) return; // SSE delivers live activity to workspace
 
     // Guarded polling every 8s only when window/tab is visible
     const interval = setInterval(() => {
@@ -78,7 +81,7 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
     }, 8000);
 
     return () => clearInterval(interval);
-  }, [fetchActivity]);
+  }, [fetchActivity, sseConnected]);
 
   // Categories present in backend
   const categories = [

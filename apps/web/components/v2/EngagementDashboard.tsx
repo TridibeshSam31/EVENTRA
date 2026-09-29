@@ -24,8 +24,8 @@ import {
 import { getAssignmentsForEvent } from "@/lib/api/vendors";
 import { getConversations } from "@/lib/api/conversations";
 import { engageProvider, requestEngagementApproval } from "@/lib/api/negotiation";
-import { initiateVoiceCall } from "@/lib/api/voice";
 import type { VendorAssignmentResponse } from "@/types/api";
+
 import type { Conversation } from "@/types/communication";
 import { ProvenanceBadge } from "./ProvenanceBadge";
 import { WhatsAppDeliveryStatus } from "./WhatsAppDeliveryStatus";
@@ -150,58 +150,8 @@ export function EngagementDashboard({
     }
   };
 
-  // Telephony Outbound Call
-  const handleInitiateCall = async (assignment: VendorAssignmentResponse) => {
-    const phone = assignment.vendor?.phone;
-    if (!phone) return;
-
-    try {
-      setActionInProgress(assignment.id);
-      setActiveCall({
-        provider_name: assignment.vendor?.name,
-        recipient_phone: phone,
-        status: "QUEUED",
-        start_time: new Date().toISOString(),
-      });
-
-      const res = await initiateVoiceCall({
-        recipient_phone: phone,
-        vendor_name: assignment.vendor?.name || "Vendor",
-        event_id: eventId,
-        provider_id: assignment.vendor_id,
-      });
-
-      if (res.success) {
-        setActiveCall({
-          provider_name: assignment.vendor?.name,
-          recipient_phone: phone,
-          status: "RINGING",
-          start_time: new Date().toISOString(),
-          source: res.source,
-          transcript_available: true,
-        });
-        setStatusMessage(`Call dispatched to ${assignment.vendor?.name} via ${res.source}.`);
-      } else {
-        setActiveCall({
-          provider_name: assignment.vendor?.name,
-          recipient_phone: phone,
-          status: "FAILED",
-          error: res.error || "Call dispatch rejected by telephony gateway.",
-        });
-      }
-    } catch (err: any) {
-      setActiveCall({
-        provider_name: assignment.vendor?.name,
-        recipient_phone: phone,
-        status: "FAILED",
-        error: err.message || "Telephony gateway connection failed.",
-      });
-    } finally {
-      setActionInProgress(null);
-    }
-  };
-
   const filteredAssignments = assignments.filter((a) => {
+
     if (!filterStatus) return true;
     const s = (a.status || "").toUpperCase();
     const neg = (a.negotiation_status || "").toUpperCase();
@@ -370,12 +320,9 @@ export function EngagementDashboard({
       {activeCall && (
         <CallExecutionCard
           call={activeCall}
-          onRetryCall={() => {
-            const match = assignments.find((a) => a.vendor?.phone === activeCall.recipient_phone);
-            if (match) handleInitiateCall(match);
-          }}
         />
       )}
+
 
       {/* 3. Shortlist to Engagement Bridge Table */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -522,25 +469,11 @@ export function EngagementDashboard({
                       {/* Actions */}
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                          {/* Send WhatsApp / Engage */}
-                          <button
-                            onClick={() => handleInitiateEngagement(assignment)}
-                            disabled={!hasPhone || isBusy}
-                            className="px-2.5 py-1 rounded-md text-[11px] font-semibold border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                            title={!hasPhone ? "No supported phone channel" : "Send WhatsApp outreach"}
-                          >
-                            {isBusy ? "Dispatching..." : "Send WhatsApp"}
-                          </button>
+                          {/* Communication Status */}
+                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold border border-slate-200 bg-slate-100 text-slate-700">
+                            {assignment.status === "CONFIRMED" ? "Confirmed" : "Assigned"}
+                          </span>
 
-                          {/* Initiate Call */}
-                          <button
-                            onClick={() => handleInitiateCall(assignment)}
-                            disabled={!hasPhone || isBusy || isCallInProgress}
-                            className="px-2.5 py-1 rounded-md text-[11px] font-semibold border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
-                            title={!hasPhone ? "No supported phone channel" : "Initiate telephony call"}
-                          >
-                            {isCallInProgress ? "Ringing..." : "Voice Call"}
-                          </button>
 
                           {/* View Conversation */}
                           {matchingConv ? (

@@ -473,7 +473,7 @@ class VendorService:
             else:
                 updated_count += 1
 
-        # Single batch commit for all upserted providers (prevents remote DB latency bottleneck)
+        # Single batch commit for all upserted providers
         try:
             self.db.commit()
         except Exception:

@@ -98,6 +98,12 @@ def conclude_event(
     return service.get_live_state(event_id)
 
 
+import logging
+from app.services.autonomous_operations_service import AutonomousOperationsService
+
+logger = logging.getLogger(__name__)
+
+
 @router.get("/{event_id}/live-stream")
 async def live_stream(
     event_id: str,
@@ -108,10 +114,18 @@ async def live_stream(
     """Authoritative Server-Sent Events (SSE) live push stream (B5).
     
     Streams real-time operational state mutations to authorized subscribers.
-    Emits an initial connection frame followed by live task/incident updates.
+    Emits an initial connection frame containing the authoritative operations snapshot
+    followed by live agent, discovery, shortlist, task, and incident updates.
     """
     service = LiveStateService(db)
     initial_state = service.get_live_state(event_id)
+
+    ops_service = AutonomousOperationsService(db)
+    try:
+        ops_snapshot = ops_service.get_operations_status(event_id)
+    except Exception as exc:
+        logger.warning(f"Could not load operations snapshot for event {event_id}: {exc}")
+        ops_snapshot = None
 
     async def event_generator():
         queue = await live_broker.subscribe(event_id)
@@ -121,6 +135,7 @@ async def live_stream(
                 "type": "CONNECTED",
                 "event_id": event_id,
                 "state": initial_state.model_dump(mode="json"),
+                "snapshot": ops_snapshot,
             })
             yield f"event: connected\ndata: {init_data}\n\n"
             frames_sent += 1

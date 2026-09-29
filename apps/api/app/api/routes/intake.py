@@ -566,12 +566,13 @@ def start_operations(
     service = AutonomousOperationsService(db)
     try:
         init_result = service.initiate_operations_run(event_id=event_id, user_id=current_user_id)
-        background_tasks.add_task(
-            AutonomousOperationsService.run_background_operations,
-            event_id=event_id,
-            run_id=init_result.get("run_id"),
-            user_id=current_user_id,
-        )
+        if init_result.get("status") != "ALREADY_RUNNING":
+            background_tasks.add_task(
+                AutonomousOperationsService.run_background_operations,
+                event_id=event_id,
+                run_id=init_result.get("run_id"),
+                user_id=current_user_id,
+            )
         return init_result
     except NotFoundException as nfe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(nfe))

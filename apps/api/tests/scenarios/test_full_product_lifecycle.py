@@ -27,6 +27,7 @@ from app.models.task import Task
 from app.models.vendor import Vendor
 from app.models.venue import Venue
 from app.models.vendor_assignment import VendorAssignment
+from app.models.shortlist import EventShortlistEntry
 from app.models.budget import BudgetItem
 from app.models.requirement import Requirement
 from app.models.incident import Incident
@@ -120,23 +121,40 @@ def test_full_autonomous_event_operations_lifecycle(clean_db):
     assert event.total_budget == 1000000.0
 
     # =========================================================================
-    # STEP 4: START OPERATIONS (Autonomous Execution Initiation)
+    # STEP 4: START OPERATIONS (Autonomous Execution Initiation - Phase 1)
     # =========================================================================
     ops_res = ops_svc.start_operations(event_id=draft_event_id, user_id="organizer_1")
 
-    assert ops_res["status"] == "OPERATING"
+    assert ops_res["status"] == "WAITING_FOR_USER_SELECTION"
     assert ops_res["lifecycle_state"] == EventLifecycleState.LIVE.value
-    assert ops_res["providers_contacted_count"] > 0
-    assert len(ops_res["operations_report"]) >= 5
+    assert ops_res["providers_contacted_count"] == 0
+    assert len(ops_res["operations_report"]) >= 4
 
-    # Check vendor assignments & scoring in DB
+    # Recommendations persisted as EventShortlistEntry records
+    shortlists = clean_db.query(EventShortlistEntry).filter(EventShortlistEntry.event_id == draft_event_id).all()
+    assert len(shortlists) > 0
+    for s in shortlists:
+        assert s.status == "RECOMMENDED"
+        assert s.selection_source == "AGENT_RECOMMENDATION"
+
+    # Prior to organizer selection, zero VendorAssignment records exist
+    pre_assignments = clean_db.query(VendorAssignment).filter(VendorAssignment.event_id == draft_event_id).all()
+    assert len(pre_assignments) == 0
+
+    # Organizer selects catering candidate from recommendations
+    cater_candidates = [s for s in shortlists if "cater" in s.category.lower()]
+    assert len(cater_candidates) > 0
+    select_res = ops_svc.select_candidate(event_id=draft_event_id, candidate_id=cater_candidates[0].candidate_id)
+    assert select_res["status"] == "SELECTED"
+    assert select_res["selection_source"] == "ORGANIZER_SELECTION"
+
+    # Check vendor assignment created upon organizer selection
     assignments = clean_db.query(VendorAssignment).filter(VendorAssignment.event_id == draft_event_id).all()
-    assert len(assignments) >= 4
+    assert len(assignments) >= 1
 
     # Verify telemetry & activity feed
     telemetry = ops_svc.get_operations_status(draft_event_id)
     assert telemetry["lifecycle_state"] == EventLifecycleState.LIVE.value
-    assert any("Candidates Evaluated" in a["action"] or "Evaluated" in a["detail"] for a in telemetry["activity_feed"])
 
     # =========================================================================
     # STEP 5: Provider Quote & Budget Processing

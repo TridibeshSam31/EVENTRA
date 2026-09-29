@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { getActivityStream } from "@/lib/api/activityStream";
+import { useEventWorkspace } from "@/hooks/useEventWorkspace";
 import { ProvenanceBadge } from "./ProvenanceBadge";
 import type { ActivityLogItem } from "@/types/activityLog";
 
@@ -33,6 +34,7 @@ export function AgentActivityStream({
   className = "",
   limit = 40,
 }: AgentActivityStreamProps) {
+  const { sseConnected } = useEventWorkspace(eventId);
   const [items, setItems] = useState<ActivityLogItem[]>(initialItems);
   const [loading, setLoading] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
@@ -53,7 +55,8 @@ export function AgentActivityStream({
 
   useEffect(() => {
     fetchStream();
-    if (!autoRefresh) return;
+    // When SSE is connected, live activity is pushed over SSE; avoid redundant polling
+    if (!autoRefresh || sseConnected) return;
 
     // Guarded polling: pause when tab is hidden to prevent duplicate requests
     const interval = setInterval(() => {
@@ -63,7 +66,7 @@ export function AgentActivityStream({
     }, refreshInterval);
 
     return () => clearInterval(interval);
-  }, [fetchStream, autoRefresh, refreshInterval]);
+  }, [fetchStream, autoRefresh, refreshInterval, sseConnected]);
 
   const filteredItems =
     categoryFilter === "ALL"

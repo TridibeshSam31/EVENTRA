@@ -40,7 +40,13 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
         self._cached_health: Optional[Dict[str, Any]] = None
         self._last_health_check: float = 0.0
 
+    @property
+    def is_configured(self) -> bool:
+        """Checks whether OpenWA is enabled and a session is configured."""
+        return bool(settings.OPENWA_ENABLED and self.session_id)
+
     def _normalize_chat_id(self, recipient_contact: Optional[str]) -> str:
+
         """Converts recipient contact into OpenWA WhatsApp chatId format (e.g. 919876543210@c.us)."""
         if not recipient_contact:
             return ""

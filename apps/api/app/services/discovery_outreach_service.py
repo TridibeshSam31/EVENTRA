@@ -56,7 +56,11 @@ class DiscoveryOutreachService:
             dev_simulate_responses = simulate_responses
 
         cand = item.candidate
-        phone = cand.phone or "+919876543210"
+        phone = cand.phone
+        if not phone:
+            logger.info(f"Skipping outreach for {cand.name}: phone number is missing")
+            item.availability = "uncontacted"
+            return item
 
         # Step 1: Immediately mark as pending — even before we dispatch
         item.availability = "pending_response"

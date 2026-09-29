@@ -120,7 +120,28 @@ class AuthorizationService:
                 raise BadRequestException(f"Target budget item '{target_id}' does not belong to event '{event_id}'.")
             return item
 
+        elif target_type_upper in (
+            "SHORTLIST", "CANDIDATE", "VENUE", "CATERING", "PHOTOGRAPHY",
+            "AV_TECH", "DECOR", "SECURITY", "TRANSPORT", "OTHER",
+        ):
+            from app.models.shortlist import EventShortlistEntry
+            entry = self.db.query(EventShortlistEntry).filter(
+                EventShortlistEntry.event_id == event_id,
+                (EventShortlistEntry.candidate_id == target_id) | (EventShortlistEntry.id == target_id) | (EventShortlistEntry.provider_id == target_id),
+            ).first()
+            if entry:
+                return entry
+            try:
+                from app.models.venue import Venue
+                ven = self.db.query(Venue).filter(Venue.id == target_id).first()
+                if ven:
+                    return ven
+            except Exception:
+                pass
+            return None
+
         return None
+
 
     def authorize_action(
         self,

@@ -28,8 +28,12 @@ class EventShortlistEntry(Base):
     candidate_name = Column(String(255), nullable=True)
     status = Column(String(50), nullable=False, default="SHORTLISTED", index=True)
     ranking = Column(Integer, nullable=True)
+    selection_source = Column(String(50), default="ORGANIZER_SELECTION", nullable=True)
     notes = Column(Text, nullable=True)
     candidate_data = Column(JSON, nullable=True, default=dict)
+
+    selected_by = Column(String(100), nullable=True)
+    selected_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=utc_now, nullable=False, index=True)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now, nullable=False)

@@ -214,3 +214,381 @@ class ProviderCommunicationService:
             )
 
         return result
+
+    def execute_approved_communication(
+        self,
+        event_id: str,
+        candidate_id: str,
+        approval_id: str,
+        approver_id: Optional[str] = "organizer",
+    ) -> Dict[str, Any]:
+        """Executes real call and WhatsApp outreach strictly AFTER explicit approval.
+
+        Guarantees:
+        - Candidate must exist, belong to event, and be in SELECTED status.
+        - Idempotency via idempotency_records (double click / repeated requests safely return existing result).
+        - Independent Call and WhatsApp operations tracked separately.
+        - Truthful failure / unavailable state (no fake success, no fabricated numbers, no silent fallback).
+        - Persisted to database candidate_data and emitted via live_broker.
+        """
+        from datetime import datetime, timezone, timedelta
+        from app.models.event import Event
+        from app.models.shortlist import EventShortlistEntry
+        from app.models.approval import Approval
+        from app.models.idempotency import IdempotencyRecord
+        from app.models.vendor import Vendor
+        from app.services.live_broker import live_broker
+        from app.core.exceptions import NotFoundException, BadRequestException
+        from app.core.config import settings
+
+        if not self.db:
+            raise ValueError("ProviderCommunicationService requires a database session for approved execution.")
+
+        event = self.db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            raise NotFoundException(f"Event with id '{event_id}' not found.")
+
+        entry = (
+            self.db.query(EventShortlistEntry)
+            .filter(
+                EventShortlistEntry.event_id == event_id,
+                (EventShortlistEntry.candidate_id == candidate_id) | (EventShortlistEntry.id == candidate_id),
+            )
+            .first()
+        )
+        if not entry:
+            raise NotFoundException(f"Candidate '{candidate_id}' not found in event '{event_id}' shortlist.")
+
+        if entry.status != "SELECTED":
+            raise BadRequestException(
+                f"Candidate '{candidate_id}' is in status '{entry.status}'. Communication approval requires candidate to be SELECTED."
+            )
+
+        # 1. Idempotency Check & Lock
+        idem_key = f"comm_approval:{event_id}:{entry.candidate_id}:{approval_id}"
+        now_dt = datetime.now(timezone.utc).replace(tzinfo=None)
+        existing_rec = (
+            self.db.query(IdempotencyRecord)
+            .filter(IdempotencyRecord.idempotency_key == idem_key)
+            .first()
+        )
+        if existing_rec:
+            if existing_rec.status == "COMPLETED" and existing_rec.response_body:
+                logger.info(f"Duplicate communication approval request ignored for {idem_key}")
+                return existing_rec.response_body
+            elif existing_rec.status == "PROCESSING":
+                logger.info(f"Communication approval already processing for {idem_key}")
+                c_data = entry.candidate_data or {}
+                return c_data.get("communication", {
+                    "approval_id": approval_id,
+                    "approval_status": "APPROVED",
+                    "overall_status": "PROCESSING",
+                })
+
+        # Register idempotency processing
+        idem_rec = IdempotencyRecord(
+            idempotency_key=idem_key,
+            event_id=event_id,
+            endpoint=f"/events/{event_id}/shortlist/{candidate_id}/approve-communication",
+            method="POST",
+            request_hash="comm_approved_hash",
+            status="PROCESSING",
+            created_at=now_dt,
+            expires_at=now_dt + timedelta(hours=24),
+        )
+        self.db.add(idem_rec)
+        self.db.commit()
+
+        # 2. Update Approval record status to APPROVED
+        approval = (
+            self.db.query(Approval)
+            .filter(Approval.id == approval_id, Approval.event_id == event_id)
+            .first()
+        )
+        if approval:
+            approval.status = "APPROVED"
+            approval.approver_id = approver_id
+            approval.decided_at = now_dt
+            self.db.commit()
+
+        # 3. Resolve Contact Phone Number
+        c_data = dict(entry.candidate_data or {})
+        phone = c_data.get("phone") or c_data.get("contact_phone")
+        if not phone and entry.provider_id:
+            vendor = self.db.query(Vendor).filter(Vendor.id == entry.provider_id).first()
+            if vendor and vendor.contact_phone:
+                phone = vendor.contact_phone
+            else:
+                try:
+                    from app.models.venue import Venue
+                    venue = self.db.query(Venue).filter(Venue.id == entry.provider_id).first()
+                    if venue and venue.contact_phone:
+                        phone = venue.contact_phone
+                except Exception:
+                    pass
+
+        phone = str(phone).strip() if phone else None
+
+        # Emit communication.started
+        live_broker.publish_sync(
+            event_id,
+            {
+                "type": "communication.started",
+                "event_id": event_id,
+                "candidate_id": entry.candidate_id,
+                "candidate_name": entry.candidate_name,
+                "category": entry.category,
+                "approval_id": approval_id,
+                "phone": phone,
+                "message": f"Approved outreach initiated for {entry.candidate_name}",
+            },
+        )
+
+        call_status = "NOT_ATTEMPTED"
+        call_error = None
+        whatsapp_status = "NOT_ATTEMPTED"
+        whatsapp_error = None
+
+        if not phone:
+            call_status = "NOT_ATTEMPTED"
+            call_error = "No contact phone number available"
+            whatsapp_status = "NOT_ATTEMPTED"
+            whatsapp_error = "No contact phone number available"
+            overall_status = "UNAVAILABLE"
+            logger.info(f"Communication for {entry.candidate_name} not attempted: phone number missing.")
+        else:
+            # --- OPERATION 1: VOICE CALL ---
+            voice_configured = False
+            voice_adapter = None
+            if settings.TWILIO_ENABLED or (settings.COMMUNICATION_PROVIDER or "").lower() == "twilio":
+                from app.integrations.communication.twilio import TwilioVoiceAdapter
+                voice_adapter = TwilioVoiceAdapter()
+                voice_configured = voice_adapter.is_configured
+            elif settings.EXOTEL_ENABLED or (settings.COMMUNICATION_PROVIDER or "").lower() == "exotel":
+                from app.integrations.communication.exotel import ExotelVoiceAdapter
+                voice_adapter = ExotelVoiceAdapter()
+                voice_configured = voice_adapter.is_configured
+
+            if not voice_configured:
+                call_status = "UNAVAILABLE"
+                call_error = "Voice provider is not configured"
+                logger.info(f"Voice call unavailable for {entry.candidate_name}: provider not configured")
+                live_broker.publish_sync(
+                    event_id,
+                    {
+                        "type": "call.failed",
+                        "event_id": event_id,
+                        "candidate_id": entry.candidate_id,
+                        "status": "UNAVAILABLE",
+                        "reason": "Voice provider is not configured",
+                    },
+                )
+            else:
+                live_broker.publish_sync(
+                    event_id,
+                    {
+                        "type": "call.started",
+                        "event_id": event_id,
+                        "candidate_id": entry.candidate_id,
+                        "candidate_name": entry.candidate_name,
+                        "phone": phone,
+                    },
+                )
+                try:
+                    call_res = self.make_call(
+                        event_id=event_id,
+                        provider_id=entry.provider_id or entry.candidate_id,
+                        recipient_phone=phone,
+                        actor_id=approver_id,
+                        actor_type="ORGANIZER",
+                    )
+                    if call_res.success:
+                        call_status = "COMPLETED"
+                        live_broker.publish_sync(
+                            event_id,
+                            {
+                                "type": "call.completed",
+                                "event_id": event_id,
+                                "candidate_id": entry.candidate_id,
+                                "status": "COMPLETED",
+                                "call_details": call_res.data,
+                            },
+                        )
+                    else:
+                        call_status = "FAILED"
+                        call_error = call_res.error or "Voice call attempt failed"
+                        live_broker.publish_sync(
+                            event_id,
+                            {
+                                "type": "call.failed",
+                                "event_id": event_id,
+                                "candidate_id": entry.candidate_id,
+                                "status": "FAILED",
+                                "reason": call_error,
+                            },
+                        )
+                except Exception as exc:
+                    logger.error(f"Voice call dispatch exception for {entry.candidate_name}: {exc}")
+                    call_status = "FAILED"
+                    call_error = str(exc)
+                    live_broker.publish_sync(
+                        event_id,
+                        {
+                            "type": "call.failed",
+                            "event_id": event_id,
+                            "candidate_id": entry.candidate_id,
+                            "status": "FAILED",
+                            "reason": call_error,
+                        },
+                    )
+
+            # --- OPERATION 2: WHATSAPP MESSAGE ---
+            from app.integrations.whatsapp.client import OpenWACommunicationAdapter
+            wa_adapter = OpenWACommunicationAdapter()
+            whatsapp_configured = wa_adapter.is_configured
+
+            if not whatsapp_configured:
+                whatsapp_status = "UNAVAILABLE"
+                whatsapp_error = "WhatsApp provider is not configured"
+                logger.info(f"WhatsApp unavailable for {entry.candidate_name}: provider not configured")
+                live_broker.publish_sync(
+                    event_id,
+                    {
+                        "type": "message.failed",
+                        "event_id": event_id,
+                        "candidate_id": entry.candidate_id,
+                        "status": "UNAVAILABLE",
+                        "reason": "WhatsApp provider is not configured",
+                    },
+                )
+            else:
+                live_broker.publish_sync(
+                    event_id,
+                    {
+                        "type": "message.started",
+                        "event_id": event_id,
+                        "candidate_id": entry.candidate_id,
+                        "candidate_name": entry.candidate_name,
+                        "phone": phone,
+                    },
+                )
+                try:
+                    msg_text = (
+                        f"Hello {entry.candidate_name}, this is an inquiry regarding {entry.category} "
+                        f"for event '{event.name}'. Please confirm your availability and service details."
+                    )
+                    wa_res = self.send_message(
+                        event_id=event_id,
+                        provider_id=entry.provider_id or entry.candidate_id,
+                        message=msg_text,
+                        recipient_contact=phone,
+                        actor_id=approver_id,
+                        actor_type="ORGANIZER",
+                    )
+                    if wa_res.success:
+                        whatsapp_status = "SENT"
+                        live_broker.publish_sync(
+                            event_id,
+                            {
+                                "type": "message.sent",
+                                "event_id": event_id,
+                                "candidate_id": entry.candidate_id,
+                                "status": "SENT",
+                            },
+                        )
+                    else:
+                        whatsapp_status = "FAILED"
+                        whatsapp_error = wa_res.error or "WhatsApp dispatch failed"
+                        live_broker.publish_sync(
+                            event_id,
+                            {
+                                "type": "message.failed",
+                                "event_id": event_id,
+                                "candidate_id": entry.candidate_id,
+                                "status": "FAILED",
+                                "reason": whatsapp_error,
+                            },
+                        )
+                except Exception as exc:
+                    logger.error(f"WhatsApp dispatch exception for {entry.candidate_name}: {exc}")
+                    whatsapp_status = "FAILED"
+                    whatsapp_error = str(exc)
+                    live_broker.publish_sync(
+                        event_id,
+                        {
+                            "type": "message.failed",
+                            "event_id": event_id,
+                            "candidate_id": entry.candidate_id,
+                            "status": "FAILED",
+                            "reason": whatsapp_error,
+                        },
+                    )
+
+            # Compute overall truthful status
+            if call_status in ("COMPLETED", "SUCCESS") and whatsapp_status in ("SENT", "DELIVERED"):
+                overall_status = "COMPLETED"
+            elif (call_status in ("COMPLETED", "SUCCESS")) or (whatsapp_status in ("SENT", "DELIVERED")):
+                overall_status = "PARTIAL"
+            elif call_status == "UNAVAILABLE" and whatsapp_status == "UNAVAILABLE":
+                overall_status = "UNAVAILABLE"
+            else:
+                overall_status = "FAILED"
+
+        # 4. Persist Truthful Communication Results
+        comm_data = {
+            "approval_id": approval_id,
+            "approval_status": "APPROVED",
+            "call_status": call_status,
+            "whatsapp_status": whatsapp_status,
+            "overall_status": overall_status,
+            "call_error": call_error,
+            "whatsapp_error": whatsapp_error,
+            "phone": phone,
+            "updated_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat(),
+        }
+        c_data["communication"] = comm_data
+        entry.candidate_data = c_data
+
+        if approval:
+            approval.decision_notes = f"Call: {call_status}, WhatsApp: {whatsapp_status}"
+
+        # Update IdempotencyRecord to COMPLETED
+        idem_rec.status = "COMPLETED"
+        idem_rec.response_code = 200
+        idem_rec.response_body = comm_data
+
+        self.db.commit()
+        self.db.refresh(entry)
+
+        # 5. Broadcast Final Realtime Events
+        end_event_type = "communication.completed" if overall_status in ("COMPLETED", "PARTIAL") else "communication.failed"
+        live_broker.publish_sync(
+            event_id,
+            {
+                "type": end_event_type,
+                "event_id": event_id,
+                "candidate_id": entry.candidate_id,
+                "candidate_name": entry.candidate_name,
+                "call_status": call_status,
+                "whatsapp_status": whatsapp_status,
+                "overall_status": overall_status,
+                "call_error": call_error,
+                "whatsapp_error": whatsapp_error,
+            },
+        )
+        live_broker.publish_sync(
+            event_id,
+            {
+                "type": "shortlist.updated",
+                "event_id": event_id,
+                "action": "communication_updated",
+                "candidate_id": entry.candidate_id,
+                "candidate_name": entry.candidate_name,
+                "category": entry.category,
+                "status": entry.status,
+                "communication": comm_data,
+            },
+        )
+
+        return comm_data
+

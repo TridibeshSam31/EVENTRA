@@ -208,9 +208,39 @@ class ApprovalService:
         approval.rejection_reason = reason
         approval.decided_at = utc_now()
 
+        if approval.action_type == "COMMUNICATION_OUTREACH" and approval.target_id:
+            from app.models.shortlist import EventShortlistEntry
+            entry = self.db.query(EventShortlistEntry).filter(
+                EventShortlistEntry.event_id == event_id,
+                (EventShortlistEntry.candidate_id == approval.target_id) | (EventShortlistEntry.id == approval.target_id),
+            ).first()
+            if entry:
+                c_data = dict(entry.candidate_data or {})
+                comm_data = dict(c_data.get("communication") or {})
+                comm_data["approval_status"] = "REJECTED"
+                comm_data["overall_status"] = "DISMISSED"
+                comm_data["call_status"] = "NOT_ATTEMPTED"
+                comm_data["whatsapp_status"] = "NOT_ATTEMPTED"
+                comm_data["updated_at"] = utc_now().isoformat()
+                c_data["communication"] = comm_data
+                entry.candidate_data = c_data
+                self.db.add(entry)
+                from app.services.live_broker import live_broker
+                live_broker.publish_sync(event_id, {
+                    "type": "shortlist.updated",
+                    "event_id": event_id,
+                    "action": "communication_dismissed",
+                    "candidate_id": entry.candidate_id,
+                    "candidate_name": entry.candidate_name,
+                    "category": entry.category,
+                    "status": entry.status,
+                    "communication": comm_data,
+                })
+
         self.db.commit()
         self.db.refresh(approval)
         return approval
+
 
     def cancel(
         self,

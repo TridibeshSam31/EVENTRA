@@ -64,10 +64,38 @@ class InitiateCallRequest(BaseModel):
     provider_id: Optional[str] = None
 
 
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from app.api.dependencies import get_db_session
+from app.models.approval import Approval
+
+
 @router.post("/voice/call")
 @router.post("/api/v1/voice/call")
-def initiate_voice_call(payload: InitiateCallRequest):
-    """Initiates an outbound telephony call to a phone number via configured voice provider (Twilio or Exotel)."""
+def initiate_voice_call(
+    payload: InitiateCallRequest,
+    db: Session = Depends(get_db_session),
+):
+    """Initiates an outbound telephony call to a phone number via configured voice provider.
+    Strictly guarded: requires prior explicit communication approval for the event.
+    """
+    if payload.event_id and payload.event_id != "default-event":
+        # Backend guard: Ensure there is an approved communication request
+        target_filter = [
+            Approval.event_id == payload.event_id,
+            Approval.action_type == "COMMUNICATION_OUTREACH",
+            Approval.status == "APPROVED",
+        ]
+        if payload.provider_id:
+            target_filter.append(Approval.target_id == payload.provider_id)
+
+        approved = db.query(Approval).filter(*target_filter).first()
+        if not approved:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Communication outreach requires explicit organizer approval.",
+            )
+
     adapter = registry.get_communication_provider()
     # If resolved provider has make_call, invoke it
     if hasattr(adapter, "make_call"):
@@ -102,6 +130,7 @@ def initiate_voice_call(payload: InitiateCallRequest):
         "data": result.data,
         "error": result.error,
     }
+
 
 
 class VoiceInteractRequest(BaseModel):

@@ -32,9 +32,9 @@ import {
   sendMessage,
 } from "@/lib/api/conversations";
 import { getAssignmentsForEvent } from "@/lib/api/vendors";
-import { initiateVoiceCall } from "@/lib/api/voice";
 import { getActivityStream } from "@/lib/api/activityStream";
 import type { Conversation, Message } from "@/types/communication";
+
 import type { VendorAssignmentResponse, EventResponse } from "@/types/api";
 import type { ActivityLogItem } from "@/types/activityLog";
 
@@ -255,55 +255,8 @@ export default function ConversationsPage() {
       .find((m) => m.extracted_facts && Object.keys(m.extracted_facts).length > 0);
   }, [messages]);
 
-  // Outbound Telephony Call Action
-  const handleInitiateCall = async (provider: ProviderContextData) => {
-    if (!provider.phone) return;
-    try {
-      setActionInProgress(provider.id);
-      setActiveCall({
-        provider_name: provider.name,
-        recipient_phone: provider.phone,
-        status: "QUEUED",
-        start_time: new Date().toISOString(),
-      });
-
-      const res = await initiateVoiceCall({
-        recipient_phone: provider.phone,
-        vendor_name: provider.name,
-        event_id: eventId,
-        provider_id: provider.id,
-      });
-
-      if (res.success) {
-        setActiveCall({
-          provider_name: provider.name,
-          recipient_phone: provider.phone,
-          status: "RINGING",
-          start_time: new Date().toISOString(),
-          source: res.source,
-          transcript_available: true,
-        });
-      } else {
-        setActiveCall({
-          provider_name: provider.name,
-          recipient_phone: provider.phone,
-          status: "FAILED",
-          error: res.error || "Call rejected by gateway.",
-        });
-      }
-    } catch (err: any) {
-      setActiveCall({
-        provider_name: provider.name,
-        recipient_phone: provider.phone,
-        status: "FAILED",
-        error: err.message || "Failed to connect telephony provider.",
-      });
-    } finally {
-      setActionInProgress(null);
-    }
-  };
-
   // Filtered Conversations List
+
   const filteredConvs = useMemo(() => {
     return conversations.filter((c) => {
       // Search
@@ -735,9 +688,6 @@ export default function ConversationsPage() {
                 {activeCall && (
                   <CallExecutionCard
                     call={activeCall}
-                    onRetryCall={() => {
-                      if (providerContext) handleInitiateCall(providerContext);
-                    }}
                   />
                 )}
 
@@ -752,12 +702,12 @@ export default function ConversationsPage() {
                 <ProviderContextPanel
                   provider={providerContext}
                   eventId={eventId}
-                  onInitiateCall={handleInitiateCall}
                   onSendWhatsApp={() => {
                     if (selectedConv) setMobileTab("CHAT");
                   }}
                   isActionInProgress={actionInProgress === providerContext?.id}
                 />
+
               </div>
             </div>
           </div>

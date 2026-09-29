@@ -202,35 +202,23 @@ export function ProviderContextPanel({
         )}
       </div>
 
-      {/* 4. Outreach Actions */}
+      {/* 4. Communication Status */}
       <div className="pt-3 border-t border-slate-100 space-y-2">
         <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
-          Outreach Actions
+          Communication Channels
         </span>
 
         <div className="grid grid-cols-2 gap-2">
-          {/* Send WhatsApp */}
-          <button
-            onClick={() => onSendWhatsApp && onSendWhatsApp(provider)}
-            disabled={!hasPhone || isActionInProgress}
-            className="w-full py-2 px-2.5 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 text-xs font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
-            title={!hasPhone ? "No supported phone channel available" : undefined}
-          >
+          <div className="py-2 px-2.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 text-xs font-medium flex items-center justify-center gap-1.5">
             <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
             <span>WhatsApp</span>
-          </button>
-
-          {/* Initiate Telephony Call */}
-          <button
-            onClick={() => onInitiateCall && onInitiateCall(provider)}
-            disabled={!hasPhone || isActionInProgress}
-            className="w-full py-2 px-2.5 rounded-lg border border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-semibold flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
-            title={!hasPhone ? "No supported phone channel available" : undefined}
-          >
+          </div>
+          <div className="py-2 px-2.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 text-xs font-medium flex items-center justify-center gap-1.5">
             <PhoneCall className="w-3.5 h-3.5 text-purple-600" />
             <span>Voice Call</span>
-          </button>
+          </div>
         </div>
+
 
         {/* Request Approval if needed */}
         {provider.approval_required && (

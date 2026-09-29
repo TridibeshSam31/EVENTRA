@@ -94,7 +94,9 @@ class ActionImpactClassifier:
                     return "CRITICAL"
                 if priority == TaskPriority.MEDIUM.value:
                     return "MAJOR"
-            return "MINOR"
+        elif action_type == "COMMUNICATION_OUTREACH":
+            return "MAJOR"
 
         # Default fallback: safe categorization
         return "MAJOR"
+

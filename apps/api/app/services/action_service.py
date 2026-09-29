@@ -114,8 +114,13 @@ class ActionService:
                 affected_entities, execution_result_data = self._execute_contract_vendor(
                     event_id, target_id, payload
                 )
+            elif action_type == "COMMUNICATION_OUTREACH":
+                affected_entities, execution_result_data = self._execute_communication_outreach(
+                    event_id, target_id, payload, approval_request_id, executor_id
+                )
             else:
                 raise BadRequestException(f"Unknown operational action type '{action_type}'.")
+
 
             self.db.flush()
 
@@ -669,5 +674,31 @@ class ActionService:
             "agreed_cost": float(cost),
             "status": "CONFIRMED",
         }
+
+    def _execute_communication_outreach(
+        self,
+        event_id: str,
+        target_id: Optional[str],
+        payload: Dict[str, Any],
+        approval_id: Optional[str] = None,
+        executor_id: Optional[str] = "organizer",
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+        candidate_id = target_id or payload.get("candidate_id")
+        app_id = approval_id or payload.get("approval_id") or "direct_exec"
+        from app.services.provider_communication_service import ProviderCommunicationService
+        comm_svc = ProviderCommunicationService(self.db)
+        comm_result = comm_svc.execute_approved_communication(
+            event_id=event_id,
+            candidate_id=candidate_id,
+            approval_id=app_id,
+            approver_id=executor_id,
+        )
+        affected = [{
+            "entity_type": "SHORTLIST_CANDIDATE",
+            "entity_id": candidate_id,
+            "status": "APPROVED",
+        }]
+        return affected, comm_result
+
 
 

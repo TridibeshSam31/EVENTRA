@@ -22,6 +22,7 @@ export function useEventWorkspace(eventId?: string) {
     isLoading: store.isLoading,
     sseConnected: store.sseConnected,
     isAgentRunning: store.isAgentRunning,
+    isWaitingForSelection: store.isWaitingForSelection,
     agentMessage: store.agentMessage,
 
     refreshWorkspace: store.refreshWorkspace,
@@ -29,6 +30,11 @@ export function useEventWorkspace(eventId?: string) {
     refreshApprovals: store.refreshApprovals,
     refreshOpsStatus: store.refreshOpsStatus,
     toggleShortlist: store.toggleShortlist,
+    selectCandidate: store.selectCandidate,
+    approveCommunication: store.approveCommunication,
+    dismissCommunication: store.dismissCommunication,
     isShortlisted: store.isShortlisted,
+    isCandidateSelected: store.isCandidateSelected,
   };
 }
+

@@ -11,8 +11,15 @@ class ShortlistEntryCreate(BaseModel):
     candidate_name: Optional[str] = Field(None, description="Display name of candidate")
     status: Optional[str] = Field("SHORTLISTED", description="Status (SHORTLISTED, ENGAGED, REJECTED)")
     ranking: Optional[int] = Field(None, description="Order ranking in shortlist")
+    selection_source: Optional[str] = Field("ORGANIZER_SELECTION", description="Source (ORGANIZER_SELECTION, AGENT_RECOMMENDATION)")
+    selected_by: Optional[str] = Field(None, description="ID of user who selected this candidate")
+    selected_at: Optional[datetime] = Field(None, description="Timestamp when selected")
     notes: Optional[str] = Field(None, description="User or organizer notes")
     candidate_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Metadata snapshot of candidate")
+
+
+class ShortlistCandidateSelect(BaseModel):
+    selected_by: Optional[str] = Field("organizer", description="Identifier of organizer making selection")
 
 
 class ShortlistEntryResponse(BaseModel):
@@ -26,6 +33,9 @@ class ShortlistEntryResponse(BaseModel):
     candidate_name: Optional[str] = None
     status: str
     ranking: Optional[int] = None
+    selection_source: Optional[str] = "ORGANIZER_SELECTION"
+    selected_by: Optional[str] = None
+    selected_at: Optional[datetime] = None
     notes: Optional[str] = None
     candidate_data: Optional[Dict[str, Any]] = None
     created_at: datetime

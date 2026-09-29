@@ -90,7 +90,7 @@ class AutonomousOperationsService:
             self.db.query(AgentRun)
             .filter(
                 AgentRun.event_id == event_id,
-                AgentRun.status.in_(["RUNNING", "INITIALIZED"]),
+                AgentRun.status.in_(["RUNNING", "INITIALIZED", "DISCOVERING"]),
             )
             .first()
         )
@@ -125,35 +125,56 @@ class AutonomousOperationsService:
             event_id=event.id,
             user_id=user_id,
             trigger_message="Organizer started autonomous operations",
-            objective=f"Execute autonomous operations for '{event.name}'",
+            objective=f"Execute autonomous discovery and recommendation for '{event.name}'",
             status="RUNNING",
             started_at=utc_now(),
             tool_history=[{"step": 1, "tool": "initiate_operations", "status": "STARTED"}],
         )
         self.db.add(agent_run)
 
-        # 4. Create initial DiscoveryRun in RUNNING state
+        # 4. Create DiscoveryRun per required category (Requirement 9)
         requirements = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
-        primary_category = requirements[0].type if requirements else "CATERING"
+        categories_to_source = []
+        if requirements:
+            for r in requirements:
+                if r.type and r.type.upper() not in categories_to_source:
+                    categories_to_source.append(r.type.upper())
+        for t in existing_tasks:
+            cat = getattr(t, "required_provider_category", None)
+            if cat:
+                c_up = cat.upper().replace("-", "_").strip()
+                if c_up and c_up not in categories_to_source:
+                    categories_to_source.append(c_up)
+        if not categories_to_source:
+            categories_to_source = ["VENUE", "CATERING", "AV_TECH"]
 
-        run = DiscoveryRun(
-            id=f"disc_{uuid.uuid4().hex[:10]}",
-            event_id=event.id,
-            category=primary_category,
-            status="RUNNING",
-            trigger="operations",
-            current_iteration=1,
-            max_iterations=3,
-            radius_km=10.0,
-            target_count=6,
-            parameters={
-                "location": event.location or "Delhi",
-                "guest_count": event.guest_count or 100,
-            },
-        )
-        self.db.add(run)
+        for cat in categories_to_source:
+            existing_disc = self.db.query(DiscoveryRun).filter(
+                DiscoveryRun.event_id == event.id,
+                DiscoveryRun.category == cat,
+                DiscoveryRun.status == "RUNNING",
+            ).first()
+            if not existing_disc:
+                run = DiscoveryRun(
+                    id=f"disc_{uuid.uuid4().hex[:10]}",
+                    event_id=event.id,
+                    category=cat,
+                    status="RUNNING",
+                    trigger="operations",
+                    current_iteration=1,
+                    max_iterations=3,
+                    radius_km=10.0,
+                    target_count=5,
+                    parameters={
+                        "location": event.location or "Delhi",
+                        "guest_count": event.guest_count or 100,
+                        "agent_run_id": agent_run_id,
+                    },
+                )
+                self.db.add(run)
+
         self.db.commit()
-        self.db.refresh(run)
+        self.db.refresh(agent_run)
 
         # 5. Broadcast agent started event across workspace
         live_broker.publish_sync(
@@ -169,7 +190,7 @@ class AutonomousOperationsService:
 
         return {
             "status": "STARTED",
-            "message": f"Autonomous operations initiated for '{event.name}'. Agent observing and executing operational plan.",
+            "message": f"Autonomous operations initiated for '{event.name}'. Agent observing and planning discovery.",
             "event_id": event.id,
             "run_id": agent_run_id,
             "lifecycle_state": event.lifecycle_state,
@@ -192,9 +213,11 @@ class AutonomousOperationsService:
             logger.error(f"Background operations execution failed for event {event_id}: {exc}", exc_info=True)
             if run_id:
                 try:
-                    run = db.query(DiscoveryRun).filter(DiscoveryRun.id == run_id).first()
-                    if run:
-                        run.status = "FAILED"
+                    agent_run = db.query(AgentRun).filter(AgentRun.run_id == run_id).first()
+                    if agent_run:
+                        agent_run.status = "FAILED"
+                        agent_run.error = str(exc)
+                        agent_run.completed_at = utc_now()
                         db.commit()
                 except Exception:
                     pass
@@ -207,10 +230,39 @@ class AutonomousOperationsService:
         user_id: str = "anonymous_operator",
         run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Transitions event to LIVE and kicks off autonomous sourcing and provider engagement."""
+        """Transitions event to LIVE and executes discovery, qualifying & ranking candidates per category.
+        Stops at WAITING_FOR_USER_SELECTION without initiating outreach or communications.
+        """
         event = self.db.query(Event).filter(Event.id == event_id).first()
         if not event:
             raise NotFoundException(f"Event with ID '{event_id}' not found.")
+
+        # Locate or initialize AgentRun
+        agent_run = None
+        if run_id:
+            agent_run = self.db.query(AgentRun).filter(AgentRun.run_id == run_id).first()
+        if not agent_run:
+            agent_run = (
+                self.db.query(AgentRun)
+                .filter(AgentRun.event_id == event.id, AgentRun.status.in_(["RUNNING", "INITIALIZED"]))
+                .order_by(AgentRun.started_at.desc())
+                .first()
+            )
+
+        if agent_run:
+            agent_run.status = "DISCOVERING"
+            self.db.commit()
+            live_broker.publish_sync(
+                event.id,
+                {
+                    "type": "agent.progress",
+                    "event_id": event.id,
+                    "run_id": agent_run.run_id,
+                    "status": "DISCOVERING",
+                    "step": "DISCOVERING",
+                    "message": "Agent analyzing requirements and planning provider discovery",
+                },
+            )
 
         # 1. Ensure operational plan exists
         existing_tasks = self.db.query(Task).filter(Task.event_id == event.id).all()
@@ -218,15 +270,49 @@ class AutonomousOperationsService:
             self._planning_service.generate_plan(event.id)
             self.db.refresh(event)
 
-        # 2. Transition lifecycle state to LIVE
+        # 2. Transition lifecycle state to LIVE (Requirement 12: Do NOT force LIVE on failure)
         if event.lifecycle_state in (EventLifecycleState.PLANNED.value, EventLifecycleState.DRAFT.value):
             try:
                 self._live_state.go_live(event.id, reason="Organizer started autonomous operations")
-            except Exception:
-                event.lifecycle_state = EventLifecycleState.LIVE.value
-                event.state = EventState.NORMAL.value
-                self.db.commit()
                 self.db.refresh(event)
+                self._audit.record(
+                    event_id=event.id,
+                    actor_id=user_id,
+                    actor_type="USER",
+                    action="AUTONOMOUS_OPERATIONS_STARTED",
+                    action_type="OPERATIONS",
+                    target_type="EVENT",
+                    target_id=event.id,
+                    after_state={"event_id": event.id, "status": "RUNNING"},
+                )
+            except Exception as live_err:
+                logger.error(f"Cannot transition event '{event.id}' to LIVE: {live_err}")
+                if agent_run:
+                    agent_run.status = "FAILED"
+                    agent_run.error = f"Failed to transition to LIVE: {live_err}"
+                    agent_run.completed_at = utc_now()
+                    self.db.commit()
+                live_broker.publish_sync(
+                    event.id,
+                    {
+                        "type": "agent.failed",
+                        "event_id": event.id,
+                        "run_id": run_id,
+                        "error": str(live_err),
+                    },
+                )
+                raise BadRequestException(f"Failed to transition event to LIVE: {str(live_err)}")
+        else:
+            self._audit.record(
+                event_id=event.id,
+                actor_id=user_id,
+                actor_type="USER",
+                action="AUTONOMOUS_OPERATIONS_STARTED",
+                action_type="OPERATIONS",
+                target_type="EVENT",
+                target_id=event.id,
+                after_state={"event_id": event.id, "status": "RUNNING"},
+            )
 
         # 3. Retrieve Active Requirements & Categories
         requirements = self.db.query(Requirement).filter(Requirement.event_id == event.id).all()
@@ -243,87 +329,34 @@ class AutonomousOperationsService:
                     categories_to_source.append(c_up)
         if not categories_to_source:
             categories_to_source = ["VENUE", "CATERING", "AV_TECH"]
-        elif "VENUE" not in categories_to_source:
-            categories_to_source.insert(0, "VENUE")
 
         date_str = event.start_datetime.strftime("%d %B %Y") if event.start_datetime else "Upcoming Date"
         city = event.location or "Delhi"
         pax = event.guest_count or 100
 
         operations_report: List[Dict[str, Any]] = []
-        providers_contacted_count = 0
 
-        # 4. Venue Operations
-        if "VENUE" in categories_to_source or not categories_to_source:
-            venue_res = self._execute_venue_operations(event, city, pax, date_str)
+        # 4. Venue Operations (Discovery & Qualification only)
+        if "VENUE" in categories_to_source:
+            venue_res = self._execute_venue_operations(event, city, pax, date_str, agent_run_id=run_id)
             operations_report.append(venue_res)
-            if venue_res.get("contacted"):
-                providers_contacted_count += 1
 
-        # 5. Vendor Operations (Catering, AV, Photography, Security, Transport, etc.)
+        # 5. Vendor Operations (Catering, AV, Photography, Security, Transport, etc. - Discovery & Qualification only)
         vendor_categories = [c for c in categories_to_source if c != "VENUE"]
         for category in vendor_categories:
-            cat_res = self._execute_vendor_operations(event, category, city, pax, date_str, run_id=run_id)
+            cat_res = self._execute_vendor_operations(event, category, city, pax, date_str, agent_run_id=run_id)
             operations_report.append(cat_res)
-            if cat_res.get("contacted"):
-                providers_contacted_count += 1
 
-        # Complete DiscoveryRun and update AgentRun status
-        pending_apps = self._approval_service.get_pending_approvals(event_id=event.id)
-        if run_id:
-            try:
-                # 1. Discovery run if exists
-                disc_run = self.db.query(DiscoveryRun).filter(DiscoveryRun.id == run_id).first()
-                if disc_run:
-                    disc_run.status = "COMPLETED"
-
-                # 2. Canonical AgentRun
-                agent_run = self.db.query(AgentRun).filter(AgentRun.run_id == run_id).first()
-                if agent_run:
-                    if pending_apps:
-                        agent_run.status = "WAITING_APPROVAL"
-                        live_broker.publish_sync(
-                            event.id,
-                            {
-                                "type": "agent.waiting_approval",
-                                "event_id": event.id,
-                                "run_id": run_id,
-                                "status": "WAITING_APPROVAL",
-                                "pending_approvals_count": len(pending_apps),
-                            },
-                        )
-                    else:
-                        agent_run.status = "COMPLETED"
-                        agent_run.completed_at = utc_now()
-                        live_broker.publish_sync(
-                            event.id,
-                            {
-                                "type": "agent.completed",
-                                "event_id": event.id,
-                                "run_id": run_id,
-                                "status": "COMPLETED",
-                            },
-                        )
-                self.db.commit()
-            except Exception as r_err:
-                logger.warning(f"Could not update AgentRun / DiscoveryRun completed status: {r_err}")
-
-
-        # 6. Audit & Telemetry
-        self._audit.record(
-            event_id=event.id,
-            actor_id=user_id,
-            actor_type="USER",
-            action="AUTONOMOUS_OPERATIONS_STARTED",
-            action_type="OPERATIONS",
-            target_type="EVENT",
-            target_id=event.id,
-            after_state={
-                "event_id": event.id,
-                "categories_sourced": categories_to_source,
-                "providers_contacted": providers_contacted_count,
-            },
-        )
+        # 6. Complete operations and transition AgentRun to WAITING_FOR_USER_SELECTION (Requirements 10 & 11)
+        if not agent_run and run_id:
+            agent_run = self.db.query(AgentRun).filter(AgentRun.run_id == run_id).first()
+        if not agent_run:
+            agent_run = (
+                self.db.query(AgentRun)
+                .filter(AgentRun.event_id == event.id)
+                .order_by(AgentRun.started_at.desc())
+                .first()
+            )
 
         currency_sym = "₹" if event.currency == "INR" else "$"
         budget_total = float(event.total_budget or 0)
@@ -331,27 +364,75 @@ class AutonomousOperationsService:
         allocated_budget = sum(float(b.estimated_amount or 0) for b in budget_items)
 
         summary_msg = (
-            f"🚀 **Operations Active for {event.name}!**\n\n"
-            f"Autonomous operations have started. Evaluated and contacted providers across {len(operations_report)} categories:\n"
+            f"🚀 **Autonomous Discovery Complete for {event.name}!**\n\n"
+            f"Evaluated and recommended provider candidates across {len(operations_report)} categories:\n"
         )
         for item in operations_report:
-            status_emoji = "✓" if item.get("status") in ("CONFIRMED", "CONTACTED", "SOURCED", "ASSIGNED") else "⟳"
-            src_tag = f" [{item.get('source', 'LIVE_SCRAPE')}]"
-            summary_msg += f"• **{item.get('category', '').title()}**: {status_emoji} {item.get('provider_name', 'Sourcing candidate')}{src_tag} ({item.get('status', 'Pending')})\n"
+            cat_name = item.get("category", "").title()
+            if item.get("status") == "NO_CANDIDATES_FOUND":
+                summary_msg += f"• **{cat_name}**: ⚠️ No suitable candidates found\n"
+            else:
+                count = item.get("candidates_count", 0)
+                summary_msg += f"• **{cat_name}**: ✓ {count} candidates recommended for review\n"
 
         summary_msg += (
             f"\n• **Allocated Budget:** {currency_sym}{allocated_budget:,.0f} / {currency_sym}{budget_total:,.0f}\n"
-            f"• **Live Status:** All operational tasks actively dispatched and monitored in Live Command Center."
+            f"• **Status:** Waiting for organizer selection from recommended shortlists."
+        )
+
+        if agent_run:
+            agent_run.status = "WAITING_FOR_USER_SELECTION"
+            agent_run.completed_at = utc_now()
+            agent_run.final_response = summary_msg
+            self.db.commit()
+
+        # Emit realtime lifecycle events
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "recommendations.ready",
+                "event_id": event.id,
+                "run_id": run_id,
+                "categories": categories_to_source,
+                "total_categories": len(operations_report),
+            },
+        )
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "agent.waiting_for_selection",
+                "event_id": event.id,
+                "run_id": run_id,
+                "status": "WAITING_FOR_USER_SELECTION",
+                "message": f"Autonomous operations discovered recommendations across {len(operations_report)} categories. Waiting for organizer selection.",
+            },
+        )
+
+        # 7. Audit & Telemetry
+        self._audit.record(
+            event_id=event.id,
+            actor_id=user_id,
+            actor_type="USER",
+            action="AUTONOMOUS_OPERATIONS_WAITING_SELECTION",
+            action_type="OPERATIONS",
+            target_type="EVENT",
+            target_id=event.id,
+            after_state={
+                "event_id": event.id,
+                "categories_sourced": categories_to_source,
+                "providers_contacted": 0,
+                "status": "WAITING_FOR_USER_SELECTION",
+            },
         )
 
         return {
-            "status": "OPERATING",
+            "status": "WAITING_FOR_USER_SELECTION",
             "message": summary_msg,
             "event_id": event.id,
             "run_id": run_id,
             "lifecycle_state": event.lifecycle_state,
             "operations_report": operations_report,
-            "providers_contacted_count": providers_contacted_count,
+            "providers_contacted_count": 0,
             "budget_allocated": allocated_budget,
             "budget_total": budget_total,
         }
@@ -395,8 +476,44 @@ class AutonomousOperationsService:
         city: str,
         pax: int,
         date_str: str,
+        agent_run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Discovers, scores, evaluates, and contacts suitable venues."""
+        """Discovers, scores, and persists multiple venue recommendations without auto-outreach."""
+        # Find or create category DiscoveryRun (Requirement 9)
+        disc_run = (
+            self.db.query(DiscoveryRun)
+            .filter(
+                DiscoveryRun.event_id == event.id,
+                DiscoveryRun.category == "VENUE",
+                DiscoveryRun.status == "RUNNING",
+            )
+            .first()
+        )
+        if not disc_run:
+            disc_run = DiscoveryRun(
+                id=f"disc_{uuid.uuid4().hex[:10]}",
+                event_id=event.id,
+                category="VENUE",
+                status="RUNNING",
+                trigger="operations",
+                current_iteration=1,
+                max_iterations=2,
+                radius_km=10.0,
+                target_count=5,
+                parameters={"location": city, "guest_count": pax},
+            )
+            self.db.add(disc_run)
+            self.db.commit()
+
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "discovery.started",
+                "event_id": event.id,
+                "run_id": disc_run.id,
+                "category": "VENUE",
+            },
+        )
         live_broker.publish_sync(
             event.id,
             {
@@ -411,36 +528,39 @@ class AutonomousOperationsService:
         if not venues:
             venues, total = self._venue_service.search_venues(city=city, limit=5)
 
-        is_simulated = False
+        # Requirement 8: NO FAKE VENDOR/VENUE FALLBACK!
         if not venues:
-            # Deterministic fallback candidate
-            is_simulated = True
-            new_venue = Venue(
-                name=f"The Grand Imperial Convention Centre {city}",
-                city=city,
-                address=f"Central Convention Boulevard, {city}",
-                capacity=max(pax * 2, 600),
-                venue_type="CONFERENCE_CENTER",
-                contact_phone="+919876543210",
-                contact_email=f"events@grandimperial{city.lower().replace(' ', '')}.com",
-                hourly_rate=15000.0,
-                status="ACTIVE",
-                amenities=["wifi", "av_tech", "parking", "catering_hall", "air_conditioned"],
-            )
-            self.db.add(new_venue)
+            disc_run.status = "COMPLETED"
+            disc_run.summary = "No suitable venue candidates were found."
+            disc_run.completed_at = utc_now()
             self.db.commit()
-            self.db.refresh(new_venue)
-            venues = [new_venue]
 
-        # Deterministic scoring across all candidates
+            live_broker.publish_sync(
+                event.id,
+                {
+                    "type": "discovery.completed",
+                    "event_id": event.id,
+                    "run_id": disc_run.id,
+                    "category": "VENUE",
+                    "target_met": False,
+                    "total_matching": 0,
+                },
+            )
+            return {
+                "category": "VENUE",
+                "status": "NO_CANDIDATES_FOUND",
+                "message": "No suitable venue candidates were found.",
+                "candidates_count": 0,
+                "contacted": False,
+                "provider_name": "No candidates found",
+            }
+
+        # Deterministic scoring across all real candidates
         scored_candidates = [(v, self._score_venue_candidate(v, pax, city)) for v in venues]
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
-        selected_venue, best_score = scored_candidates[0]
 
-        venue_source = getattr(selected_venue, "source", None) or ("DEMO_FALLBACK" if is_simulated else "DATABASE")
-
-        # Auto-shortlist top venue candidates
-        for rank, (cand_venue, v_score) in enumerate(scored_candidates[:3], start=1):
+        # Requirement 4 & 5: Persist multiple candidates as RECOMMENDED (do NOT auto-select top_matches[0])
+        for rank, (cand_venue, v_score) in enumerate(scored_candidates[:5], start=1):
             cand_id = cand_venue.id or str(uuid.uuid4())
             existing_sl = self.db.query(EventShortlistEntry).filter(
                 EventShortlistEntry.event_id == event.id,
@@ -453,8 +573,9 @@ class AutonomousOperationsService:
                     provider_id=cand_venue.id,
                     category="VENUE",
                     candidate_name=cand_venue.name,
-                    status="SHORTLISTED",
+                    status="RECOMMENDED",
                     ranking=rank,
+                    selection_source="AGENT_RECOMMENDATION",
                     notes=f"Autonomous score: {v_score} (Capacity: {cand_venue.capacity} pax in {city})",
                     candidate_data={
                         "id": cand_venue.id,
@@ -465,11 +586,32 @@ class AutonomousOperationsService:
                         "city": cand_venue.city,
                         "contact_phone": cand_venue.contact_phone,
                         "score": v_score,
+                        "ranking": rank,
+                        "status": "RECOMMENDED",
+                        "selection_source": "AGENT_RECOMMENDATION",
+                        "source": getattr(cand_venue, "source", "DATABASE") or "DATABASE",
                     },
                 )
                 self.db.add(sl_entry)
         self.db.commit()
 
+        # Update DiscoveryRun
+        disc_run.status = "COMPLETED"
+        disc_run.summary = f"Discovered and evaluated {len(scored_candidates)} venue recommendations."
+        disc_run.completed_at = utc_now()
+        self.db.commit()
+
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "discovery.completed",
+                "event_id": event.id,
+                "run_id": disc_run.id,
+                "category": "VENUE",
+                "target_met": True,
+                "total_matching": len(scored_candidates),
+            },
+        )
         live_broker.publish_sync(
             event.id,
             {
@@ -488,53 +630,23 @@ class AutonomousOperationsService:
             action="PROVIDER_CANDIDATES_EVALUATED",
             action_type="OPERATIONS",
             target_type="VENUE",
-            target_id=selected_venue.id,
+            target_id=event.id,
             after_state={
                 "category": "VENUE",
-                "total_candidates": len(venues),
-                "selected_provider": selected_venue.name,
-                "evaluation_score": best_score,
-                "capacity": selected_venue.capacity,
-                "source": venue_source,
+                "total_candidates": len(scored_candidates),
+                "candidates_recommended": len(scored_candidates[:5]),
             },
         )
 
-        # Dispatch structured inquiry tied to the actual event
-        inquiry_msg = (
-            f"Greetings from EVENTRA Operations. We are inquiring about venue availability at {selected_venue.name} "
-            f"for '{event.name}' ({pax} attendees) on {date_str}. Please provide availability confirmation and full-day rate quotation."
-        )
-
-        comm_res = self._comm_service.send_message(
-            event_id=event.id,
-            provider_id=selected_venue.id,
-            message=inquiry_msg,
-            recipient_contact=selected_venue.contact_phone,
-            actor_id="autonomous_agent",
-            actor_type="AGENT",
-        )
-
-        live_broker.publish_sync(
-            event.id,
-            {
-                "type": "agent.progress",
-                "event_id": event.id,
-                "message": f"Autonomous Agent: Shortlisted {selected_venue.name} & dispatched availability inquiry via WhatsApp",
-                "step": "VENUE_CONTACTED",
-            },
-        )
-
+        # Requirements 2, 3, 6: NO automatic contact, NO vendor assignment, NO phone call, NO WhatsApp
         return {
             "category": "VENUE",
-            "provider_id": selected_venue.id,
-            "provider_name": selected_venue.name,
-            "status": "CONTACTED" if comm_res.success else "SOURCED",
-            "contacted": comm_res.success,
-            "contact_phone": selected_venue.contact_phone,
-            "evaluation_score": best_score,
-            "is_simulated": is_simulated or (venue_source == "DEMO_FALLBACK"),
-            "source": venue_source,
-            "notes": f"Scored {best_score} on capacity ({selected_venue.capacity}) & location match for {pax} pax on {date_str}",
+            "status": "RECOMMENDED",
+            "candidates_count": len(scored_candidates[:5]),
+            "contacted": False,
+            "provider_name": f"{len(scored_candidates[:5])} venues evaluated",
+            "source": "DATABASE",
+            "notes": f"Scored and recommended {len(scored_candidates[:5])} venues for {pax} pax in {city}",
         }
 
     def _execute_vendor_operations(
@@ -544,12 +656,47 @@ class AutonomousOperationsService:
         city: str,
         pax: int,
         date_str: str,
-        run_id: Optional[str] = None,
+        agent_run_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Discovers, scores, assigns, and contacts providers for a specific category via AgenticDiscoveryController."""
+        """Discovers, scores, and persists multiple vendor recommendations without auto-outreach."""
         cat_lower = category.lower()
         cat_title = category.replace("_", " ").title()
 
+        # Find or create category DiscoveryRun (Requirement 9)
+        disc_run = (
+            self.db.query(DiscoveryRun)
+            .filter(
+                DiscoveryRun.event_id == event.id,
+                DiscoveryRun.category == category.upper(),
+                DiscoveryRun.status == "RUNNING",
+            )
+            .first()
+        )
+        if not disc_run:
+            disc_run = DiscoveryRun(
+                id=f"disc_{uuid.uuid4().hex[:10]}",
+                event_id=event.id,
+                category=category.upper(),
+                status="RUNNING",
+                trigger="operations",
+                current_iteration=1,
+                max_iterations=2,
+                radius_km=10.0,
+                target_count=5,
+                parameters={"location": city, "guest_count": pax},
+            )
+            self.db.add(disc_run)
+            self.db.commit()
+
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "discovery.started",
+                "event_id": event.id,
+                "run_id": disc_run.id,
+                "category": category.upper(),
+            },
+        )
         live_broker.publish_sync(
             event.id,
             {
@@ -571,146 +718,149 @@ class AutonomousOperationsService:
             category=category,
             location=city,
             guest_count=pax,
-            run_id=run_id,
+            run_id=disc_run.id,
             trigger="operations",
             simulate_outreach=False,
         )
 
-        selected_vendor = None
-        best_score = 0.85
-        is_simulated = False
-        vendor_source = "LIVE_SCRAPE"
+        # Aggregate candidates from top_matches and other_available_options
+        candidates_pool = list(discovery_res.top_matches or [])
+        if discovery_res.other_available_options:
+            candidates_pool.extend(discovery_res.other_available_options)
 
-        if discovery_res.top_matches:
-            top_match = discovery_res.top_matches[0]
-            cand = top_match.candidate
-            best_score = top_match.score or 0.85
-            vendor_source = getattr(cand, "source", "LIVE_SCRAPE") or "LIVE_SCRAPE"
+        # If empty, check cached DB vendors
+        if not candidates_pool:
+            cached_vendors = self._vendor_service.get_cached_candidates(category=category, city=city, limit=3)
+            for cv in cached_vendors:
+                candidates_pool.append(cv)
 
-            # Find or upsert vendor in DB
-            selected_vendor = (
+        # Requirement 8: NO FAKE VENDOR FALLBACK (Do NOT create DEMO_FALLBACK or fake phones)
+        if not candidates_pool:
+            disc_run.status = "COMPLETED"
+            disc_run.summary = f"No suitable {cat_title} candidates were found."
+            disc_run.completed_at = utc_now()
+            self.db.commit()
+
+            live_broker.publish_sync(
+                event.id,
+                {
+                    "type": "discovery.completed",
+                    "event_id": event.id,
+                    "run_id": disc_run.id,
+                    "category": category.upper(),
+                    "target_met": False,
+                    "total_matching": 0,
+                },
+            )
+            return {
+                "category": category,
+                "status": "NO_CANDIDATES_FOUND",
+                "message": f"No suitable {cat_title} candidates were found.",
+                "candidates_count": 0,
+                "contacted": False,
+                "provider_name": "No candidates found",
+            }
+
+        # Requirement 4 & 5: Persist multiple candidates as RECOMMENDED (never auto-select top_matches[0])
+        for rank, item in enumerate(candidates_pool[:5], start=1):
+            if hasattr(item, "candidate"):
+                cand = item.candidate
+                score = getattr(item, "score", 0.85) or 0.85
+            else:
+                cand = item
+                score = 0.85
+
+            cand_name = cand.name
+            cand_id = getattr(cand, "id", None) or getattr(cand, "source_id", None) or str(uuid.uuid4())
+            # Requirement 10: Missing phone number is NEVER fabricated
+            cand_phone = cand.phone if hasattr(cand, "phone") else getattr(cand, "contact_phone", None)
+            cand_source = getattr(cand, "source", "LIVE_SCRAPE") or "LIVE_SCRAPE"
+
+            # Register real vendor in DB if not existing
+            vendor_record = (
                 self.db.query(Vendor)
-                .filter(
-                    Vendor.name == cand.name,
-                    Vendor.city.ilike(f"%{city}%"),
-                )
+                .filter(Vendor.name == cand_name, Vendor.city.ilike(f"%{city}%"))
                 .first()
             )
-            if not selected_vendor:
-                selected_vendor = Vendor(
-                    name=cand.name,
+            if not vendor_record:
+                vendor_record = Vendor(
+                    name=cand_name,
                     category=category.upper(),
-                    city=cand.city or city,
-                    address=cand.address,
-                    latitude=cand.latitude,
-                    longitude=cand.longitude,
-                    contact_phone=cand.phone or "+919811223344",
-                    contact_email=cand.email,
-                    website=cand.website,
-                    base_cost=float(pax * 450) if "cater" in cat_lower else (cand.base_cost or 45000.0),
-                    rating=cand.rating or 4.8,
-                    review_count=cand.review_count or 15,
+                    city=getattr(cand, "city", None) or city,
+                    address=getattr(cand, "address", None),
+                    latitude=getattr(cand, "latitude", None),
+                    longitude=getattr(cand, "longitude", None),
+                    contact_phone=cand_phone,
+                    contact_email=getattr(cand, "email", None),
+                    website=getattr(cand, "website", None),
+                    base_cost=float(pax * 450) if "cater" in cat_lower else (getattr(cand, "base_cost", None) or 45000.0),
+                    rating=getattr(cand, "rating", None) or 4.5,
+                    review_count=getattr(cand, "review_count", None) or 10,
                     status="ACTIVE",
-                    source=vendor_source,
+                    source=cand_source,
                 )
-                self.db.add(selected_vendor)
+                self.db.add(vendor_record)
                 self.db.commit()
-                self.db.refresh(selected_vendor)
+                self.db.refresh(vendor_record)
 
-        if not selected_vendor:
-            # Check cached DB strictly meeting radius and category
-            cached_vendors = self._vendor_service.get_cached_candidates(category=category, city=city, limit=1)
-            if cached_vendors:
-                selected_vendor = cached_vendors[0]
-                vendor_source = "CACHED_DB"
-            else:
-                is_simulated = True
-                vendor_source = "DEMO_FALLBACK"
-                selected_vendor = Vendor(
-                    name=f"Elite {category.replace('_', ' ').title()} Solutions {city}",
-                    category=category.upper(),
-                    city=city,
-                    address=f"Central Business Plaza, Sector 4, {city}",
-                    contact_phone="+919811223344",
-                    contact_email=f"contact@elite{cat_lower}.com",
-                    base_cost=float(pax * 450) if "cater" in cat_lower else 45000.0,
-                    rating=4.8,
-                    status="ACTIVE",
-                    source="DEMO_FALLBACK",
-                )
-                self.db.add(selected_vendor)
-                self.db.commit()
-                self.db.refresh(selected_vendor)
-
-        # Auto-shortlist top vendor candidates
-        if discovery_res.top_matches:
-            for rank, tm in enumerate(discovery_res.top_matches[:3], start=1):
-                cand = tm.candidate
-                cand_id = getattr(cand, "id", None) or cand.name or str(uuid.uuid4())
-                existing_sl = self.db.query(EventShortlistEntry).filter(
-                    EventShortlistEntry.event_id == event.id,
-                    (EventShortlistEntry.candidate_id == cand_id) | (EventShortlistEntry.candidate_name == cand.name),
-                ).first()
-                if not existing_sl:
-                    sl_entry = EventShortlistEntry(
-                        event_id=event.id,
-                        candidate_id=cand_id,
-                        provider_id=selected_vendor.id if (selected_vendor and selected_vendor.name == cand.name) else None,
-                        category=category.upper(),
-                        candidate_name=cand.name,
-                        status="SHORTLISTED",
-                        ranking=rank,
-                        notes=f"Autonomous score: {tm.score} ({tm.tier})",
-                        candidate_data={
-                            "name": cand.name,
-                            "city": cand.city or city,
-                            "phone": cand.phone,
-                            "rating": cand.rating,
-                            "score": tm.score,
-                            "tier": tm.tier,
-                            "source": getattr(cand, "source", "LIVE_SCRAPE"),
-                        },
-                    )
-                    self.db.add(sl_entry)
-        elif selected_vendor:
             existing_sl = self.db.query(EventShortlistEntry).filter(
                 EventShortlistEntry.event_id == event.id,
-                (EventShortlistEntry.candidate_id == selected_vendor.id) | (EventShortlistEntry.candidate_name == selected_vendor.name),
+                (EventShortlistEntry.candidate_id == str(cand_id)) | (EventShortlistEntry.candidate_name == cand_name),
             ).first()
             if not existing_sl:
                 sl_entry = EventShortlistEntry(
                     event_id=event.id,
-                    candidate_id=selected_vendor.id,
-                    provider_id=selected_vendor.id,
+                    candidate_id=str(cand_id),
+                    provider_id=vendor_record.id if vendor_record else None,
                     category=category.upper(),
-                    candidate_name=selected_vendor.name,
-                    status="SHORTLISTED",
-                    ranking=1,
-                    notes=f"Autonomous score: {best_score}",
+                    candidate_name=cand_name,
+                    status="RECOMMENDED",
+                    ranking=rank,
+                    selection_source="AGENT_RECOMMENDATION",
+                    notes=f"Autonomous score: {score}",
                     candidate_data={
-                        "id": selected_vendor.id,
-                        "name": selected_vendor.name,
-                        "city": selected_vendor.city,
-                        "phone": selected_vendor.contact_phone,
-                        "rating": selected_vendor.rating,
-                        "score": best_score,
-                        "source": vendor_source,
+                        "name": cand_name,
+                        "city": getattr(cand, "city", None) or city,
+                        "phone": cand_phone,
+                        "rating": getattr(cand, "rating", None),
+                        "score": score,
+                        "ranking": rank,
+                        "status": "RECOMMENDED",
+                        "selection_source": "AGENT_RECOMMENDATION",
+                        "source": cand_source,
                     },
                 )
                 self.db.add(sl_entry)
         self.db.commit()
 
+        # Update DiscoveryRun
+        disc_run.status = "COMPLETED"
+        disc_run.summary = f"Discovered and ranked {len(candidates_pool[:5])} {cat_title} recommendations."
+        disc_run.completed_at = utc_now()
+        self.db.commit()
+
+        live_broker.publish_sync(
+            event.id,
+            {
+                "type": "discovery.completed",
+                "event_id": event.id,
+                "run_id": disc_run.id,
+                "category": category.upper(),
+                "target_met": True,
+                "total_matching": len(candidates_pool),
+            },
+        )
         live_broker.publish_sync(
             event.id,
             {
                 "type": "shortlist.updated",
                 "event_id": event.id,
                 "action": "added",
-                "category": category,
+                "category": category.upper(),
             },
         )
 
-        # Record candidate evaluation trace
+        # Record candidate evaluation trace in Audit
         self._audit.record(
             event_id=event.id,
             actor_id="autonomous_agent",
@@ -718,144 +868,23 @@ class AutonomousOperationsService:
             action="PROVIDER_CANDIDATES_EVALUATED",
             action_type="OPERATIONS",
             target_type="VENDOR",
-            target_id=selected_vendor.id,
+            target_id=event.id,
             after_state={
                 "category": category,
-                "total_candidates": len(discovery_res.top_matches) if discovery_res.top_matches else 1,
-                "selected_provider": selected_vendor.name,
-                "evaluation_score": best_score,
-                "base_cost": float(selected_vendor.base_cost or 0),
-                "source": vendor_source,
+                "total_candidates": len(candidates_pool),
+                "candidates_recommended": len(candidates_pool[:5]),
             },
         )
 
-        # Ensure VendorAssignment
-        existing_assignment = (
-            self.db.query(VendorAssignment)
-            .filter(
-                VendorAssignment.event_id == event.id,
-                VendorAssignment.vendor_id == selected_vendor.id,
-            )
-            .first()
-        )
-
-        if not existing_assignment:
-            assignment = VendorAssignment(
-                event_id=event.id,
-                vendor_id=selected_vendor.id,
-                category=cat_lower,
-                status="PENDING_CONFIRMATION",
-                agreed_cost=selected_vendor.base_cost,
-                notes=f"Autonomous sourcing dispatch (Score: {best_score}) for {pax} pax on {date_str}",
-            )
-            self.db.add(assignment)
-            self.db.commit()
-            self.db.refresh(assignment)
-        else:
-            assignment = existing_assignment
-
-        # Strict requirement (Decision 2): Every vendor-binding action strictly requires an ApprovalRequest via ApprovalService
-        approval_record = None
-        cat_task = self.db.query(Task).filter(
-            Task.event_id == event.id,
-            Task.required_provider_category.ilike(f"%{cat_lower}%"),
-        ).first()
-        try:
-            approval_in = ApprovalRequestCreate(
-                action_type="CONTRACT_VENDOR",
-                target_type="VENDOR",
-                target_id=selected_vendor.id,
-                requested_action={
-                    "vendor_id": selected_vendor.id,
-                    "vendor_name": selected_vendor.name,
-                    "category": category,
-                    "task_id": cat_task.id if cat_task else None,
-                    "assignment_id": assignment.id,
-                    "agreed_cost": float(selected_vendor.base_cost or 0),
-                    "notes": f"Contracting shortlisted provider {selected_vendor.name} for {category.title()}",
-                },
-                notes=f"Approval required to contract {selected_vendor.name} for {category.title()}",
-            )
-            approval_record = self._approval_service.create_request(event.id, requester_id="autonomous_operations_engine", data=approval_in)
-            live_broker.publish_sync(
-                event.id,
-                {
-                    "type": "approval.created",
-                    "event_id": event.id,
-                    "approval_id": approval_record.id,
-                    "action_type": approval_record.action_type,
-                    "target_name": selected_vendor.name,
-                },
-            )
-        except Exception as app_err:
-            logger.error(f"Approval creation failed for vendor {selected_vendor.name}: {app_err}")
-            # HARD GATE STOP: Enter error/blocked state. DO NOT send outreach or assign!
-            assignment.status = "APPROVAL_FAILED"
-            self.db.commit()
-
-            live_broker.publish_sync(
-                event.id,
-                {
-                    "type": "agent.failed",
-                    "event_id": event.id,
-                    "category": category,
-                    "error": f"Approval creation failed: {app_err}",
-                },
-            )
-
-            return {
-                "category": category,
-                "provider_id": selected_vendor.id,
-                "provider_name": selected_vendor.name,
-                "assignment_id": assignment.id,
-                "status": "APPROVAL_FAILED",
-                "error": f"Approval creation failed: {app_err}",
-                "contacted": False,
-            }
-
-        # Keep assignment strictly PENDING_CONFIRMATION until explicit human approval
-        assignment.status = "PENDING_CONFIRMATION"
-        self.db.commit()
-
-        # Dispatch outreach inquiry message tied to the actual event
-        cat_title = category.replace("_", " ").title()
-        outreach_msg = (
-            f"Hello {selected_vendor.name}, EVENTRA Autonomous Operations is requesting availability and quotation "
-            f"for {cat_title} services for '{event.name}' ({pax} guests) in {city} on {date_str}. "
-            f"Please reply with your standard package quotation."
-        )
-
-        comm_res = self._comm_service.send_message(
-            event_id=event.id,
-            provider_id=selected_vendor.id,
-            message=outreach_msg,
-            recipient_contact=selected_vendor.contact_phone,
-            actor_id="autonomous_agent",
-            actor_type="AGENT",
-        )
-
-        live_broker.publish_sync(
-            event.id,
-            {
-                "type": "agent.progress",
-                "event_id": event.id,
-                "message": f"Autonomous Agent: Shortlisted {selected_vendor.name} for {cat_title} & dispatched RFQ via WhatsApp",
-                "step": f"RFQ_{category}",
-            },
-        )
-
+        # Requirements 2, 3, 6: NO automatic contact, NO vendor assignment, NO phone call, NO WhatsApp
         return {
             "category": category,
-            "provider_id": selected_vendor.id,
-            "provider_name": selected_vendor.name,
-            "assignment_id": assignment.id,
-            "status": "CONTACTED" if comm_res.success else "ASSIGNED",
-            "contacted": comm_res.success,
-            "contact_phone": selected_vendor.contact_phone,
-            "evaluation_score": best_score,
-            "base_cost": float(selected_vendor.base_cost or 0),
-            "is_simulated": is_simulated or (vendor_source == "DEMO_FALLBACK"),
-            "source": vendor_source,
+            "status": "RECOMMENDED",
+            "candidates_count": len(candidates_pool[:5]),
+            "contacted": False,
+            "provider_name": f"{len(candidates_pool[:5])} {cat_title} candidates evaluated",
+            "source": "AGENTIC_DISCOVERY",
+            "notes": f"Discovered and ranked {len(candidates_pool[:5])} candidates for review",
         }
 
     def simulate_caterer_cancellation(
@@ -1033,7 +1062,14 @@ class AutonomousOperationsService:
             recovery_option_id=top_opt_id,
             notes=f"Authorize emergency replacement of cancelled caterer with {backup_caterer.name}",
         )
-        approval = self._approval_service.create_request(event.id, requester_id="system_incident_engine", data=approval_in)
+        try:
+            approval = self._approval_service.create_request(event.id, requester_id="system_incident_engine", data=approval_in)
+        except Exception as app_err:
+            logger.error(f"Approval creation failed: {app_err}")
+            if catering_task:
+                catering_task.status = TaskStatus.BLOCKED.value
+                self.db.commit()
+            raise BadRequestException(f"Failed to create required approval for recovery: {app_err}")
 
         # Record Audit
         self._audit.record(
@@ -1265,6 +1301,103 @@ class AutonomousOperationsService:
                 "detail": detail or action_title,
             })
 
+        # Agent status from latest AgentRun
+        latest_agent_run = (
+            self.db.query(AgentRun)
+            .filter(AgentRun.event_id == event.id)
+            .order_by(AgentRun.started_at.desc())
+            .first()
+        )
+        agent_data = None
+        if latest_agent_run:
+            agent_data = {
+                "run_id": latest_agent_run.run_id,
+                "status": latest_agent_run.status,
+                "current_step": getattr(latest_agent_run, "current_step", None) or latest_agent_run.status,
+                "error": latest_agent_run.error,
+                "is_waiting_for_selection": latest_agent_run.status == "WAITING_FOR_USER_SELECTION",
+                "started_at": latest_agent_run.started_at.isoformat() if latest_agent_run.started_at else None,
+                "completed_at": latest_agent_run.completed_at.isoformat() if latest_agent_run.completed_at else None,
+                "final_response": latest_agent_run.final_response,
+            }
+
+        # Discovery Runs per category
+        discovery_runs = (
+            self.db.query(DiscoveryRun)
+            .filter(DiscoveryRun.event_id == event.id)
+            .order_by(DiscoveryRun.created_at.desc())
+            .all()
+        )
+        seen_cats = set()
+        discovery_list = []
+        for dr in discovery_runs:
+            cat_upper = dr.category.upper() if dr.category else "OTHER"
+            if cat_upper not in seen_cats:
+                seen_cats.add(cat_upper)
+                discovered_count = getattr(dr, "discovered", 0) or 0
+                discovery_list.append({
+                    "id": dr.id,
+                    "category": cat_upper,
+                    "status": dr.status,
+                    "candidates_discovered": discovered_count,
+                    "qualified_candidates": getattr(dr, "matching", 0) or getattr(dr, "relevant", 0) or 0,
+                    "ranked_candidates": getattr(dr, "shortlisted", 0) or 0,
+                    "current_iteration": dr.current_iteration,
+                    "max_iterations": dr.max_iterations,
+                    "radius_km": dr.radius_km,
+                    "target_count": dr.target_count,
+                    "summary": dr.summary,
+                    "created_at": dr.created_at.isoformat() if dr.created_at else None,
+                    "updated_at": dr.updated_at.isoformat() if getattr(dr, "updated_at", None) else None,
+                })
+
+        # Shortlist Recommendations
+        shortlist_entries = (
+            self.db.query(EventShortlistEntry)
+            .filter(EventShortlistEntry.event_id == event.id)
+            .order_by(EventShortlistEntry.ranking.asc(), EventShortlistEntry.created_at.asc())
+            .all()
+        )
+        recommendations_list = []
+        selections_list = []
+        for sl in shortlist_entries:
+            cdata = sl.candidate_data or {}
+            rec_item = {
+                "id": sl.id,
+                "shortlist_entry_id": sl.id,
+                "candidate_id": sl.candidate_id,
+                "provider_id": sl.provider_id,
+                "category": sl.category.upper() if sl.category else "OTHER",
+                "name": sl.candidate_name,
+                "candidate_name": sl.candidate_name,
+                "address": cdata.get("address"),
+                "phone": cdata.get("phone"),
+                "rating": cdata.get("rating"),
+                "score": cdata.get("score"),
+                "ranking": sl.ranking,
+                "status": sl.status,  # "RECOMMENDED" vs "SELECTED"
+                "selection_source": sl.selection_source,
+                "selected_by": sl.selected_by,
+                "selected_at": sl.selected_at.isoformat() if getattr(sl, "selected_at", None) else None,
+                "notes": sl.notes,
+                "candidate_data": cdata,
+                "communication_approval": (cdata.get("communication") or {
+                    "approval_id": None,
+                    "approval_status": "NOT_REQUESTED",
+                    "call_status": "NOT_ATTEMPTED",
+                    "whatsapp_status": "NOT_ATTEMPTED",
+                    "overall_status": "NOT_REQUESTED",
+                    "call_error": None,
+                    "whatsapp_error": None,
+                    "phone": cdata.get("phone"),
+                    "updated_at": None,
+                }),
+            }
+            recommendations_list.append(rec_item)
+            if sl.status == "SELECTED":
+                selections_list.append(rec_item)
+
+
         return {
             "event_id": event.id,
             "event_name": event.name,
@@ -1274,9 +1407,149 @@ class AutonomousOperationsService:
             "committed_budget": committed_budget,
             "currency": event.currency,
             "live_state": live_state.model_dump(),
+            "agent": agent_data,
+            "discovery": discovery_list,
             "assignments": assignment_list,
+            "recommendations": recommendations_list,
+            "selections": selections_list,
             "tasks": task_list,
             "pending_approvals": pending_approvals_list,
             "pending_approvals_count": len(pending_approvals_list),
             "activity_feed": activity_feed,
         }
+
+    def select_candidate(
+        self,
+        event_id: str,
+        candidate_id: str,
+        user_id: str = "organizer",
+    ) -> Dict[str, Any]:
+        """Organizer action to select a candidate from recommendations.
+        Transitions the EventShortlistEntry to SELECTED (selection_source=ORGANIZER_SELECTION)
+        and creates the VendorAssignment.
+        """
+        entry = (
+            self.db.query(EventShortlistEntry)
+            .filter(
+                EventShortlistEntry.event_id == event_id,
+                (EventShortlistEntry.candidate_id == candidate_id) | (EventShortlistEntry.id == candidate_id),
+            )
+            .first()
+        )
+        if not entry:
+            raise NotFoundException(f"Candidate '{candidate_id}' not found in event '{event_id}' shortlist.")
+
+        entry.status = "SELECTED"
+        entry.selection_source = "ORGANIZER_SELECTION"
+        entry.selected_by = user_id
+        entry.selected_at = utc_now()
+
+        # Check / create VendorAssignment
+        existing_asg = (
+            self.db.query(VendorAssignment)
+            .filter(
+                VendorAssignment.event_id == event_id,
+                VendorAssignment.vendor_id == entry.provider_id,
+            )
+            .first()
+        )
+        asg = existing_asg
+        if not existing_asg and entry.provider_id:
+            asg = VendorAssignment(
+                event_id=event_id,
+                vendor_id=entry.provider_id,
+                category=entry.category.lower(),
+                status="ASSIGNED",
+            )
+            self.db.add(asg)
+
+        if entry.category and entry.category.upper() == "VENUE" and entry.provider_id:
+            event = self.db.query(Event).filter(Event.id == event_id).first()
+            if event:
+                event.venue_id = entry.provider_id
+
+        # Initialize pending communication approval (Consent is NOT implied by selection)
+        from app.models.approval import Approval
+        from app.engines.auth.snapshot import compute_event_state_snapshot
+        approval = (
+            self.db.query(Approval)
+            .filter(
+                Approval.event_id == event_id,
+                Approval.action_type == "COMMUNICATION_OUTREACH",
+                Approval.target_id == entry.candidate_id,
+            )
+            .first()
+        )
+        if not approval:
+            approval = Approval(
+                event_id=event_id,
+                requester_id=user_id or "organizer",
+                action_type="COMMUNICATION_OUTREACH",
+                target_type=(entry.category or "VENDOR").upper(),
+                target_id=entry.candidate_id,
+                impact_level="MAJOR",
+                requested_action={
+                    "candidate_id": entry.candidate_id,
+                    "candidate_name": entry.candidate_name,
+                    "category": entry.category,
+                    "provider_id": entry.provider_id,
+                },
+                status="PENDING",
+                state_snapshot=compute_event_state_snapshot(self.db, event_id),
+                created_at=utc_now(),
+            )
+            self.db.add(approval)
+            self.db.flush()
+
+        c_data = dict(entry.candidate_data or {})
+        c_data["communication"] = {
+            "approval_id": approval.id,
+            "approval_status": "PENDING",
+            "call_status": "NOT_ATTEMPTED",
+            "whatsapp_status": "NOT_ATTEMPTED",
+            "overall_status": "PENDING_APPROVAL",
+            "updated_at": utc_now().isoformat(),
+        }
+        entry.candidate_data = c_data
+
+        self.db.commit()
+        self.db.refresh(entry)
+
+        live_broker.publish_sync(
+            event_id,
+            {
+                "type": "shortlist.selected",
+                "event_id": event_id,
+                "candidate_id": entry.candidate_id,
+                "candidate_name": entry.candidate_name,
+                "category": entry.category,
+                "status": "SELECTED",
+                "selection_source": "ORGANIZER_SELECTION",
+                "selected_by": entry.selected_by,
+                "selected_at": entry.selected_at.isoformat() if entry.selected_at else None,
+            },
+        )
+        live_broker.publish_sync(
+            event_id,
+            {
+                "type": "approval.created",
+                "event_id": event_id,
+                "approval_id": approval.id,
+                "action_type": "COMMUNICATION_OUTREACH",
+                "target_id": entry.candidate_id,
+                "target_name": entry.candidate_name,
+                "status": "PENDING",
+                "impact_level": "MAJOR",
+            },
+        )
+        return {
+            "status": "SELECTED",
+            "candidate_id": entry.candidate_id,
+            "candidate_name": entry.candidate_name,
+            "category": entry.category,
+            "selection_source": entry.selection_source,
+            "assignment_id": asg.id if asg else None,
+            "approval_id": approval.id,
+            "communication_status": "PENDING_APPROVAL",
+        }
+

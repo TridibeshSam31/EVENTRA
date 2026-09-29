@@ -45,6 +45,7 @@ import type {
   FinalExecutionPlan,
 } from "@/types/api";
 import type { ActivityLogItem } from "@/types/activityLog";
+import { useEventWorkspace } from "@/hooks/useEventWorkspace";
 
 import { OperationalHealthCard } from "./OperationalHealthCard";
 import { ExecutionOverview } from "./ExecutionOverview";
@@ -64,6 +65,7 @@ export function LiveOperationsCommand({
   eventId,
   className = "",
 }: LiveOperationsCommandProps) {
+  const { sseConnected } = useEventWorkspace(eventId);
   const [eventData, setEventData] = useState<EventResponse | null>(null);
   const [liveState, setLiveState] = useState<EventLiveState | null>(null);
   const [executionState, setExecutionState] = useState<EventExecutionStateResponse | null>(null);
@@ -139,9 +141,10 @@ export function LiveOperationsCommand({
     }
   }, [eventId]);
 
-  // Initial load + Controlled 6s Polling Loop
+  // Initial load + Controlled fallback polling only if SSE is disconnected
   useEffect(() => {
     loadLiveData();
+    if (sseConnected) return; // Real-time mutations streamed via SSE
 
     const intervalId = setInterval(() => {
       // Avoid polling if browser tab is in background
@@ -149,10 +152,10 @@ export function LiveOperationsCommand({
         return;
       }
       loadLiveData();
-    }, 6000);
+    }, 8000);
 
     return () => clearInterval(intervalId);
-  }, [loadLiveData]);
+  }, [loadLiveData, sseConnected]);
 
   // Action: Conclude Event
   const handleConcludeEvent = async () => {

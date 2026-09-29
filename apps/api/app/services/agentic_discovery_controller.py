@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.event import Event
+from app.models.vendor import Vendor
 from app.integrations.registry import registry
 from app.integrations.google_maps_scraper.models import NormalizedProvider
 from app.services.discovery_search_planner import SearchPlanner
@@ -28,6 +29,7 @@ from app.services.deduplication import ProviderDeduplicator
 from app.services.geospatial_service import geospatial_discovery
 from app.services.vendor_service import haversine_distance_km
 from app.models.discovery_run import DiscoveryRun, DiscoveryRunEvent
+from app.services.live_broker import live_broker
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -159,6 +161,23 @@ class AgenticDiscoveryController:
                     logger.warning(f"Could not log DiscoveryRunEvent: {log_err}")
                     self.db.rollback()
 
+            if event_id and event_id != "demo-event":
+                try:
+                    live_broker.publish_sync(
+                        event_id,
+                        {
+                            "type": "discovery.progress",
+                            "event_id": event_id,
+                            "run_id": run.id if run else run_id,
+                            "category": category,
+                            "event_type": ev_type,
+                            "message": message,
+                            "data": data or {},
+                        },
+                    )
+                except Exception:
+                    pass
+
         seen_ids: Set[str] = set()
         tried_queries: Set[str] = set()
         all_queries_used: List[str] = []
@@ -175,6 +194,43 @@ class AgenticDiscoveryController:
         # Global deduplicator connected to DB Vendor table
         deduplicator = ProviderDeduplicator(self.db)
         directory_provider = registry.get_provider_directory()
+
+        # Check existing active database vendors first
+        local_vendors = (
+            self.db.query(Vendor)
+            .filter(
+                Vendor.category.ilike(f"%{category}%"),
+                Vendor.status == "ACTIVE",
+            )
+            .limit(self.target_count * 2)
+            .all()
+        )
+        if clean_loc:
+            loc_matched = [v for v in local_vendors if v.city and clean_loc.lower() in v.city.lower()]
+            if loc_matched:
+                local_vendors = loc_matched
+
+        initial_db_candidates: List[NormalizedProvider] = []
+        for lv in local_vendors:
+            norm_lv = NormalizedProvider(
+                source=lv.source or "DATABASE",
+                source_id=lv.source_id or lv.id,
+                name=lv.name,
+                category=lv.category,
+                city=lv.city,
+                address=lv.address,
+                phone=lv.contact_phone,
+                email=lv.contact_email,
+                website=lv.website,
+                rating=lv.rating or 4.5,
+                review_count=lv.review_count or 10,
+                base_cost=lv.base_cost or 1000.0,
+            )
+            cid = norm_lv.source_id or norm_lv.name.lower()
+            if cid not in seen_ids:
+                seen_ids.add(cid)
+                raw_candidates_pool.append(norm_lv)
+                initial_db_candidates.append(norm_lv)
 
         _log_event(
             "requirements_parsed",
@@ -216,20 +272,21 @@ class AgenticDiscoveryController:
             radius_meters = int(current_radius * 1000)
             iter_scraped_candidates: List[NormalizedProvider] = []
 
-            for q in queries:
-                res = directory_provider.search_providers(
-                    category=category,
-                    city=clean_loc,
-                    query=q,
-                    latitude=lat,
-                    longitude=lon,
-                    limit=15,
-                    radius_km=current_radius,  # FIX(4c): thread actual computed radius through
-                )
-                if res.success and res.data:
-                    for raw_item in res.data:
-                        norm = NormalizedProvider.model_validate(raw_item)
-                        iter_scraped_candidates.append(norm)
+            if len(raw_candidates_pool) < self.target_count:
+                for q in queries:
+                    res = directory_provider.search_providers(
+                        category=category,
+                        city=clean_loc,
+                        query=q,
+                        latitude=lat,
+                        longitude=lon,
+                        limit=15,
+                        radius_km=current_radius,  # FIX(4c): thread actual computed radius through
+                    )
+                    if res.success and res.data:
+                        for raw_item in res.data:
+                            norm = NormalizedProvider.model_validate(raw_item)
+                            iter_scraped_candidates.append(norm)
 
             total_scraped_count += len(iter_scraped_candidates)
             _log_event(
@@ -240,14 +297,16 @@ class AgenticDiscoveryController:
 
             # Step C: Global Persistent Deduplication
             new_candidates: List[NormalizedProvider] = []
+            if iteration == 1 and initial_db_candidates:
+                new_candidates.extend(initial_db_candidates)
             for cand in iter_scraped_candidates:
                 cid = cand.source_id or cand.maps_url or cand.phone or cand.name.lower()
                 if cid not in seen_ids:
                     seen_ids.add(cid)
                     new_candidates.append(cand)
+                    raw_candidates_pool.append(cand)
 
             total_deduped_count += len(new_candidates)
-            raw_candidates_pool.extend(new_candidates)
 
             # Step D: Qualification Gate & Hard Constraints Filter
             iter_qual_results: Dict[str, QualificationResult] = {}
@@ -310,9 +369,11 @@ class AgenticDiscoveryController:
             )
 
             # Step F: Outreach & Availability Confirmation State Machine
+            # Requirement 8: Discovery does not initiate communication during autonomous operations.
+            should_run_outreach = simulate_outreach and (trigger != "operations")
             uncontacted_qualified = [c for c in qualified_pool if c.availability == "unconfirmed"]
 
-            if uncontacted_qualified:
+            if uncontacted_qualified and should_run_outreach:
                 outreach_res = DiscoveryOutreachService.contact_batch(
                     ranked_candidates=qualified_pool,
                     event_id=event_id or "demo-event",
@@ -332,13 +393,19 @@ class AgenticDiscoveryController:
                         confirmed_pool.append(item)
 
             # Check Stopping Condition
-            valid_confirmed = [
-                c for c in confirmed_pool
-                if c.qualification in ("qualified", "uncertain") and c.confidence >= 0.75
-            ]
+            if confirmed_pool:
+                valid_candidates = [
+                    c for c in confirmed_pool
+                    if c.qualification in ("qualified", "uncertain") and c.confidence >= 0.75
+                ]
+            else:
+                valid_candidates = [
+                    c for c in qualified_pool
+                    if c.qualification in ("qualified", "uncertain")
+                ]
 
-            if len(valid_confirmed) >= self.target_count:
-                logger.info(f"Target count met ({len(valid_confirmed)} >= {self.target_count}) at iteration {iteration}")
+            if len(valid_candidates) >= self.target_count:
+                logger.info(f"Target count met ({len(valid_candidates)} >= {self.target_count}) at iteration {iteration}")
                 break
 
             # Step G: Diagnosis Branch (Search Problem vs Outreach Problem)

@@ -144,9 +144,10 @@ def interpret_node(state: AgentState, config: Optional[RunnableConfig] = None) -
         from app.agent.tools.operations_tools import start_autonomous_operations
         db, _ = _get_context(config)
         op_result = start_autonomous_operations(db=db, event_id=state["event_id"], user_id=state.get("user_id", "anonymous_operator"))
+        res_status = op_result.get("status", "WAITING_FOR_USER_SELECTION")
         return {
-            "status": "COMPLETED",
-            "termination_status": "COMPLETED",
+            "status": res_status,
+            "termination_status": res_status,
             "final_response": op_result.get("message", "Operations Active"),
             "current_phase": "TERMINATED",
         }
@@ -445,6 +446,11 @@ def tool_execution_node(state: AgentState, config: Optional[RunnableConfig] = No
                 feasible = [o for o in tool_result.data if o.get("is_feasible")]
                 backup_opts = [o for o in feasible if str(o.get("strategy_type", "")).upper() in ("BACKUP", "REASSIGN", "REASSIGN_VENDOR")]
                 updates["selected_option"] = backup_opts[0] if backup_opts else (feasible[0] if feasible else tool_result.data[0])
+        elif tool_name == "start_autonomous_operations":
+            updates["status"] = "WAITING_FOR_USER_SELECTION"
+            updates["termination_status"] = "WAITING_FOR_USER_SELECTION"
+            if isinstance(tool_result.data, dict) and "message" in tool_result.data:
+                updates["final_response"] = tool_result.data["message"]
         elif tool_name == "execute_action":
             updates["execution_result"] = tool_result.data
             updates["action_status"] = "EXECUTED"
@@ -486,6 +492,9 @@ def route_after_process_result(state: AgentState) -> str:
 
     if status == ToolStatus.REQUIRES_APPROVAL.value:
         return "wait_for_approval"
+
+    if tool_name == "start_autonomous_operations":
+        return "end_completed"
 
     # Consequential write execution must be immediately verified
     if tool_name == "execute_action" and status == ToolStatus.SUCCESS.value:
@@ -781,9 +790,11 @@ def end_completed_node(state: AgentState, config: Optional[RunnableConfig] = Non
     }
     final_resp = state.get("final_response") or llm.format_operational_response("COMPLETED", context)
 
+    target_status = state.get("status") if state.get("status") in ("WAITING_FOR_USER_SELECTION", "WAITING_APPROVAL") else "COMPLETED"
+    term_status = state.get("termination_status") or target_status
     return {
-        "status": "COMPLETED",
-        "termination_status": "COMPLETED",
+        "status": target_status,
+        "termination_status": term_status,
         "final_response": final_resp,
         "current_phase": "TERMINATED",
     }
@@ -863,7 +874,7 @@ class EventOperationsAgentGraph:
         builder.add_edge("observe", "interpret")
         builder.add_conditional_edges(
             "interpret",
-            lambda s: "end_completed" if s.get("status") == "COMPLETED" else "decide_next_step",
+            lambda s: "end_completed" if s.get("status") in ("COMPLETED", "WAITING_FOR_USER_SELECTION") else "decide_next_step",
             {
                 "end_completed": "end_completed",
                 "decide_next_step": "decide_next_step",

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 
 import { getEvent } from "@/lib/api/events";
+import { useEventWorkspace } from "@/hooks/useEventWorkspace";
 import {
   getDiscoveryRuns,
   getDiscoveryRun,
@@ -95,6 +96,9 @@ export function DiscoveryCommand({
   defaultCategory,
   className = "",
 }: DiscoveryCommandProps) {
+  // Canonical workspace integration
+  const { opsStatus, shortlist: workspaceShortlist, sseConnected } = useEventWorkspace(eventId);
+
   // Event & run state
   const [eventData, setEventData] = useState<EventResponse | null>(null);
   const [runs, setRuns] = useState<DiscoveryRun[]>([]);
@@ -279,10 +283,36 @@ export function DiscoveryCommand({
     }
   }, [eventData?.id, category, discoveryType, loadCandidates]);
 
-  // 4. Live Polling Effect while DiscoveryRun status is RUNNING
+  // Synchronize shortlisted IDs from canonical workspace store
+  useEffect(() => {
+    if (workspaceShortlist && workspaceShortlist.length > 0) {
+      setShortlistedIds(new Set(workspaceShortlist.map((i) => i.candidate_id)));
+    }
+  }, [workspaceShortlist]);
+
+  // Synchronize discovery runs from canonical workspace status
+  useEffect(() => {
+    if (opsStatus?.discovery?.runs && opsStatus.discovery.runs.length > 0) {
+      const relevantRuns = opsStatus.discovery.runs.filter((r: any) =>
+        discoveryType === "VENUE" ? r.category === "VENUE" : r.category === category
+      );
+      if (relevantRuns.length > 0) {
+        setRuns(relevantRuns);
+        const running = relevantRuns.find((r: any) => r.status === "RUNNING");
+        if (running) {
+          setSelectedRun(running);
+        } else if (!selectedRun) {
+          setSelectedRun(relevantRuns[0]);
+        }
+      }
+    }
+  }, [opsStatus?.discovery, discoveryType, category]);
+
+  // 4. Live Polling Effect: only active if SSE is disconnected
   useEffect(() => {
     if (!eventId || !selectedRun?.run_id) return;
     if (selectedRun.status !== "RUNNING") return;
+    if (sseConnected) return; // SSE handles discovery progress in real-time
 
     let isMounted = true;
     const currentRunId = selectedRun.run_id;
@@ -317,13 +347,13 @@ export function DiscoveryCommand({
       } catch (err) {
         console.error("Error polling discovery run:", err);
       }
-    }, 2500);
+    }, 4000);
 
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
     };
-  }, [eventId, selectedRun?.run_id, selectedRun?.status, loadCandidates]);
+  }, [eventId, selectedRun?.run_id, selectedRun?.status, sseConnected, loadCandidates]);
 
   // Explicit Trigger: ONLY explicit click on Start Discovery creates 1 run
   const handleTriggerDiscovery = async () => {

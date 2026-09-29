@@ -9,6 +9,9 @@ export interface ShortlistEntry {
   candidate_name?: string | null;
   status: string;
   ranking?: number | null;
+  selection_source?: string | null;
+  selected_by?: string | null;
+  selected_at?: string | null;
   notes?: string | null;
   candidate_data?: Record<string, any> | null;
   created_at: string;
@@ -37,6 +40,9 @@ export async function addShortlistEntry(
     candidate_name?: string | null;
     status?: string;
     ranking?: number | null;
+    selection_source?: string | null;
+    selected_by?: string | null;
+    selected_at?: string | null;
     notes?: string | null;
     candidate_data?: Record<string, any>;
   }
@@ -58,3 +64,40 @@ export async function removeShortlistEntry(
     }
   );
 }
+
+export async function selectShortlistCandidate(
+  eventId: string,
+  candidateId: string
+): Promise<ShortlistEntry> {
+  return apiRequest<ShortlistEntry>(
+    `/events/${eventId}/shortlist/${encodeURIComponent(candidateId)}/select`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+export async function approveShortlistCommunication(
+  eventId: string,
+  candidateId: string
+): Promise<ShortlistEntry> {
+  return apiRequest<ShortlistEntry>(
+    `/events/${eventId}/shortlist/${encodeURIComponent(candidateId)}/approve-communication`,
+    {
+      method: "POST",
+    }
+  );
+}
+
+export async function dismissShortlistCommunication(
+  eventId: string,
+  candidateId: string
+): Promise<ShortlistEntry> {
+  return apiRequest<ShortlistEntry>(
+    `/events/${eventId}/shortlist/${encodeURIComponent(candidateId)}/dismiss-communication`,
+    {
+      method: "POST",
+    }
+  );
+}
+

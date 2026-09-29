@@ -24,6 +24,9 @@ interface AgentPanelProps {
   eventName: string;
   lifecycleState: string;
   isRunning?: boolean;
+  isWaitingForSelection?: boolean;
+  agentMessage?: string | null;
+  agentStatus?: string | null;
   onOperationsStarted?: (runId?: string) => void;
   className?: string;
   latestOperation?: string | null;
@@ -38,6 +41,9 @@ export function AgentPanel({
   eventName,
   lifecycleState,
   isRunning = false,
+  isWaitingForSelection = false,
+  agentMessage,
+  agentStatus,
   onOperationsStarted,
   className = "",
   latestOperation,
@@ -91,11 +97,27 @@ export function AgentPanel({
         </div>
 
         {/* Backend Status Badge */}
+        {/* Backend Status Badge */}
         <div className="flex items-center gap-2 self-start sm:self-auto">
           {hasPendingApprovals ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
               <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
               <span>Waiting For Approval</span>
+            </span>
+          ) : isWaitingForSelection ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+              <span>Waiting For Selection</span>
+            </span>
+          ) : agentStatus === "FAILED" ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+              <span>Failed</span>
+            </span>
+          ) : isRunning ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+              <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+              <span>Sourcing & Qualifying</span>
             </span>
           ) : isLive ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
@@ -119,8 +141,10 @@ export function AgentPanel({
             <Layers className="w-3 h-3 text-slate-500" />
             <span>Current Operation</span>
           </div>
-          <div className="font-semibold text-slate-900 truncate">
-            {latestOperation || (isLive ? "Monitoring execution state" : "Awaiting dispatch")}
+          <div className="font-semibold text-slate-900 truncate" title={agentMessage || latestOperation || ""}>
+            {isWaitingForSelection
+              ? "EVENTRA is waiting for your selection."
+              : agentMessage || latestOperation || (isLive ? "Monitoring execution state" : "Awaiting dispatch")}
           </div>
           <span className="text-[10px] text-slate-500">Autonomous workflow step</span>
         </div>
@@ -200,7 +224,17 @@ export function AgentPanel({
         {isRunning || starting ? (
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm animate-pulse">
             <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-            <span>Autonomous Loop Active • Sourcing & Contacting</span>
+            <span>{agentMessage || "Autonomous Loop Active • Sourcing & Qualifying"}</span>
+          </div>
+        ) : isWaitingForSelection ? (
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 shadow-sm">
+            <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
+            <span>{agentMessage || "Recommendations Ready • Select Preferred Options"}</span>
+          </div>
+        ) : agentStatus === "FAILED" ? (
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 shadow-sm">
+            <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+            <span>{agentMessage || "EVENTRA encountered an issue."}</span>
           </div>
         ) : (
           <button
