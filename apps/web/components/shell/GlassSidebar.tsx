@@ -44,6 +44,7 @@ export function GlassSidebar({ onClose, className = "" }: GlassSidebarProps) {
       items: [
         { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
         { label: "Event Overview", href: `/events/${eventId}`, icon: Compass },
+        { label: "Team & Permissions", href: `/events/${eventId}/collaborators`, icon: Users },
       ],
     },
     {
