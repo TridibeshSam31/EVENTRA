@@ -40,56 +40,37 @@ export function GlassSidebar({ onClose, className = "" }: GlassSidebarProps) {
 
   const navigationSections = [
     {
-      title: "Fleet",
+      title: "Workspace",
       items: [
         { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-        { label: "Create Event", href: "/events/new", icon: PlusCircle },
+        { label: "Event Overview", href: `/events/${eventId}`, icon: Compass },
       ],
     },
     {
-      title: "Event Workspace",
+      title: "Live Operations",
       items: [
-        { label: "Overview", href: `/events/${eventId}`, icon: Compass },
-        { label: "Setup & Spec", href: `/events/${eventId}/setup`, icon: Settings },
+        { label: "Live Command Cockpit", href: `/events/${eventId}/live`, icon: Radio, isLive: true },
+        { label: "Comms & Vendor Calls", href: `/events/${eventId}/conversations`, icon: MessageSquare },
+        { label: "Incidents & Blast Radius", href: `/events/${eventId}/incidents`, icon: AlertTriangle },
+        { label: "Recovery Simulator", href: `/events/${eventId}/recovery`, icon: RotateCcw },
+        { label: "Approvals & Sign-Offs", href: `/events/${eventId}/approvals`, icon: ShieldCheck },
       ],
     },
     {
-      title: "Discovery",
+      title: "Planning & Resources",
       items: [
-        { label: "Venues", href: `/events/${eventId}/venue`, icon: Building2 },
-        { label: "Vendors & Sourcing", href: `/events/${eventId}/vendors`, icon: Users },
+        { label: "Schedule & Critical Path", href: `/events/${eventId}/schedule`, icon: Clock },
+        { label: "Tasks & Execution", href: `/events/${eventId}/tasks`, icon: CheckSquare },
+        { label: "Budget & Variance", href: `/events/${eventId}/budget`, icon: DollarSign },
+        { label: "Venues & Spaces", href: `/events/${eventId}/venue`, icon: Building2 },
+        { label: "Vendors & Outreach", href: `/events/${eventId}/vendors`, icon: Users },
       ],
     },
     {
-      title: "Planning",
-      items: [
-        { label: "Blueprint & Plan", href: `/events/${eventId}/plan`, icon: CalendarCheck },
-        { label: "Tasks", href: `/events/${eventId}/tasks`, icon: CheckSquare },
-        { label: "Schedule", href: `/events/${eventId}/schedule`, icon: Clock },
-        { label: "Budget", href: `/events/${eventId}/budget`, icon: DollarSign },
-      ],
-    },
-    {
-      title: "Engagement",
-      items: [
-        { label: "Conversations & Outreach", href: `/events/${eventId}/conversations`, icon: MessageSquare },
-        { label: "Quotes & Negotiation", href: `/events/${eventId}/procurement`, icon: FileText },
-      ],
-    },
-    {
-      title: "Operations",
-      items: [
-        { label: "Live Command", href: `/events/${eventId}/live`, icon: Radio, isLive: true },
-        { label: "Incidents", href: `/events/${eventId}/incidents`, icon: AlertTriangle },
-        { label: "Recovery", href: `/events/${eventId}/recovery`, icon: RotateCcw },
-        { label: "Approvals", href: `/events/${eventId}/approvals`, icon: ShieldCheck },
-      ],
-    },
-    {
-      title: "Trust & Audit",
+      title: "Telemetry & Audit",
       items: [
         { label: "Activity Stream", href: `/events/${eventId}/activity`, icon: History },
-        { label: "Audit Log", href: `/events/${eventId}/audit`, icon: FileText },
+        { label: "Audit Ledger", href: `/events/${eventId}/audit`, icon: FileText },
       ],
     },
   ];
