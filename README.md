@@ -1,168 +1,480 @@
 # EVENTRA — Adaptive Event Operations Platform
 
-> **PLAN THE EVENT. RUN THE EVENT. ADAPT WHEN REALITY CHANGES.**
+<div align="center">
 
-EVENTRA is an Adaptive Event Operations platform engineered to manage live, complex events. Unlike static planning checklists, EVENTRA maintains a persistent, dependency-aware representation of the event and adapts dynamically when real-world disruptions (vendor delays, venue emergencies, resource shortages) occur.
+```
+  ███████╗██╗   ██╗███████╗███╗   ██╗████████╗██████╗  █████╗ 
+  ██╔════╝██║   ██║██╔════╝████╗  ██║╚══██╔══╝██╔══██╗██╔══██╗
+  █████╗  ██║   ██║█████╗  ██╔██╗ ██║   ██║   ██████╔╝███████║
+  ██╔══╝  ╚██╗ ██╔╝██╔══╝  ██║╚██╗██║   ██║   ██╔══██╗██╔══██║
+  ███████╗ ╚████╔╝ ███████╗██║ ╚████║   ██║   ██║  ██║██║  ██║
+  ╚══════╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝
+```
+
+### **Plan the event. Run the event. Adapt when reality changes.**
+
+[![Next.js](https://img.shields.io/badge/Next.js-14.2-black?style=for-the-badge&logo=next.js&logoColor=white)](https://nextjs.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-Agent_Orchestration-FF6F00?style=for-the-badge&logo=langchain&logoColor=white)](https://langchain-ai.github.io/langgraph/)
+[![Google Gemini Live](https://img.shields.io/badge/Gemini_Live-Multimodal_Telephony-4285F4?style=for-the-badge&logo=google&logoColor=white)](https://ai.google.dev/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16_Alpine-336791?style=for-the-badge&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![Docker](https://img.shields.io/badge/Docker-Compose_Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+
+</div>
 
 ---
 
-## 1. Core Operational Loop
+## 📌 Executive Summary
 
-```text
-PLAN
-  ↓
-RUN
-  ↓
-DETECT CHANGE
-  ↓
-UNDERSTAND
-  ↓
-IMPACT
-  ↓
-RISK
-  ↓
-RECOVER
-  ↓
-APPROVE
-  ↓
-ACT
-  ↓
-VERIFY
-  ↓
-UPDATED EVENT STATE
-  ↺
+**EVENTRA** is an enterprise-grade **Adaptive Event Operations Platform** engineered to manage high-stakes, live events under chaotic real-world conditions. 
+
+Unlike traditional event management suites (like Cvent) or project management boards (Trello, Notion, Asana) that treat plans as **static checklists**, EVENTRA maintains a **living, dependency-aware representation of the event**. 
+
+When real-world disruptions strike—such as vendor no-shows, severe weather, power outages, or supply deficits—EVENTRA automatically:
+1. **Detects** the deviation via telemetry, IoT, or coordinator alerts.
+2. **Computes the blast radius** across the temporal dependency graph (DAG) and critical path.
+3. **Synthesizes mathematically feasible recovery plans** (alternative vendors, timeline compression, scope adjustments).
+4. **Negotiates and executes verified solutions** via autonomous AI voice calling (Gemini Live + Twilio/Exotel) and WhatsApp (OpenWA).
+5. **Enforces human-in-the-loop governance** through strict role-based access control (RBAC) and budget guardrails.
+
+---
+
+## 🔁 The Closed-Loop Operational Cycle
+
+Every event state transition, sensor trigger, or human notification passes through EVENTRA's continuous 11-step operational loop:
+
+```mermaid
+flowchart TD
+    A([1. PLAN]) --> B([2. RUN])
+    B --> C{3. DETECT CHANGE}
+    C -->|Telemetry / Alert / Inbound| D[4. UNDERSTAND]
+    D --> E[5. IMPACT & BLAST RADIUS]
+    E --> F[6. RISK EVALUATION]
+    F --> G[7. RECOVERY SYNTHESIS]
+    G --> H{8. APPROVE}
+    H -->|Within Budget / Pre-authorized| I[9. ACT & EXECUTE]
+    H -->|Exceeds Threshold / Scope Shift| J[Human Sign-Off / Escalation]
+    J -->|Approved| I
+    J -->|Rejected| G
+    I --> K[10. VERIFY & AUDIT]
+    K --> L[11. UPDATED EVENT STATE]
+    L --> B
 ```
 
 ---
 
-## 2. Core Architectural Principle
+## 🏛️ Core Architectural Principle
 
-> **"The deterministic engine calculates what is feasible.**  
-> **The agent decides what should happen next."**
+> ### *"The deterministic engine calculates what is feasible.*  
+> ### *The AI agent decides what should happen next."*
 
-- **Backend (PostgreSQL + Domain Services):** The authoritative source of truth. Holds all state machines, invariants, and permissions.
-- **Deterministic Engines:** Mathematical engines computing critical path DAGs, topological sort order, budget arithmetic, capacity constraints, and temporal feasibility.
-- **Single Event Operations Agent:** An LLM-powered orchestrator (using LangGraph) that reasons through ambiguous trade-offs, evaluates strategic options, and coordinates execution via strongly typed tools.
-- **Frontend (Next.js PWA):** Mobile-first operational control center organized around user workflows.
+EVENTRA eliminates AI hallucinations in critical operations by strictly bifurcating reasoning from computation:
+
+| Domain | Layer / Responsibility | Guarantees |
+| :--- | :--- | :--- |
+| **Authoritative State** | **PostgreSQL 16 + Domain Services** | Acid-compliant single source of truth. Holds all state machines, invariants, and permission matrices. |
+| **Deterministic Engines** | **Mathematical Engines (`apps/api/app/engines/`)** | Zero LLM guessing: Computes critical-path DAGs, topological sorting, temporal feasibility, spatial capacity, and budget arithmetic. |
+| **Reasoning & Orchestration** | **Single Operations Agent (LangGraph)** | Evaluates ambiguous trade-offs, coordinates multi-step negotiations, selects recovery strategies, and invokes typed tools. |
+| **Real-World Integration** | **Boundary Isolation Layer (`apps/api/app/integrations/`)** | Dedicated adapters for Gemini Multimodal Live, Twilio/Exotel Telephony, OpenWA WhatsApp, and Google Maps Scraper. |
+| **Control Surface** | **Next.js 14 Progressive Web App (`apps/web/`)** | Mobile-first real-time operational cockpit, interactive venue floor plans, Gantt schedules, and approval dispatchers. |
 
 ---
 
-## 3. Repository Structure
+## 🚫 What EVENTRA Is NOT
+
+To maintain laser focus on operational resilience, EVENTRA strictly defines its anti-goals:
+- ❌ **NOT an ungrounded Chatbot:** No free-form unvalidated text; all actions pass through validated Pydantic schemas.
+- ❌ **NOT an Attendee/Ticketing App:** No QR ticket scanning, badge printing, or RSVP tracking. Attendee counts are strictly treated as a scalar input (`guest_count: int`) for spatial and catering sizing.
+- ❌ **NOT a Consumer Marketplace:** No public bidding or merchant ad platforms.
+- ❌ **NOT an Autonomous Payment Bot:** The agent never executes unilateral bank transfers or credit card payments; it issues validated procurement intents for human approval.
+
+---
+
+## ✨ Key Platform Features
+
+### 1. 🎛️ Live Operations Cockpit & Telemetry
+- **Dynamic Event Health Score:** Real-time composite health index computed from timeline drift, unresolved risks, and vendor check-ins.
+- **WebSocket Telemetry Stream:** Instantaneous state propagation across all coordinators with zero polling.
+- **Interactive Venue Canvas:** Floor plan mapping, capacity tracking, zone allocations, and egress monitoring via Leaflet & React Simple Maps.
+
+### 2. ⚡ Deterministic Dependency Graph (DAG) & Blast Radius Engine
+- **Topological Sorting & Critical Path:** Instant identification of zero-slack bottleneck tasks.
+- **Cascade Impact Analysis:** When a task slips, the engine computes downstream impacts across time, vendor availability, and dependent setups before failure cascades.
+- **Spatial Feasibility Checking:** Validates floor plan dimensions, ingress/egress, and acoustic interference constraints.
+
+### 3. 🤖 Single Operations Agent (LangGraph + 20+ Tools)
+- Powered by Google Gemini 1.5/2.0/3.x models with LangGraph state graphs.
+- Equipped with strongly-typed tools across 7 operational domains:
+  - `ProviderTools`: Real-time discovery, qualification, capability matching, and task binding.
+  - `CommunicationTools`: Automated outbound inquiries, counter-offer handling, and timeline confirmations.
+  - `RecoveryTools`: Autonomous generation, simulation, and validation of contingency options.
+  - `PlanningTools`: Dynamic milestone compilation and schedule adjustment.
+  - `ApprovalTools`: Policy-gated escalation tickets for human intervention.
+
+### 4. 📞 Multimodal AI Voice Telephony & WhatsApp Gateway
+- **Real-Time Voice Streaming:** Bidirectional audio streaming between Gemini Live (`wss://`) and PSTN telecommunication providers (**Twilio** / **Exotel**).
+- **Autonomous Vendor Phone Calls:** The AI can pick up the phone, dial a backup vendor, explain the emergency requirement, negotiate prices within budget caps, confirm arrival ETAs, and transcribe the audio call into an auditable outcome.
+- **Self-Hosted WhatsApp Gateway:** Integrated OpenWA Docker container for automated WhatsApp notifications, vendor checks, and coordinator confirmations.
+
+### 5. 🛡️ Policy-Gated Autonomy & Human-in-the-Loop RBAC
+- **Configurable Autonomy Tiers:**
+  - *Tier 1 (Autonomous):* Minor schedule shifts (<15 min) or budget variance within pre-approved emergency reserves.
+  - *Tier 2 (Gated Approval):* Critical-path timeline changes, vendor contract reassignments, or budget threshold breaches require coordinator approval.
+  - *Tier 3 (Locked Invariant):* Life-safety, maximum physical venue capacity, and legal requirements can never be overridden by AI.
+- **Immutable Audit Trail:** Complete tamper-evident record of all AI decisions, coordinator overrides, and state changes.
+
+### 6. 🧪 Authentic Simulation Lab
+- Injects non-mocked, legitimate incident payloads to test system resilience:
+  1. **Vendor No-Show:** Critical catering/AV supplier cancels 2 hours before curtain; engine calculates impact, locates backup vendors via OSM/Google Maps, negotiates rates via voice/WhatsApp, and routes approval.
+  2. **Venue Emergency:** Downpour or electrical fault renders outdoor stage unusable; system calculates spatial delta, checks indoor hall capacity, shifts timeline, and alerts stakeholders.
+  3. **Resource Shortage:** Missing 150 chairs; autonomous calculation of local rental options, courier dispatch, and arrival verification.
+
+---
+
+## 📂 Repository Architecture
 
 ```text
-eventra/
-├── .agents/                    # Persistent AI context layer & engineering memory
+EVENTRA/
 ├── apps/
-│   ├── web/                    # Next.js 14/15 PWA frontend (React, Tailwind CSS, shadcn/ui)
-│   └── api/                    # FastAPI backend (SQLAlchemy, Pydantic, LangGraph)
+│   ├── api/                            # FastAPI Backend (Domain Services & Engines)
+│   │   ├── app/
+│   │   │   ├── agent/                  # LangGraph Event Operations Agent & 20+ Tools
+│   │   │   ├── analytics/              # Post-event KPI, budget variance & recovery metrics
+│   │   │   ├── api/routes/             # Resource-oriented REST & WebSocket endpoints
+│   │   │   ├── collaboration/          # Team roles, permissions & live collaboration
+│   │   │   ├── core/                   # Security, settings, and logging configuration
+│   │   │   ├── db/                     # SQLAlchemy models, sessions & migrations
+│   │   │   ├── domains/                # Core business logic & state machines
+│   │   │   ├── engines/                # Deterministic DAG, Budget, Risk, Recovery & State
+│   │   │   ├── integrations/           # Gemini Live, Twilio, Exotel, OpenWA, Google Maps
+│   │   │   ├── models/                 # Authoritative database entity schemas
+│   │   │   ├── schemas/                # Inbound/outbound Pydantic validation contracts
+│   │   │   ├── seeds/                  # Baseline seed datasets & synthetic venues
+│   │   │   ├── services/               # Transactional domain services
+│   │   │   └── simulation/             # Authentic scenario runner & fault injection
+│   │   ├── tests/                      # Pytest unit, integration & scenario suites
+│   │   └── requirements.txt            # Python dependencies
+│   │
+│   └── web/                            # Next.js 14 PWA Operational Dashboard
+│       ├── app/
+│       │   ├── (app)/events/[eventId]/ # Event-specific operational sub-modules
+│       │   │   ├── activity/           # Real-time event activity feed
+│       │   │   ├── analytics/          # KPI dashboards & operational telemetry
+│       │   │   ├── approvals/          # Pending human-in-the-loop approval tickets
+│       │   │   ├── audit/              # Immutable audit trail
+│       │   │   ├── budget/             # Budget allocation, commitments & variance
+│       │   │   ├── incidents/          # Incident command center & blast radius view
+│       │   │   ├── live/               # Live operational cockpit
+│       │   │   ├── recovery/           # Alternative plan comparison & execution
+│       │   │   ├── schedule/           # Gantt view & critical-path timeline
+│       │   │   ├── tasks/              # Dependency-linked task management
+│       │   │   ├── vendors/            # Vendor catalog, communications & assignments
+│       │   │   └── venue/              # Interactive spatial map & layout management
+│       │   ├── layout.tsx              # Root app layout & theme provider
+│       │   └── globals.css             # Tailwind design tokens & dark-mode styling
+│       ├── components/                 # Reusable UI components (shadcn/ui, maps, forms)
+│       └── package.json                # Frontend dependencies
+│
 ├── packages/
-│   ├── contracts/              # Shared TypeScript data models, schemas & enums
-│   └── config/                 # Shared configurations (tsconfig, linting)
-├── docs/
-│   ├── architecture/           # System design & component boundaries
-│   ├── api/                    # API route contracts and specifications
-│   ├── product/                # MVP scope definitions & taxonomy
-│   └── demo/                   # Simulation scenarios (Vendor No-Show, Venue, Shortage)
-├── scripts/                    # Helper scripts (dev server, seeding, linting)
+│   ├── contracts/                      # Shared TypeScript types, schemas & enums
+│   └── config/                         # Unified ESLint, Prettier & TypeScript configs
+│
 ├── docker/
-│   ├── postgres/               # PostgreSQL initialization script
-│   └── nginx/                  # Reverse proxy configuration
-├── docker-compose.yml          # Local containerized development stack
-├── .env.example                # Environment variable templates
-├── package.json                # Monorepo root workspace configuration
-└── pnpm-workspace.yaml         # Monorepo package paths definition
+│   ├── postgres/                       # Postgres 16 init scripts & schemas
+│   └── nginx/                          # Reverse proxy configuration
+│
+├── docs/                               # Architecture, API specifications & guides
+│   ├── architecture/                   # System design & structural zones
+│   ├── api/                            # Route contracts & endpoint documentation
+│   ├── demo/                           # Simulation walkthroughs
+│   └── voice_integration/              # Telephony audio streaming & KYC details
+│
+├── scripts/                            # Operational helper scripts
+│   ├── dev_tunnel.ps1                  # PowerShell script to spin up WebSocket tunnel for voice
+│   ├── dev_tunnel.sh                   # Bash script to spin up WebSocket tunnel for voice
+│   ├── seed.sh                         # Seed database with demo venues and vendors
+│   └── audit_frontend_pages.py         # Frontend route & component validation
+│
+├── tools/
+│   └── openwa/                         # WhatsApp automate container configuration
+│
+├── docker-compose.yml                  # Complete local containerized stack
+├── .env.example                        # Comprehensive environment template
+├── package.json                        # Root npm monorepo configuration
+└── pnpm-workspace.yaml                 # Monorepo workspace configuration
 ```
 
 ---
 
-## 4. Architectural Rules
+## 🛠️ Tech Stack & Integrations
 
-1. **Backend is Source of Truth:** No authoritative event state resides in the frontend or agent memory.
-2. **LLM Output is Probabilistic:** Never trust LLM arithmetic or dates without deterministic validation.
-3. **Agent Decides, Deterministic Engines Calculate:** Prompts never compute critical paths or budget sums.
-4. **All Integrations Isolated:** Google Maps, WhatsApp, and LLMs live strictly in `apps/api/app/integrations/`.
-5. **Server-Side RBAC:** Access control and spending thresholds are validated on the backend.
-6. **No Attendee Subsystem:** Guest count is strictly an aggregate scalar (`guest_count: int`) for capacity calculations.
-7. **Authentic Simulation:** Demo simulations inject legitimate incident payloads; they never fake outputs.
+| Domain | Technology / Library | Purpose |
+| :--- | :--- | :--- |
+| **Frontend Framework** | **Next.js 14 (App Router, PWA)** | Mobile-first event operations cockpit |
+| **Frontend Styling** | **Tailwind CSS + shadcn/ui + Framer Motion** | Dark-mode interface, micro-animations, glassmorphic HUD |
+| **Maps & Geo** | **Leaflet + React Simple Maps** | Venue floor plans, geospatial vendor tracking |
+| **Backend Framework** | **FastAPI (Python 3.11+)** | High-performance asynchronous API & WebSockets |
+| **AI Orchestration** | **LangGraph + LangChain Core** | Stateful agent graph, tool dispatch, decision loops |
+| **AI Telephony & Voice** | **Gemini Live Multimodal (`gemini-3.8-live`)** | Bidirectional low-latency audio streaming for vendor calls |
+| **Telephony Carriers** | **Twilio & Exotel** | Outbound PSTN calling with WebSocket media streams |
+| **Messaging** | **OpenWA (Automate)** | Headless WhatsApp container for automated chats |
+| **Database & ORM** | **PostgreSQL 16 + SQLAlchemy 2.0 + Alembic** | Authoritative relational state machine & migrations |
+| **Validation** | **Pydantic v2 & TypeScript Contracts** | End-to-end typed contracts between Python and Next.js |
+| **Containerization** | **Docker & Docker Compose** | Local orchestration for DB, Web, API, and Gateways |
 
 ---
 
-## 5. Getting Started & Setup
+## 🚀 Getting Started & Local Setup
 
 ### Prerequisites
-- Node.js >= 20.0.0 & npm >= 10.0.0
-- Python >= 3.11
-- Docker & Docker Compose (optional, for containerized PostgreSQL)
+- **Node.js**: `>= 20.0.0`
+- **npm**: `>= 10.0.0`
+- **Python**: `>= 3.11`
+- **Docker & Docker Compose**: Installed and running
 
-### 1. Environment Configuration
+---
 
-Copy `.env.example` to `.env` in the root repository and customize for your environment:
+### Step 1: Clone & Configure Environment
+
 ```bash
+# Clone the repository
+git clone https://github.com/TridibeshSam31/EVENTRA.git
+cd EVENTRA
+
+# Copy the environment template
 cp .env.example .env
 ```
 
-#### Real vs. Mock Operation Configuration
-By default, the backend falls back to `MockCommunicationProvider` and logs a prominent warning on startup. To enable real integrations:
+Open `.env` and fill in your keys. Below are the key configuration options:
 
-| Component | Required Environment Variables | Notes |
-| :--- | :--- | :--- |
-| **WhatsApp (OpenWA)** | `COMMUNICATION_PROVIDER=openwa`<br>`OPENWA_ENABLED=true`<br>`OPENWA_BASE_URL=http://localhost:2785`<br>`OPENWA_API_KEY=your_key`<br>`OPENWA_SESSION_ID=eventra_ops` | Requires running OpenWA container (`docker-compose up -d openwa`) and scanning QR code. |
-| **AI Voice Telephony (Exotel + Gemini)** | `COMMUNICATION_PROVIDER=exotel`<br>`EXOTEL_ENABLED=true`<br>`EXOTEL_ACCOUNT_SID=...`<br>`EXOTEL_API_KEY=...`<br>`EXOTEL_API_TOKEN=...`<br>`EXOTEL_CALLER_ID=...`<br>`EXOTEL_STREAM_URL=wss://<tunnel>/api/v1/voice/exotel/stream`<br>`GEMINI_API_KEY=...` | Must provide a public `wss://` endpoint (e.g. ngrok tunnel) for audio streaming. Requires KYC compliance on Exotel. |
-| **Real Provider Discovery** | Network access to OpenStreetMap Overpass API or `APIFY_API_KEY` for Google Maps | Vendor discovery uses `GoogleMapsScraperAdapter`. |
+```dotenv
+# Core Database
+DATABASE_URL=postgresql://eventra_user:eventra_password@localhost:5432/eventra_db
 
-### 2. Services Setup (Docker)
+# AI / LLM Configuration
+LLM_PROVIDER=gemini
+GEMINI_API_KEY=your_gemini_api_key_here
+LLM_MODEL=gemini-3.6-flash
+GEMINI_LIVE_MODEL=gemini-3.8-live
 
-Start PostgreSQL and the OpenWA WhatsApp Automate container:
-```bash
-docker-compose up -d postgres openwa
+# Communication Mode (Options: mock, openwa, twilio, exotel)
+COMMUNICATION_PROVIDER=mock
 ```
 
-#### WhatsApp QR Linking Flow (First-Time Setup)
-1. Ensure the `openwa` container is running: `docker-compose ps openwa`
-2. Navigate to `http://localhost:2785` in your browser (or check container logs: `docker-compose logs -f openwa`).
-3. Scan the generated QR code using WhatsApp on your phone (**Linked Devices → Link a Device**).
-4. Once authenticated, session state is preserved inside the `openwa_sessions` named Docker volume across restarts.
-5. Verify messaging with `python apps/api/scripts/test_whatsapp_send.py --to 919XXXXXXXXX --message "Hello from EVENTRA"`.
+> [!NOTE]
+> By default, `COMMUNICATION_PROVIDER=mock`. The platform will run fully locally using mock communication without requiring active Twilio, Exotel, or WhatsApp accounts.
 
-### 3. Exotel Voice & Gemini Live Telephony Bridge Setup
+---
 
-For AI phone calls to vendors via Exotel and Gemini Live:
-1. Start local dev tunnel for Exotel to reach your local backend:
-   - On Linux/macOS: `./scripts/dev_tunnel.sh 8000`
-   - On Windows (PowerShell): `.\scripts\dev_tunnel.ps1 -Port 8000`
-2. Copy the printed `wss://.../api/v1/voice/exotel/stream` URL and set it as `EXOTEL_STREAM_URL` in your `.env`.
-3. Note: The Exotel account must be KYC-verified in the Exotel dashboard to dial real PSTN phone numbers.
+### Step 2: Start Infrastructure (Docker)
 
-### 4. Backend Setup
+Start the PostgreSQL database and OpenWA container:
+
 ```bash
+docker-compose up -d postgres
+```
+
+*(Optional: To run the entire stack via Docker including the frontend, API, OpenWA, and Scraper, run `docker-compose up -d`)*
+
+---
+
+### Step 3: Backend Setup (FastAPI)
+
+```bash
+# Navigate to the API application
 cd apps/api
+
+# Create and activate virtual environment
 python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# On Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+# On Linux/macOS:
+source .venv/bin/activate
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Run migrations and seed baseline venues and vendors
+python -m app.seeds.seed_runner
+
+# Launch the FastAPI dev server
 uvicorn app.main:app --reload --port 8000
 ```
-On startup, watch the console banner for **EVENTRA INTEGRATION ADAPTER RESOLUTION** to confirm whether adapters resolved to `REAL` or `MOCK`.
 
-### 5. Frontend Setup
+The backend will start at **`http://localhost:8000`**.  
+Interactive Swagger documentation is available at **`http://localhost:8000/docs`**.
+
+---
+
+### Step 4: Frontend Setup (Next.js PWA)
+
+In a new terminal window at the repository root:
+
 ```bash
-# In workspace root
+# Install root and workspace dependencies
 npm install
-npm run dev --workspace=apps/web
+
+# Start the Next.js development server
+npm run dev:web
+```
+
+The frontend will be accessible at **`http://localhost:3000`**.
+
+---
+
+## 📡 Live Telephony & WhatsApp Configuration (Real Mode)
+
+To enable real-world vendor calling and WhatsApp messaging:
+
+### 1. WhatsApp Integration (OpenWA)
+1. Start the OpenWA service: `docker-compose up -d openwa`
+2. Open `http://localhost:2785` in your browser.
+3. Link your WhatsApp device by scanning the generated QR code (**WhatsApp → Linked Devices → Link a Device**).
+4. Update your `.env`:
+   ```dotenv
+   COMMUNICATION_PROVIDER=openwa
+   OPENWA_ENABLED=true
+   OPENWA_BASE_URL=http://localhost:2785
+   OPENWA_SESSION_ID=eventra_ops
+   ```
+5. Test delivery:
+   ```bash
+   python apps/api/scripts/test_whatsapp_send.py --to 91XXXXXXXXXX --message "EVENTRA live check-in"
+   ```
+
+### 2. Autonomous AI Voice Telephony (Twilio / Exotel + Gemini Live)
+The agent streams raw bidirectional audio to live telephone networks using Gemini Live:
+
+1. **Start the local tunnel** for PSTN carrier webhooks:
+   - On Windows: `.\scripts\dev_tunnel.ps1 -Port 8000`
+   - On Linux/macOS: `./scripts/dev_tunnel.sh 8000`
+2. Copy the generated `wss://...` URL.
+3. **Configure Twilio (Recommended for Hackathons / Demos):**
+   ```dotenv
+   COMMUNICATION_PROVIDER=twilio
+   TWILIO_ENABLED=true
+   TWILIO_ACCOUNT_SID=your_sid
+   TWILIO_AUTH_TOKEN=your_token
+   TWILIO_CALLER_NUMBER=+1XXXXXXXXXX
+   TWILIO_STREAM_URL=wss://<your-tunnel-subdomain>/voice/twilio/stream
+   ```
+4. **Or Configure Exotel (India PSTN direct):**
+   ```dotenv
+   COMMUNICATION_PROVIDER=exotel
+   EXOTEL_ENABLED=true
+   EXOTEL_ACCOUNT_SID=your_sid
+   EXOTEL_API_KEY=your_key
+   EXOTEL_API_TOKEN=your_token
+   EXOTEL_CALLER_ID=your_exotel_virtual_number
+   EXOTEL_STREAM_URL=wss://<your-tunnel-subdomain>/api/v1/voice/exotel/stream
+   ```
+
+---
+
+## 🎮 Simulation & Demo Scenarios
+
+EVENTRA includes authentic failure-mode scenarios that test the end-to-end recovery pipeline under realistic conditions:
+
+```bash
+# Trigger an authentic Vendor No-Show simulation via the API
+curl -X POST http://localhost:8000/api/simulation/scenarios/vendor-no-show \
+  -H "Content-Type: application/json" \
+  -d '{"event_id": "demo-summit-2026", "vendor_category": "catering"}'
+```
+
+| Scenario | Injected Condition | Engine Response | Agent Action |
+| :--- | :--- | :--- | :--- |
+| **1. Vendor No-Show** | Anchor AV / Catering supplier fails to check in 120 min before start. | Recalculates DAG critical path; detects 4 downstream task blocks; flags threat level **HIGH**. | Discovers top 3 nearby vetted suppliers; places automated phone call to check availability; issues approval ticket to coordinator. |
+| **2. Venue Emergency** | Heavy rain / physical fault closes primary outdoor pavilion. | Evaluates covered zones; recalculates spatial guest capacity and power requirements. | Identifies adjacent indoor ballroom; compresses setup schedule; reroutes logistics team. |
+| **3. Resource Shortage** | Delivery receipt shows 200 chairs damaged on arrival. | Computes capacity delta; validates reserve budget tolerance. | Finds closest commercial rental store; dispatches courier order; verifies dispatch notice. |
+
+---
+
+## 🔌 API Endpoints Reference
+
+All API endpoints are mounted under `/api` and enforce event-scoped authentication:
+
+```text
+GET/POST    /api/events              Event lifecycle state machine (Draft, Planned, Live, Concluded)
+GET/POST    /api/setup               Specification, requirements, goals & constraints
+GET/POST    /api/venues              Location discovery, spatial capacity & zone layout
+GET/POST    /api/vendors             Provider catalog, capability search & assignments
+GET/POST    /api/planning            Work breakdown structures & milestone baselines
+GET/PUT     /api/tasks               Task dependency tracking & status progression
+GET         /api/schedule            Gantt timeline & critical-path calculations
+GET/POST    /api/budget              Line-item allocations, commitments & variance tracking
+GET/WS      /api/live                Real-time telemetry, active trackers & health metrics
+POST        /api/incidents           Incident intake, severity evaluation & blast radius
+GET         /api/impact              Graph traversal & cascade impact assessments
+GET         /api/risk                Composite risk calculations & threat levels
+GET/POST    /api/recovery            Autonomous recovery options & feasibility simulation
+GET/PUT     /api/approvals           Pending human-in-the-loop authorization tickets
+GET/POST    /api/procurement         Emergency supply manifests & replacement purchase orders
+GET/POST    /api/notifications       Coordinator alert broadcasts & push notifications
+GET/POST    /api/collaborators       RBAC permission matrix & access tokens
+GET         /api/analytics           Post-event operational KPIs & recovery efficiency
+GET         /api/audit               Immutable audit trail & state transition ledger
+POST        /api/simulation          Authentic incident injection harness
 ```
 
 ---
 
-## 6. MVP Implementation Sequence (20 Phases)
+## 🧪 Testing & Quality Assurance
 
-```text
-01. Database Model                     11. Risk Engine
-02. Event Setup                        12. Recovery Engine
-03. Event Specification                13. Agent (Single Operations Agent)
-04. Venue / Location Discovery         14. Collaboration + Approval/RBAC
-05. Provider Network & Assignments     15. Action + Autonomy Policy
-06. Planning Engine                    16. Verification
-07. Dependency Engine (DAG)            17. PWA / UI Workflows
-08. Live State Engine                  18. Notifications & Integrations
-09. Incident Engine                    19. Analytics & Audit
-10. Impact Engine (Blast Radius)       20. Simulation / Demo Hardening
+EVENTRA incorporates comprehensive unit, integration, and scenario tests:
+
+```bash
+# Run backend test suite
+cd apps/api
+pytest -v
+
+# Run specific engine and agent tests
+pytest tests/unit/agent/ -v
+pytest tests/scenarios/ -v
+
+# Run frontend lint and type checking
+cd ../..
+npm run lint --workspace=apps/web
+npm run typecheck --workspace=apps/web
 ```
+
+---
+
+## 📄 Monorepo NPM Scripts
+
+From the repository root, you can run:
+
+```bash
+npm run dev          # Start web frontend in development mode
+npm run dev:api      # Start FastAPI backend server with hot-reload
+npm run build        # Build all packages and applications for production
+npm run lint         # Run ESLint across all workspaces
+npm run typecheck    # Validate TypeScript types across contracts and web
+npm run test         # Run all tests across workspaces
+```
+
+---
+
+## 🔒 Security & Governance
+
+1. **Server-Side Enforcement:** All authorizations, spend ceilings, and state mutations are validated in the Python domain services—never trusted from frontend clients.
+2. **Encrypted Credentials:** API keys, telephony secrets, and webhook signatures are loaded strictly from environment variables or secure key vaults.
+3. **Auditability:** Every tool invocation, agent proposal, and coordinator override produces an immutable audit record with timestamps, initiator IDs, and cryptographic hashes.
+
+---
+
+## 📜 License
+
+Distributed under the **MIT License**. See `LICENSE` for more information.
+
+---
+
+<div align="center">
+
+**Built for mission-critical operations where failure is not an option.**
+
+*EVENTRA — Plan the event. Run the event. Adapt when reality changes.*
+
+</div>
