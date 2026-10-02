@@ -16,7 +16,8 @@ const frameVariants = cva(
     // var(--radius-none): no such token exists, and it only reached 0 by being
     // invalid, which also left --frame-radius empty for anything reading it.
     "[--frame-radius:var(--radius-xl)]",
-    "[--frame-gap:--spacing(0.75)] [--frame-px:--spacing(0.75)] [--frame-py:--spacing(0.75)] [--frame-panel-header-gap:0rem] [--frame-panel-footer-gap:--spacing(1)]",
+    // Tailwind v3 compatible: replaced --spacing(N) with rem equivalents (1 unit = 0.25rem)
+    "[--frame-gap:0.1875rem] [--frame-px:0.1875rem] [--frame-py:0.1875rem] [--frame-panel-header-gap:0rem] [--frame-panel-footer-gap:0.25rem]",
     "[--frame-panel-px-adjust:0px] [--frame-panel-py-adjust:0px] [--frame-panel-header-px-adjust:0px] [--frame-panel-header-py-adjust:0px] [--frame-panel-footer-px-adjust:0px] [--frame-panel-footer-py-adjust:0px]",
     "[--frame-panel-px:calc(var(--frame-panel-px-base)+var(--frame-panel-px-adjust))] [--frame-panel-py:calc(var(--frame-panel-py-base)+var(--frame-panel-py-adjust))] [--frame-panel-header-px:calc(var(--frame-panel-header-px-base)+var(--frame-panel-header-px-adjust))] [--frame-panel-header-py:calc(var(--frame-panel-header-py-base)+var(--frame-panel-header-py-adjust))] [--frame-panel-footer-px:calc(var(--frame-panel-footer-px-base)+var(--frame-panel-footer-px-adjust))] [--frame-panel-footer-py:calc(var(--frame-panel-footer-py-base)+var(--frame-panel-footer-py-adjust))]",
     // Luma alone re-times the frame: wider gap and padding, roomier bars.
@@ -41,11 +42,12 @@ const frameVariants = cva(
       // header, content and footer left-align. xs floors at 0.5 (2px), below
       // which it stops reading as padding. No style-*.css overrides these.
       spacing: {
-        xs: "[--frame-panel-px-base:--spacing(2)] [--frame-panel-py-base:--spacing(2)] [--frame-panel-header-px-base:--spacing(2)] [--frame-panel-header-py-base:--spacing(0.5)] [--frame-panel-footer-px-base:--spacing(2)] [--frame-panel-footer-py-base:--spacing(0.5)]",
-        sm: "[--frame-panel-px-base:--spacing(3)] [--frame-panel-py-base:--spacing(3.5)] [--frame-panel-header-px-base:--spacing(3)] [--frame-panel-header-py-base:--spacing(1.5)] [--frame-panel-footer-px-base:--spacing(3)] [--frame-panel-footer-py-base:--spacing(1.5)]",
+        // Tailwind v3 compatible: replaced --spacing(N) with rem equivalents
+        xs: "[--frame-panel-px-base:0.5rem] [--frame-panel-py-base:0.5rem] [--frame-panel-header-px-base:0.5rem] [--frame-panel-header-py-base:0.125rem] [--frame-panel-footer-px-base:0.5rem] [--frame-panel-footer-py-base:0.125rem]",
+        sm: "[--frame-panel-px-base:0.75rem] [--frame-panel-py-base:0.875rem] [--frame-panel-header-px-base:0.75rem] [--frame-panel-header-py-base:0.375rem] [--frame-panel-footer-px-base:0.75rem] [--frame-panel-footer-py-base:0.375rem]",
         default:
-          "[--frame-panel-px-base:--spacing(4)] [--frame-panel-py-base:--spacing(4)] [--frame-panel-header-px-base:--spacing(4)] [--frame-panel-header-py-base:--spacing(2)] [--frame-panel-footer-px-base:--spacing(4)] [--frame-panel-footer-py-base:--spacing(2)]",
-        lg: "[--frame-panel-px-base:--spacing(5)] [--frame-panel-py-base:--spacing(5)] [--frame-panel-header-px-base:--spacing(5)] [--frame-panel-header-py-base:--spacing(2.5)] [--frame-panel-footer-px-base:--spacing(5)] [--frame-panel-footer-py-base:--spacing(2.5)]",
+          "[--frame-panel-px-base:1rem] [--frame-panel-py-base:1rem] [--frame-panel-header-px-base:1rem] [--frame-panel-header-py-base:0.5rem] [--frame-panel-footer-px-base:1rem] [--frame-panel-footer-py-base:0.5rem]",
+        lg: "[--frame-panel-px-base:1.25rem] [--frame-panel-py-base:1.25rem] [--frame-panel-header-px-base:1.25rem] [--frame-panel-header-py-base:0.625rem] [--frame-panel-footer-px-base:1.25rem] [--frame-panel-footer-py-base:0.625rem]",
       },
       stacked: {
         true: [
