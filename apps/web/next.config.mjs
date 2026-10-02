@@ -2,8 +2,8 @@
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@eventra/contracts"],
-  webpack: (config) => {
-    return config;
+  experimental: {
+    turbo: {},
   },
 };
 
