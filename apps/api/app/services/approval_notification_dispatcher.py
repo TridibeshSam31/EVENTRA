@@ -30,18 +30,30 @@ from app.services.live_broker import live_broker
 logger = logging.getLogger(__name__)
 
 
-def generate_unique_reply_code(db: Session) -> str:
-    """Generates a 4-character unambiguous uppercase reply code for pending approvals."""
-    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    for _ in range(20):
-        code = "".join(secrets.choice(chars) for _ in range(4))
-        exists = db.query(Approval).filter(
-            Approval.reply_code == code,
-            Approval.status == "PENDING",
-        ).first()
+UNAMBIGUOUS_REPLY_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+
+def generate_unique_reply_code(db: Session, length: int = 6, max_retries: int = 25) -> str:
+    """Generates an unambiguous 6-character uppercase reply code.
+    
+    Checks against ALL existing approvals in the database (not just PENDING ones)
+    to enforce global uniqueness. Retries upon any collision.
+    Excludes ambiguous characters (0, O, 1, I).
+    """
+    for _ in range(max_retries):
+        code = "".join(secrets.choice(UNAMBIGUOUS_REPLY_CHARS) for _ in range(length))
+        exists = db.query(Approval.id).filter(Approval.reply_code == code).first()
         if not exists:
             return code
-    return "".join(secrets.choice(chars) for _ in range(6))
+
+    # Fallback with higher entropy if maximum retries collided
+    for _ in range(max_retries):
+        code = "".join(secrets.choice(UNAMBIGUOUS_REPLY_CHARS) for _ in range(length + 2))
+        exists = db.query(Approval.id).filter(Approval.reply_code == code).first()
+        if not exists:
+            return code
+
+    raise RuntimeError("Failed to generate a unique approval reply code after multiple attempts.")
 
 
 class ApprovalNotificationDispatcher:
