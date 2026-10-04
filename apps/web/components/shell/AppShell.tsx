@@ -2,17 +2,20 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 import { useEventStore, getActiveEventId } from "@/stores/eventStore";
 import { Menu, X, Bell, UserCircle, Radio, Sparkles } from "lucide-react";
 import { EventSwitcher } from "./EventSwitcher";
 import { GlassSidebar } from "./GlassSidebar";
+import { PushNotificationBanner } from "@/components/notifications";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const params = useParams();
+  const pathname = usePathname();
   const activeEventId = useEventStore((state) => state.activeEventId);
   const eventId = (params?.eventId as string) || activeEventId || getActiveEventId() || "conference_demo";
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const isApprovalsPage = pathname ? pathname.includes("/approvals") : false;
 
   return (
     <div className="flex h-screen w-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
@@ -82,6 +85,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {/* Scrollable Workspace Content Area */}
         <main className="flex-1 overflow-y-auto bg-slate-50">
+          {!isApprovalsPage && (
+            <div className="px-4 pt-4 sm:px-6 max-w-7xl mx-auto">
+              <PushNotificationBanner />
+            </div>
+          )}
           {children}
         </main>
       </div>

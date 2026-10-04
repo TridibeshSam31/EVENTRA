@@ -47,7 +47,7 @@ export async function registerPushSubscription(): Promise<{ success: boolean; er
 
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: convertedKey,
+        applicationServerKey: convertedKey as any,
       });
     }
 

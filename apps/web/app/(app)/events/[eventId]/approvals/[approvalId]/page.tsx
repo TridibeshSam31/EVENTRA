@@ -93,7 +93,7 @@ export default function ApprovalDetailPage() {
   const isStale = approval?.status === "STALE";
 
   return (
-    <EventShell eventId={eventId} activeTab="approvals">
+    <EventShell eventId={eventId} currentStage="LIVE">
       <div className="mx-auto max-w-4xl space-y-6 py-6 px-4">
         {/* Navigation Back */}
         <div className="flex items-center justify-between">

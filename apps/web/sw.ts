@@ -61,7 +61,7 @@ self.addEventListener("push", (event) => {
   }
 
   const title = data.title || "EVENTRA Operational Approval Required";
-  const options: NotificationOptions = {
+  const options: any = {
     body: data.body || "A live event mutation requires your immediate review and authorization.",
     icon: "/icons/icon-192x192.png",
     badge: "/icons/icon-192x192.png",

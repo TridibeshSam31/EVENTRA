@@ -679,6 +679,7 @@ export interface ApprovalRequestResponse {
   state_snapshot: string;
   rejection_reason?: string | null;
   decision_notes?: string | null;
+  reply_code?: string | null;
   decided_at?: string | null;
   expires_at?: string | null;
   created_at: string;
