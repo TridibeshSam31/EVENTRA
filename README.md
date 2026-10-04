@@ -400,7 +400,7 @@ The agent streams raw bidirectional audio to live telephone networks using Gemin
    VAPID_PUBLIC_KEY=your_vapid_public_key
    VAPID_PRIVATE_KEY=your_vapid_private_key
    VAPID_CLAIM_EMAIL=mailto:admin@eventra.local
-   APPROVAL_DEEP_LINK_SECRET=your_secure_random_key_min_32_chars
+   DEEP_LINK_SECRET=your_secure_random_key_min_32_chars
    APPROVAL_EXPIRY_SWEEPER_ENABLED=true
    ```
 
@@ -408,7 +408,7 @@ The agent streams raw bidirectional audio to live telephone networks using Gemin
 | Capability | `COMMUNICATION_PROVIDER=mock` (Default) | Real Credentials Required |
 | :--- | :--- | :--- |
 | **In-App Approvals & Ledger** | Works out of the box (Local DB) | None |
-| **Signed Deep Link Review** | Works out of the box (`APPROVAL_DEEP_LINK_SECRET`) | None (uses local secret) |
+| **Signed Deep Link Review** | Works out of the box (`DEEP_LINK_SECRET`) | None (uses local secret) |
 | **WhatsApp Notifications & Replies** | Dispatches to memory log; simulated inbound webhook | OpenWA Docker container (`OPENWA_*`) |
 | **Web Push Notifications** | In-memory push adapter (simulated) | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `pywebpush` |
 | **AI Voice Telephony & Escalation** | Mock call dispatch | Twilio or Exotel credentials + Public Tunnel |

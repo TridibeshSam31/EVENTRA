@@ -9,6 +9,7 @@ dependencies = [
     "uvicorn>=0.29.0",
     "pydantic>=2.7.1",
     "sqlalchemy>=2.0.30",
+    "pywebpush>=2.0.0",
 ]
 
 [tool.pytest.ini_options]

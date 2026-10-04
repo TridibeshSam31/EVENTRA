@@ -19,6 +19,7 @@ os.environ["LLM_PROVIDER"] = "mock"
 os.environ["COMMUNICATION_PROVIDER"] = "mock"
 os.environ["EXOTEL_ENABLED"] = "false"
 os.environ["OPENWA_ENABLED"] = "false"
+os.environ.setdefault("OPENWA_WEBHOOK_SECRET", "test-secret-123")
 os.environ.setdefault("EXOTEL_STREAM_URL", "wss://test.stream.eventra.ai/stream")
 
 from app.main import app

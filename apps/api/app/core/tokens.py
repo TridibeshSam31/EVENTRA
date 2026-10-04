@@ -13,8 +13,12 @@ def utc_now() -> datetime:
 
 
 def _get_signing_key() -> bytes:
-    key = settings.DEEP_LINK_SECRET or settings.SECRET_KEY or "development-secret-key"
-    return key.encode("utf-8")
+    if settings.DEEP_LINK_SECRET:
+        return settings.DEEP_LINK_SECRET.encode("utf-8")
+    if settings.ENVIRONMENT in ("development", "test"):
+        key = settings.SECRET_KEY or "development-secret-key"
+        return key.encode("utf-8")
+    raise RuntimeError("DEEP_LINK_SECRET must be configured in non-dev environments.")
 
 
 def generate_approval_view_token(

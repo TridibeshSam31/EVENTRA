@@ -127,6 +127,12 @@ async def lifespan(app: FastAPI):
         settings.API_HOST,
         settings.API_PORT,
     )
+    if settings.ENVIRONMENT not in ("development", "test"):
+        if not settings.DEEP_LINK_SECRET:
+            raise RuntimeError("CRITICAL STARTUP ERROR: DEEP_LINK_SECRET must be configured in non-dev environments.")
+        if settings.OPENWA_ENABLED and not settings.OPENWA_WEBHOOK_SECRET:
+            raise RuntimeError("CRITICAL STARTUP ERROR: OPENWA_WEBHOOK_SECRET is required when OPENWA_ENABLED=true in non-dev environments.")
+
     log_startup_adapter_status()
     try:
         from app.db.session import SessionLocal
