@@ -215,6 +215,34 @@ class ProviderCommunicationService:
 
         return result
 
+    def hangup_call(
+        self,
+        call_sid: str,
+        reason: Optional[str] = "MANUAL_TAKEOVER",
+        actor_id: Optional[str] = None,
+        event_id: Optional[str] = None,
+    ) -> IntegrationResult[Dict[str, Any]]:
+        """Terminates an in-progress telephony call to a provider/vendor."""
+        provider = self._resolve_provider()
+        if hasattr(provider, "hangup_call"):
+            result = provider.hangup_call(call_sid, reason=reason)
+        else:
+            from app.integrations.communication.mock import MockCommunicationProvider
+            result = MockCommunicationProvider().hangup_call(call_sid, reason=reason)
+
+        if self._audit and event_id:
+            self._audit.record(
+                event_id=event_id,
+                actor_id=actor_id or "system",
+                actor_type="ORGANIZER" if actor_id else "SYSTEM",
+                action="PROVIDER_CALL_TERMINATED",
+                action_type="COMMUNICATION",
+                target_type="CALL",
+                target_id=call_sid,
+                after_state={"call_sid": call_sid, "reason": reason, "success": result.success},
+            )
+        return result
+
     def execute_approved_communication(
         self,
         event_id: str,

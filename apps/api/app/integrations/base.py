@@ -121,6 +121,14 @@ class ProviderCommunicationProvider(ABC):
         """Initiates an outbound telephony call to a provider/vendor."""
         raise NotImplementedError("Telephony voice calls not supported by this provider.")
 
+    def hangup_call(
+        self,
+        call_sid: str,
+        reason: Optional[str] = None,
+    ) -> IntegrationResult[Dict[str, Any]]:
+        """Terminates an in-progress telephony call to a provider/vendor."""
+        raise NotImplementedError("Call termination not supported by this provider.")
+
 
 class VenueDirectoryProvider(ABC):
     """Abstract interface for external venue discovery directories."""

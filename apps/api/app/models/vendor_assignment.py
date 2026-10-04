@@ -37,6 +37,9 @@ class VendorAssignment(Base):
     negotiation_round = Column(String(10), default="0", nullable=True)  # Counter for negotiation rounds
     approval_id = Column(String(36), nullable=True, index=True)  # Links to Approval request
     is_simulation = Column(Boolean, default=False, nullable=False)  # True for demo simulation
+    negotiation_control = Column(String(20), default="AGENT", nullable=False)  # "AGENT" | "HUMAN"
+    control_changed_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    control_changed_at = Column(DateTime, nullable=True)
 
     vendor = relationship("Vendor", back_populates="assignments")
     event = relationship("Event", back_populates="vendor_assignments")

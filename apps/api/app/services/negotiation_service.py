@@ -9,7 +9,9 @@ CRITICAL AUTHORITY RULE:
 - Agent NEVER autonomously accepts any offer
 - ALL final commitments require human approval via ApprovalService
 """
+import logging
 import time
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple
 
@@ -26,6 +28,9 @@ from app.services.provider_communication_service import ProviderCommunicationSer
 from app.services.approval_service import ApprovalService
 from app.schemas.approval import ApprovalRequestCreate
 from app.observability.audit import AuditRecorder
+from app.services.negotiation_broker import negotiation_broker
+
+logger = logging.getLogger(__name__)
 
 
 class NegotiationService:
@@ -296,11 +301,76 @@ class NegotiationService:
         if offer.get("advance_required") is not None:
             assignment.advance_required = offer["advance_required"]
 
+        quoted_val = float(quoted) if quoted is not None else None
+
+        # Real-time event: Broadcast inbound message
+        negotiation_broker.publish_sync(
+            event_id=assignment.event_id,
+            assignment_id=assignment.id,
+            event_type="message_added",
+            data={
+                "id": f"msg_in_{time.time()}",
+                "sender_type": "VENDOR",
+                "text": response_text,
+                "amount_extracted": quoted_val,
+                "channel": "DEMO_SIMULATION" if is_simulation else "whatsapp",
+                "timestamp": time.time(),
+            },
+        )
+
+        # CHOKE POINT GUARD: When in manual HUMAN control, record reply and alert organizer without agent counter
+        if getattr(assignment, "negotiation_control", "AGENT") == "HUMAN":
+            assignment.negotiation_status = NegotiationStatus.QUOTATION_RECEIVED.value
+            self.db.commit()
+            self.db.refresh(assignment)
+
+            negotiation_broker.publish_sync(
+                event_id=assignment.event_id,
+                assignment_id=assignment.id,
+                event_type="quote_updated",
+                data={
+                    "quoted_amount": assignment.quoted_amount,
+                    "status": assignment.negotiation_status,
+                    "control": "HUMAN",
+                    "timestamp": time.time(),
+                },
+            )
+
+            try:
+                from app.services.approval_notification_dispatcher import ApprovalNotificationDispatcher
+                dispatcher = ApprovalNotificationDispatcher(self.db)
+                vendor = self._get_vendor(assignment.vendor_id)
+                quoted_str = f"{assignment.currency} {quoted_val:,.0f}" if quoted_val else "a quote"
+                dispatcher.notify_organizers(
+                    event_id=assignment.event_id,
+                    title="Vendor Replied in Manual Negotiation",
+                    message=f"{vendor.name} sent {quoted_str}: '{response_text[:100]}'. Organizer action required.",
+                    payload={
+                        "assignment_id": assignment.id,
+                        "vendor_id": assignment.vendor_id,
+                        "vendor_name": vendor.name,
+                        "quoted_amount": quoted_val,
+                    },
+                )
+            except Exception as notify_err:
+                logger.warning("Failed to notify organizers of vendor reply in HUMAN mode: %s", notify_err)
+
+            return {
+                "assignment_id": assignment.id,
+                "negotiation_status": assignment.negotiation_status,
+                "negotiation_control": getattr(assignment, "negotiation_control", "HUMAN") or "HUMAN",
+                "action": "HUMAN_CONTROL",
+                "message": "Provider reply recorded under manual organizer control. Agent will not auto-counter.",
+                "offer": offer,
+                "quoted_amount": assignment.quoted_amount,
+                "target_amount": assignment.target_amount,
+                "max_approved_amount": assignment.max_approved_amount,
+            }
+
         # Determine next action based on budget authority rules
         max_ceiling = assignment.max_approved_amount
         target = assignment.target_amount
 
-        quoted_val = float(quoted) if quoted is not None else None
         if quoted_val is not None and max_ceiling is not None and quoted_val > max_ceiling:
             # Over ceiling → agent counter-offers toward target
             assignment.negotiation_status = NegotiationStatus.NEGOTIATING.value
@@ -364,6 +434,20 @@ class NegotiationService:
         self.db.commit()
         self.db.refresh(assignment)
 
+        # Real-time event: Broadcast quote and status update
+        negotiation_broker.publish_sync(
+            event_id=assignment.event_id,
+            assignment_id=assignment.id,
+            event_type="quote_updated",
+            data={
+                "quoted_amount": assignment.quoted_amount,
+                "status": assignment.negotiation_status,
+                "action": action,
+                "approval_id": assignment.approval_id,
+                "timestamp": time.time(),
+            },
+        )
+
         result: Dict[str, Any] = {
             "assignment_id": assignment.id,
             "negotiation_status": assignment.negotiation_status,
@@ -384,6 +468,12 @@ class NegotiationService:
         """Generates a counter-offer toward target_amount. Never exceeds ceiling."""
         assignment = self._get_assignment(assignment_id)
         vendor = self._get_vendor(assignment.vendor_id)
+
+        # CHOKE POINT GUARD 1: Human control check
+        if getattr(assignment, "negotiation_control", "AGENT") == "HUMAN":
+            raise BadRequestException(
+                "Negotiation is under manual organizer control (HUMAN). Agent cannot send counter-offers."
+            )
 
         if assignment.negotiation_status not in (
             NegotiationStatus.NEGOTIATING.value,
@@ -408,6 +498,58 @@ class NegotiationService:
             counter = min(counter, ceiling * 0.98)  # Never hit exact ceiling
 
         counter = round(counter, -2)  # Round to nearest 100
+
+        # CHOKE POINT GUARD 2: Hard cap guard
+        if assignment.max_approved_amount is not None and counter > assignment.max_approved_amount:
+            logger.error(
+                "HARD CAP VIOLATION PREVENTED: Counter-offer %f exceeds max_approved_amount %f for assignment %s",
+                counter,
+                assignment.max_approved_amount,
+                assignment_id,
+            )
+            self._audit.record(
+                event_id=assignment.event_id,
+                actor_id="system",
+                actor_type="AGENT",
+                action="NEGOTIATION_CAP_BLOCKED",
+                action_type="NEGOTIATION",
+                target_type="VENDOR_ASSIGNMENT",
+                target_id=assignment_id,
+                after_state={
+                    "attempted_counter": counter,
+                    "max_approved_amount": assignment.max_approved_amount,
+                    "quoted": quoted,
+                },
+            )
+            self.db.commit()
+            negotiation_broker.publish_sync(
+                event_id=assignment.event_id,
+                assignment_id=assignment.id,
+                event_type="cap_blocked",
+                data={
+                    "attempted_counter": counter,
+                    "max_approved_amount": assignment.max_approved_amount,
+                    "status": assignment.negotiation_status,
+                    "reason": "Counter-offer exceeds budget cap ceiling",
+                    "timestamp": time.time(),
+                },
+            )
+            try:
+                from app.services.approval_notification_dispatcher import ApprovalNotificationDispatcher
+                dispatcher = ApprovalNotificationDispatcher(self.db)
+                dispatcher.notify_organizers(
+                    event_id=assignment.event_id,
+                    title="Budget Cap Blocked Negotiation Counter",
+                    message=f"Agent attempted counter of {currency} {counter:,.0f} exceeding ceiling {currency} {assignment.max_approved_amount:,.0f} for {vendor.name}.",
+                    payload={"assignment_id": assignment.id, "counter": counter, "cap": assignment.max_approved_amount},
+                )
+            except Exception:
+                pass
+
+            raise BadRequestException(
+                f"Counter-offer amount ({currency} {counter:,.0f}) exceeds approved ceiling "
+                f"({currency} {assignment.max_approved_amount:,.0f}). Blocked by deterministic hard cap guard."
+            )
 
         message = self._build_counter_offer_message(vendor, counter, currency, assignment)
 
@@ -442,6 +584,33 @@ class NegotiationService:
         self.db.commit()
         self.db.refresh(assignment)
 
+        # Real-time event: Broadcast counter offer and message
+        negotiation_broker.publish_sync(
+            event_id=assignment.event_id,
+            assignment_id=assignment.id,
+            event_type="counter_sent",
+            data={
+                "counter_amount": counter,
+                "round": round_num,
+                "message": message,
+                "currency": currency,
+                "timestamp": time.time(),
+            },
+        )
+        negotiation_broker.publish_sync(
+            event_id=assignment.event_id,
+            assignment_id=assignment.id,
+            event_type="message_added",
+            data={
+                "id": f"msg_out_{time.time()}",
+                "sender_type": "AGENT",
+                "text": message,
+                "amount_extracted": counter,
+                "channel": "whatsapp",
+                "timestamp": time.time(),
+            },
+        )
+
         return {
             "assignment_id": assignment.id,
             "negotiation_status": assignment.negotiation_status,
@@ -453,6 +622,183 @@ class NegotiationService:
             "ceiling": ceiling,
             "provider_quoted": quoted,
         }
+
+    # ---- Control State Transitions (Takeover, Resume, Cancel) ----
+
+    def take_over(self, assignment_id: str, user_id: str = "organizer") -> Dict[str, Any]:
+        """Transfers negotiation authority from AGENT to HUMAN organizer.
+        
+        Guarantees:
+        - Sets negotiation_control to 'HUMAN'
+        - Records user ID and timestamp
+        - Terminates any active voice call immediately
+        - Emits 'control_changed' on negotiation_broker
+        - Records authoritative audit record NEGOTIATION_TAKEOVER
+        """
+        assignment = self._get_assignment(assignment_id)
+        prev_control = getattr(assignment, "negotiation_control", "AGENT") or "AGENT"
+        assignment.negotiation_control = "HUMAN"
+        assignment.control_changed_by = user_id
+        assignment.control_changed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        self._hangup_active_call_if_any(assignment, reason="MANUAL_TAKEOVER", user_id=user_id)
+
+        self._audit.record(
+            event_id=assignment.event_id,
+            actor_id=user_id,
+            actor_type="ORGANIZER",
+            action="NEGOTIATION_TAKEOVER",
+            action_type="NEGOTIATION",
+            target_type="VENDOR_ASSIGNMENT",
+            target_id=assignment.id,
+            after_state={
+                "previous_control": prev_control,
+                "negotiation_control": "HUMAN",
+                "control_changed_by": user_id,
+            },
+        )
+        self.db.commit()
+        self.db.refresh(assignment)
+
+        negotiation_broker.publish_sync(
+            event_id=assignment.event_id,
+            assignment_id=assignment.id,
+            event_type="control_changed",
+            data={
+                "control": "HUMAN",
+                "changed_by": user_id,
+                "timestamp": time.time(),
+                "status": assignment.negotiation_status,
+            },
+        )
+
+        return {
+            "assignment_id": assignment.id,
+            "negotiation_control": assignment.negotiation_control,
+            "control_changed_by": assignment.control_changed_by,
+            "control_changed_at": assignment.control_changed_at.isoformat() if assignment.control_changed_at else None,
+            "status": assignment.negotiation_status,
+            "message": "Manual takeover successful. Agent paused. Outbound messages now sent by organizer.",
+        }
+
+    def resume(self, assignment_id: str, user_id: str = "organizer") -> Dict[str, Any]:
+        """Restores autonomous agent authority for vendor negotiation.
+        
+        Guarantees:
+        - Sets negotiation_control to 'AGENT'
+        - Records user ID and timestamp
+        - Emits 'control_changed' on negotiation_broker
+        - Records authoritative audit record NEGOTIATION_RESUME
+        """
+        assignment = self._get_assignment(assignment_id)
+        prev_control = getattr(assignment, "negotiation_control", "HUMAN") or "HUMAN"
+        assignment.negotiation_control = "AGENT"
+        assignment.control_changed_by = user_id
+        assignment.control_changed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        self._audit.record(
+            event_id=assignment.event_id,
+            actor_id=user_id,
+            actor_type="ORGANIZER",
+            action="NEGOTIATION_RESUME",
+            action_type="NEGOTIATION",
+            target_type="VENDOR_ASSIGNMENT",
+            target_id=assignment.id,
+            after_state={
+                "previous_control": prev_control,
+                "negotiation_control": "AGENT",
+                "control_changed_by": user_id,
+            },
+        )
+        self.db.commit()
+        self.db.refresh(assignment)
+
+        negotiation_broker.publish_sync(
+            event_id=assignment.event_id,
+            assignment_id=assignment.id,
+            event_type="control_changed",
+            data={
+                "control": "AGENT",
+                "changed_by": user_id,
+                "timestamp": time.time(),
+                "status": assignment.negotiation_status,
+            },
+        )
+
+        return {
+            "assignment_id": assignment.id,
+            "negotiation_control": assignment.negotiation_control,
+            "control_changed_by": assignment.control_changed_by,
+            "control_changed_at": assignment.control_changed_at.isoformat() if assignment.control_changed_at else None,
+            "status": assignment.negotiation_status,
+            "message": "Autonomous agent negotiation resumed.",
+        }
+
+    def cancel(self, assignment_id: str, user_id: str = "organizer", reason: Optional[str] = None) -> Dict[str, Any]:
+        """Stops negotiation and marks assignment DECLINED / CANCELLED using existing state machine."""
+        assignment = self._get_assignment(assignment_id)
+
+        self._hangup_active_call_if_any(assignment, reason="NEGOTIATION_CANCELLED", user_id=user_id)
+
+        assignment.negotiation_status = NegotiationStatus.DECLINED.value
+        assignment.status = "CANCELLED"
+        assignment.provider_available = False
+
+        self._audit.record(
+            event_id=assignment.event_id,
+            actor_id=user_id,
+            actor_type="ORGANIZER",
+            action="NEGOTIATION_CANCEL",
+            action_type="NEGOTIATION",
+            target_type="VENDOR_ASSIGNMENT",
+            target_id=assignment.id,
+            after_state={
+                "negotiation_status": assignment.negotiation_status,
+                "status": assignment.status,
+                "reason": reason or "Cancelled by organizer",
+            },
+        )
+        self.db.commit()
+        self.db.refresh(assignment)
+
+        negotiation_broker.publish_sync(
+            event_id=assignment.event_id,
+            assignment_id=assignment.id,
+            event_type="status_changed",
+            data={
+                "status": assignment.negotiation_status,
+                "action": "CANCELLED",
+                "reason": reason or "Cancelled by organizer",
+                "timestamp": time.time(),
+            },
+        )
+
+        return {
+            "assignment_id": assignment.id,
+            "negotiation_status": assignment.negotiation_status,
+            "status": assignment.status,
+            "message": f"Negotiation cancelled by organizer. {reason or ''}".strip(),
+        }
+
+    def _hangup_active_call_if_any(self, assignment: VendorAssignment, reason: str, user_id: str) -> None:
+        """Attempts to hang up any active call on this vendor/assignment via telephony gateway."""
+        try:
+            from app.integrations.communication.exotel_gateway import voice_gateway, SessionState
+            for session in list(voice_gateway._active_sessions.values()):
+                if (
+                    session.session_id == assignment.id
+                    or session.custom_parameters.get("assignment_id") == assignment.id
+                    or session.custom_parameters.get("provider_id") == assignment.vendor_id
+                ):
+                    session.state = SessionState.CANCELLED
+                    self._comm.hangup_call(
+                        session.call_sid or session.session_id,
+                        reason=reason,
+                        actor_id=user_id,
+                        event_id=assignment.event_id,
+                    )
+        except Exception as e:
+            logger.debug("No active voice call to hang up or gateway not initialized: %s", e)
 
     def request_approval(
         self,

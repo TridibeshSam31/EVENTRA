@@ -100,6 +100,14 @@ def send_conversation_message(
         )
 
     service = ConversationService(db)
+    
+    # Check active negotiation assignment to resolve control and stream updates
+    from app.services.negotiation_service import NegotiationService
+    from app.services.negotiation_broker import negotiation_broker
+    import time
+    assignment = NegotiationService(db).find_active_assignment(conv.vendor_id, event_id) if conv.vendor_id else None
+    is_human_mode = bool(assignment and getattr(assignment, "negotiation_control", "AGENT") == "HUMAN")
+
     if payload.direction == "inbound":
         msg = service.record_inbound_message(
             event_id=event_id,
@@ -108,7 +116,10 @@ def send_conversation_message(
             channel=payload.channel or conv.channel,
             sender=payload.sender or conv.vendor_name,
         )
+        sender_type = "VENDOR"
     else:
+        sender_name = payload.sender or ("ORGANIZER" if is_human_mode else "AGENT")
+        sender_type = "ORGANIZER" if is_human_mode or sender_name == "ORGANIZER" else "AGENT"
         from app.services.provider_communication_service import ProviderCommunicationService
         comm_service = ProviderCommunicationService(db)
         send_result = comm_service.send_message(
@@ -132,8 +143,24 @@ def send_conversation_message(
                 raw_text=payload.raw_text,
                 channel=payload.channel or conv.channel,
                 recipient=conv.recipient_contact,
-                sender=payload.sender or "EVENTRA Operator",
+                sender=sender_name,
                 status="sent" if send_result.success else "failed",
             )
+
+    if assignment:
+        ts = msg.timestamp.timestamp() if hasattr(msg.timestamp, "timestamp") else time.time()
+        negotiation_broker.publish_sync(
+            event_id=event_id,
+            assignment_id=assignment.id,
+            event_type="message_added",
+            data={
+                "id": msg.id,
+                "sender_type": sender_type,
+                "text": payload.raw_text,
+                "amount_extracted": (msg.extracted_facts or {}).get("quoted_amount") if hasattr(msg, "extracted_facts") else None,
+                "channel": payload.channel or conv.channel or "whatsapp",
+                "timestamp": ts,
+            },
+        )
 
     return MessageResponse.model_validate(msg)

@@ -29,6 +29,7 @@ from app.api.routes.reconciliation import router as reconciliation_router
 from app.api.routes.shortlist import router as shortlist_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.notifications import router as notifications_router
+from app.api.routes.negotiations import router as negotiations_router
 
 # Initialize application logging
 setup_logging()
@@ -259,6 +260,10 @@ app.include_router(auth_router)
 # Notifications & Web Push Routes
 app.include_router(notifications_router, prefix=settings.API_V1_STR)
 app.include_router(notifications_router)
+
+# Live Negotiation Screen & Stream Routes
+app.include_router(negotiations_router, prefix=settings.API_V1_STR)
+app.include_router(negotiations_router)
 
 
 

@@ -531,3 +531,63 @@ class ApprovalNotificationDispatcher:
             )
         except Exception:
             pass
+
+    def notify_organizers(
+        self,
+        event_id: str,
+        title: str,
+        message: str,
+        payload: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Sends an operational alert (IN_APP + Web Push) to event organizers."""
+        event = self.db.query(Event).filter(Event.id == event_id).first()
+        if not event:
+            return
+
+        # 1. In-app notification
+        try:
+            notif_provider = registry.get_notification_provider()
+            notif_provider.send_notification(
+                event_id=event_id,
+                notification_type="OPERATIONAL_ALERT",
+                title=title,
+                message=message,
+                channel="IN_APP",
+                payload=payload,
+            )
+        except Exception as e:
+            logger.warning("Failed to dispatch in-app alert: %s", e)
+
+        # 2. Push notifications to eligible organizer subscriptions
+        try:
+            organizer_user_ids = {event.owner_id} if event.owner_id else set()
+            members = self.db.query(EventMember).filter(EventMember.event_id == event_id).all()
+            for m in members:
+                if ApprovalPolicy.is_eligible_approver(m.role, "MAJOR"):
+                    organizer_user_ids.add(m.user_id)
+
+            push_adapter = PushAdapter()
+            subscriptions = (
+                self.db.query(PushSubscription)
+                .filter(PushSubscription.user_id.in_(list(organizer_user_ids)))
+                .all()
+            )
+            for sub in subscriptions:
+                sub_info = {
+                    "endpoint": sub.endpoint,
+                    "keys": {
+                        "p256dh": sub.p256dh_key,
+                        "auth": sub.auth_key,
+                    },
+                }
+                push_adapter.send_push(
+                    subscription_info=sub_info,
+                    payload={
+                        "title": title,
+                        "body": message,
+                        "url": f"/events/{event_id}/negotiations",
+                        "data": payload or {},
+                    },
+                )
+        except Exception as e:
+            logger.warning("Failed to dispatch web push alert to organizers: %s", e)

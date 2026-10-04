@@ -344,6 +344,26 @@ class VoiceNegotiationService:
         target = context.target_price or assignment.target_amount
 
         # 9. Evaluate Commercial Position
+        # CHOKE POINT GUARD: Under manual HUMAN control, agent must not send counters in voice call
+        if getattr(assignment, "negotiation_control", "AGENT") == "HUMAN":
+            assignment.negotiation_status = NegotiationStatus.QUOTATION_RECEIVED.value
+            self.db.commit()
+            return NegotiationEvaluationDecision(
+                action="HUMAN_CONTROL",
+                negotiation_status=NegotiationStatus.QUOTATION_RECEIVED.value,
+                can_proceed_to_engagement=False,
+                approval_required=True,
+                conversational_response=(
+                    f"Thank you for the quotation of {context.currency} {quoted_val:,.0f}. "
+                    "The event organizer is managing this negotiation directly and will review your proposal."
+                ),
+                reason="Negotiation is currently under manual organizer control (HUMAN). Agent will not auto-counter.",
+                assignment_id=assignment.id,
+                quoted_amount=quoted_val,
+                target_amount=target,
+                max_approved_amount=ceiling,
+            )
+
         # Case A: Over Ceiling → Counter-offer toward target or Escalate
         if ceiling is not None and quoted_val > ceiling:
             round_num = int(assignment.negotiation_round or "0")
@@ -351,8 +371,47 @@ class VoiceNegotiationService:
                 # Deterministic counter-offer using NegotiationService rules
                 assignment.negotiation_status = NegotiationStatus.NEGOTIATING.value
                 self.db.commit()
-                counter_result = self._negotiation.negotiate(assignment.id)
-                counter_amount = counter_result.get("counter_offer_amount")
+                try:
+                    counter_result = self._negotiation.negotiate(assignment.id)
+                    counter_amount = counter_result.get("counter_offer_amount")
+                except Exception as neg_err:
+                    logger.warning("Voice counter-offer blocked or failed: %s", neg_err)
+                    return NegotiationEvaluationDecision(
+                        action="ESCALATE",
+                        negotiation_status=NegotiationStatus.NEGOTIATING.value,
+                        can_proceed_to_engagement=False,
+                        approval_required=True,
+                        conversational_response=(
+                            f"Thank you. That rate of {context.currency} {quoted_val:,.0f} requires direct organizer review. "
+                            "I have forwarded your proposal to the organizer."
+                        ),
+                        reason=f"Counter-offer blocked by safety guard: {neg_err}",
+                        assignment_id=assignment.id,
+                        quoted_amount=quoted_val,
+                        target_amount=target,
+                        max_approved_amount=ceiling,
+                        blocking_factors=[str(neg_err)],
+                    )
+
+                # Hard cap assertion
+                if ceiling is not None and counter_amount > ceiling:
+                    logger.error("HARD CAP VIOLATION PREVENTED IN VOICE PATH: %f > %f", counter_amount, ceiling)
+                    return NegotiationEvaluationDecision(
+                        action="ESCALATE",
+                        negotiation_status=NegotiationStatus.NEGOTIATING.value,
+                        can_proceed_to_engagement=False,
+                        approval_required=True,
+                        conversational_response=(
+                            f"Thank you. That rate requires organizer approval. I have logged your proposal."
+                        ),
+                        reason=f"Counter-offer {counter_amount} exceeds authorized ceiling {ceiling}.",
+                        assignment_id=assignment.id,
+                        quoted_amount=quoted_val,
+                        target_amount=target,
+                        max_approved_amount=ceiling,
+                        blocking_factors=[f"Counter-offer {counter_amount} exceeds ceiling {ceiling}."],
+                    )
+
                 return NegotiationEvaluationDecision(
                     action="COUNTER_OFFER",
                     negotiation_status=NegotiationStatus.COUNTER_OFFER_SENT.value,

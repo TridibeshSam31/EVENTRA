@@ -114,5 +114,24 @@ class MockCommunicationProvider(ProviderCommunicationProvider):
             latency_ms=2.0,
         )
 
+    def hangup_call(
+        self,
+        call_sid: str,
+        reason: Optional[str] = None,
+    ) -> IntegrationResult[Dict[str, Any]]:
+        record = {
+            "call_sid": call_sid,
+            "status": "TERMINATED",
+            "reason": reason or "MANUAL_TAKEOVER",
+            "timestamp": time.time(),
+        }
+        self._history.append(record)
+        return IntegrationResult(
+            data=record,
+            source=IntegrationSource.MOCK,
+            success=True,
+            latency_ms=1.0,
+        )
+
     def clear(self):
         self._history.clear()
