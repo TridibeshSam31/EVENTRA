@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { EventShell } from "@/components/v2/EventShell";
 import { listApprovals, approveRequest, rejectRequest } from "@/lib/api/approvals";
+import { PushNotificationBanner } from "@/components/notifications";
 import type { ApprovalRequestResponse } from "@/types/api";
 
 interface DisplayApproval {
@@ -170,6 +171,9 @@ export default function ApprovalsPage() {
   return (
     <EventShell eventId={eventId} currentStage="LIVE">
       <div className="space-y-6">
+        {/* Remote Approval Push Notification Banner */}
+        <PushNotificationBanner />
+
         {/* Header Bar */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
