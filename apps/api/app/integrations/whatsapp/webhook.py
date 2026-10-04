@@ -236,15 +236,17 @@ def process_organizer_approval_reply(
             return res
 
         except BadRequestException as exc:
-            msg = format_expired_notice() if "expire" in str(exc).lower() else f"Error: {exc}"
+            is_expired = "expire" in str(exc).lower()
+            msg = format_expired_notice() if is_expired else f"Error: {exc}"
             comm.send_message(
                 event_id=event_id,
                 provider_id=user.id,
                 message=msg,
                 recipient_contact=sender,
             )
-            res = {"status": "BAD_REQUEST", "error": str(exc)}
-            idempotency.complete(idem_key, 400, res)
+            status = "EXPIRED" if is_expired else "BAD_REQUEST"
+            res = {"status": status, "error": str(exc), "approval_id": approval_id}
+            idempotency.complete(idem_key, 200 if is_expired else 400, res)
             return res
 
         except ForbiddenException as exc:
@@ -277,15 +279,17 @@ def process_organizer_approval_reply(
             return res
 
         except BadRequestException as exc:
-            msg = format_expired_notice() if "expire" in str(exc).lower() else f"Error: {exc}"
+            is_expired = "expire" in str(exc).lower()
+            msg = format_expired_notice() if is_expired else f"Error: {exc}"
             comm.send_message(
                 event_id=event_id,
                 provider_id=user.id,
                 message=msg,
                 recipient_contact=sender,
             )
-            res = {"status": "BAD_REQUEST", "error": str(exc)}
-            idempotency.complete(idem_key, 400, res)
+            status = "EXPIRED" if is_expired else "BAD_REQUEST"
+            res = {"status": status, "error": str(exc), "approval_id": approval_id}
+            idempotency.complete(idem_key, 200 if is_expired else 400, res)
             return res
 
         except ForbiddenException as exc:

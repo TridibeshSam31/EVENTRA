@@ -589,3 +589,328 @@ def test_web_push_endpoints(test_client: TestClient, db_session: Session):
 
     sub_after = db_session.query(PushSubscription).filter(PushSubscription.endpoint == sub_payload["endpoint"]).first()
     assert sub_after is None
+
+
+# =============================================================================
+# 9. Review Fixes: Tokens, Webhook Edge Cases, Multi-Tier Escalation, Collisions
+# =============================================================================
+from unittest.mock import patch
+from app.core.tokens import _get_signing_key
+from app.services.approval_notification_dispatcher import generate_unique_reply_code
+
+
+def test_tokens_environment_enforcement_and_scoping():
+    """Verifies that missing DEEP_LINK_SECRET raises in non-dev, works in dev/test,
+    and tokens are scoped to a specific approval and expire properly."""
+    orig_env = settings.ENVIRONMENT
+    orig_secret = settings.DEEP_LINK_SECRET
+    try:
+        # 1. In non-dev, missing DEEP_LINK_SECRET must raise RuntimeError
+        settings.ENVIRONMENT = "production"
+        settings.DEEP_LINK_SECRET = None
+        with pytest.raises(RuntimeError) as excinfo:
+            _get_signing_key()
+        assert "DEEP_LINK_SECRET must be configured" in str(excinfo.value)
+
+        # 2. In test/dev, missing DEEP_LINK_SECRET falls back to SECRET_KEY / dev default
+        settings.ENVIRONMENT = "test"
+        key = _get_signing_key()
+        assert isinstance(key, bytes)
+        assert len(key) > 0
+
+        # When DEEP_LINK_SECRET is present, it is always used
+        settings.DEEP_LINK_SECRET = "custom-deep-link-secret-test"
+        assert _get_signing_key() == b"custom-deep-link-secret-test"
+
+        # 3. Scoping: Token for approval A does not open approval B
+        tok_a = generate_approval_view_token("ev-100", "appr-A")
+        assert verify_approval_view_token(tok_a, "ev-100", "appr-A") is True
+        assert verify_approval_view_token(tok_a, "ev-100", "appr-B") is False
+        assert verify_approval_view_token(tok_a, "ev-200", "appr-A") is False
+
+        # 4. Expired token is rejected
+        expired_tok = generate_approval_view_token(
+            "ev-100", "appr-A", expires_at=utc_now() - timedelta(seconds=1)
+        )
+        assert verify_approval_view_token(expired_tok, "ev-100", "appr-A") is False
+
+    finally:
+        settings.ENVIRONMENT = orig_env
+        settings.DEEP_LINK_SECRET = orig_secret
+
+
+def test_webhook_edge_cases_and_hinglish_decisions(test_client: TestClient, db_session: Session):
+    """Verifies non-organizer rejection, duplicate message idempotency, expired/stale replies,
+    and Hinglish responses ('haan', 'nahi')."""
+    from app.models.budget import BudgetItem
+    event, owner, requester, _ = create_test_event_and_organizer(db_session, "+919876543210")
+    service = ApprovalService(db_session)
+
+    b_item = BudgetItem(
+        event_id=event.id,
+        name="Sound & AV",
+        category="AV",
+        estimated_amount=10000,
+        actual_amount=5000,
+        status="COMMITTED",
+    )
+    db_session.add(b_item)
+    db_session.commit()
+
+    # 1. Non-organizer phone never approves
+    appr1 = service.create_request(
+        event.id,
+        requester.id,
+        ApprovalRequestCreate(
+            action_type="ADJUST_BUDGET",
+            target_type="BUDGET",
+            target_id=b_item.id,
+            impact_level="MAJOR",
+            requested_action={"budget_item_id": b_item.id, "actual_amount": 5500},
+        ),
+    )
+    unauthorized_payload = {
+        "from": "+910000000000",
+        "body": f"YES {appr1.reply_code}",
+        "id": "unauth-msg-1",
+    }
+    res = send_openwa_webhook(test_client, unauthorized_payload)
+    assert res.status_code == 200
+    assert res.json().get("status") in ("UNMAPPED_PROVIDER", "NO_PENDING_APPROVALS", "CODE_NOT_FOUND")
+    db_session.refresh(appr1)
+    assert appr1.status == "PENDING"  # Did NOT approve!
+
+    # 2. Duplicate webhook message ID does not double-approve
+    dup_msg_id = "idem-msg-test-999"
+    webhook_dup = {
+        "from": "919876543210@c.us",
+        "body": f"YES {appr1.reply_code}",
+        "id": dup_msg_id,
+    }
+    r1 = send_openwa_webhook(test_client, webhook_dup)
+    assert r1.status_code == 200
+    assert r1.json().get("status") == "APPROVED"
+
+    r2 = send_openwa_webhook(test_client, webhook_dup)
+    assert r2.status_code == 200
+    assert r2.json().get("status") == "APPROVED"
+    db_session.refresh(appr1)
+    assert appr1.status == "APPROVED"
+
+    # 3. Expired approval replies correctly
+    appr_exp = service.create_request(
+        event.id,
+        requester.id,
+        ApprovalRequestCreate(
+            action_type="ADJUST_BUDGET",
+            target_type="BUDGET",
+            target_id=b_item.id,
+            impact_level="MAJOR",
+            requested_action={"budget_item_id": b_item.id, "actual_amount": 5600},
+        ),
+    )
+    appr_exp.expires_at = utc_now() - timedelta(minutes=5)
+    db_session.commit()
+
+    exp_webhook = {
+        "from": "919876543210@c.us",
+        "body": f"YES {appr_exp.reply_code}",
+        "id": "exp-msg-01",
+    }
+    res_exp = send_openwa_webhook(test_client, exp_webhook)
+    assert res_exp.status_code == 200
+    assert res_exp.json().get("status") == "EXPIRED"
+    db_session.refresh(appr_exp)
+    assert appr_exp.status == "EXPIRED"
+
+    # 4. STALE approval replies correctly
+    from app.models.task import Task
+    appr_stale = service.create_request(
+        event.id,
+        requester.id,
+        ApprovalRequestCreate(
+            action_type="ADJUST_BUDGET",
+            target_type="BUDGET",
+            target_id=b_item.id,
+            impact_level="MAJOR",
+            requested_action={"budget_item_id": b_item.id, "actual_amount": 5700},
+        ),
+    )
+    # Mutate event state to invalidate snapshot
+    extra_task = Task(event_id=event.id, name="Decor Cleanup", status="PENDING")
+    db_session.add(extra_task)
+    db_session.commit()
+
+    stale_webhook = {
+        "from": "919876543210@c.us",
+        "body": f"YES {appr_stale.reply_code}",
+        "id": "stale-msg-01",
+    }
+    res_stale = send_openwa_webhook(test_client, stale_webhook)
+    assert res_stale.status_code == 200
+    assert res_stale.json().get("status") == "STALE"
+    db_session.refresh(appr_stale)
+    assert appr_stale.status == "STALE"
+
+    # 5. Hinglish replies work: "haan" approves, "nahi" rejects
+    appr_h1 = service.create_request(
+        event.id,
+        requester.id,
+        ApprovalRequestCreate(
+            action_type="ADJUST_BUDGET",
+            target_type="BUDGET",
+            target_id=b_item.id,
+            impact_level="MAJOR",
+            requested_action={"budget_item_id": b_item.id, "actual_amount": 5800},
+        ),
+    )
+    h1_webhook = {
+        "from": "919876543210@c.us",
+        "body": f"haan {appr_h1.reply_code}",
+        "id": "hinglish-haan-01",
+    }
+    res_h1 = send_openwa_webhook(test_client, h1_webhook)
+    assert res_h1.status_code == 200
+    assert res_h1.json().get("status") == "APPROVED"
+    db_session.refresh(appr_h1)
+    assert appr_h1.status == "APPROVED"
+
+    appr_h2 = service.create_request(
+        event.id,
+        requester.id,
+        ApprovalRequestCreate(
+            action_type="ADJUST_BUDGET",
+            target_type="BUDGET",
+            target_id=b_item.id,
+            impact_level="MAJOR",
+            requested_action={"budget_item_id": b_item.id, "actual_amount": 5900},
+        ),
+    )
+    h2_webhook = {
+        "from": "919876543210@c.us",
+        "body": f"nahi {appr_h2.reply_code}",
+        "id": "hinglish-nahi-01",
+    }
+    res_h2 = send_openwa_webhook(test_client, h2_webhook)
+    assert res_h2.status_code == 200
+    assert res_h2.json().get("status") == "REJECTED"
+    db_session.refresh(appr_h2)
+    assert appr_h2.status == "REJECTED"
+
+
+def test_escalation_recipients_filtering_and_repeated_sweeps(db_session: Session):
+    """Verifies that escalation recipients exclude requester and already-notified users,
+    falls back to owner when none eligible, and repeated sweeps fire reminder/escalation exactly once."""
+    event, owner, requester, _ = create_test_event_and_organizer(db_session)
+
+    # Add Manager 1 before request creation
+    manager1 = User(name="Manager 1", email="m1@eventra.local", phone_e164="+919876543001")
+    db_session.add(manager1)
+    db_session.flush()
+
+    mem_m1 = EventMember(event_id=event.id, user_id=manager1.id, role="EVENT_MANAGER")
+    db_session.add(mem_m1)
+    db_session.commit()
+
+    service = ApprovalService(db_session)
+    approval = service.create_request(
+        event.id,
+        requester.id,
+        ApprovalRequestCreate(
+            action_type="TASK_MUTATION",
+            target_type="TASK",
+            impact_level="MAJOR",
+            requested_action={"cost_delta": 2500},
+        ),
+    )
+
+    # Add Manager 2 after request creation (manager2 has not yet been notified for this approval)
+    manager2 = User(name="Manager 2", email="m2@eventra.local", phone_e164="+919876543002")
+    db_session.add(manager2)
+    db_session.flush()
+
+    mem_m2 = EventMember(event_id=event.id, user_id=manager2.id, role="EVENT_MANAGER")
+    db_session.add(mem_m2)
+    db_session.commit()
+
+    sweeper = ApprovalEscalationService(db_session)
+
+    # 1. Verify exclusion: requester is excluded, and already-notified users (owner, manager1) are excluded
+    next_recipients = sweeper._resolve_escalation_recipients(approval)
+    recipient_ids = [u.id for u in next_recipients]
+    # requester must NOT be included
+    assert requester.id not in recipient_ids
+    # already notified users must NOT be included
+    assert manager1.id not in recipient_ids
+    # manager2 is eligible and unnotified
+    assert manager2.id in recipient_ids
+
+    # 2. When ALL eligible users (manager1, manager2) have been notified, falls back to owner
+    approval.requested_action = {"notified_to": [owner.id, manager1.id, manager2.id]}
+    db_session.commit()
+
+    fallback_recipients = sweeper._resolve_escalation_recipients(approval)
+    fallback_ids = [u.id for u in fallback_recipients]
+    assert fallback_ids == [owner.id]
+
+    # 3. Sweeper safety: running sweep_pending_approvals() twice sends exactly one reminder and one escalation
+    approval.created_at = utc_now() - timedelta(minutes=30)
+    approval.expires_at = utc_now() + timedelta(minutes=30)
+    approval.requested_action = {}
+    db_session.commit()
+
+    first_sweep = sweeper.sweep_pending_approvals()
+    assert first_sweep["reminded"] == 1
+    assert first_sweep["escalated"] == 1
+
+    db_session.refresh(approval)
+    req_act = approval.requested_action
+    assert req_act.get("reminder_sent") is True
+    assert req_act.get("escalated") is True
+    assert "escalated_to" in req_act
+
+    # Second sweep immediately after must NOT fire again (atomic claims persisted)
+    second_sweep = sweeper.sweep_pending_approvals()
+    assert second_sweep["reminded"] == 0
+    assert second_sweep["escalated"] == 0
+
+
+def test_reply_code_collision_retry(db_session: Session):
+    """Verifies that generate_unique_reply_code checks ALL approvals (including resolved ones)
+    and successfully retries on collision."""
+    event, owner, requester, _ = create_test_event_and_organizer(db_session)
+    service = ApprovalService(db_session)
+
+    existing_appr = service.create_request(
+        event.id,
+        requester.id,
+        ApprovalRequestCreate(
+            action_type="TASK_MUTATION",
+            target_type="TASK",
+            impact_level="MAJOR",
+            requested_action={"cost_delta": 500},
+        ),
+    )
+    # Manually set a known reply code and mark it APPROVED (historical non-pending approval)
+    colliding_code = "ABCDEF"
+    existing_appr.reply_code = colliding_code
+    existing_appr.status = "APPROVED"
+    db_session.commit()
+
+    # Verify colliding_code exists in DB
+    assert db_session.query(Approval).filter(Approval.reply_code == colliding_code).first() is not None
+
+    # Patch secrets.choice so first 6 choices build colliding_code, then second 6 build XYZ789
+    sequence_to_yield = list("ABCDEF") + list("XYZ789")
+    seq_iter = iter(sequence_to_yield)
+
+    with patch("secrets.choice", side_effect=lambda seq: next(seq_iter)):
+        new_code = generate_unique_reply_code(db_session, length=6)
+
+    # Must have bypassed ABCDEF because it exists in DB, and returned XYZ789
+    assert new_code == "XYZ789"
+    assert new_code != colliding_code
+
+    # Verify no ambiguous characters (0, O, 1, I)
+    for bad_char in ["0", "O", "1", "I"]:
+        assert bad_char not in new_code
