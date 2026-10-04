@@ -111,7 +111,17 @@ class ApprovalService:
             created_at=utc_now(),
         )
         self.db.add(approval)
-        self.db.flush()
+        self.db.commit()
+        self.db.refresh(approval)
+
+        try:
+            from app.services.approval_notification_dispatcher import ApprovalNotificationDispatcher
+            dispatcher = ApprovalNotificationDispatcher(self.db)
+            dispatcher.dispatch(approval)
+        except Exception as dispatch_err:
+            import logging
+            logging.getLogger(__name__).warning("Notification dispatch failed for outreach approval %s: %s", approval.id, dispatch_err)
+
         return approval, True
 
     def create_request(
@@ -158,6 +168,16 @@ class ApprovalService:
         self.db.add(approval)
         self.db.commit()
         self.db.refresh(approval)
+
+        # 4. Dispatch remote multi-channel notifications
+        try:
+            from app.services.approval_notification_dispatcher import ApprovalNotificationDispatcher
+            dispatcher = ApprovalNotificationDispatcher(self.db)
+            dispatcher.dispatch(approval)
+        except Exception as dispatch_err:
+            import logging
+            logging.getLogger(__name__).warning("Notification dispatch failed for approval %s: %s", approval.id, dispatch_err)
+
         return approval
 
     def approve(
@@ -181,6 +201,12 @@ class ApprovalService:
 
         if approval.status != "PENDING":
             raise BadRequestException(f"Approval request is '{approval.status}', only PENDING requests can be approved.")
+
+        # Enforce expires_at
+        if approval.expires_at and utc_now() > approval.expires_at:
+            approval.status = "EXPIRED"
+            self.db.commit()
+            raise BadRequestException("Approval request has expired.")
 
         # 1. Separation of duties: Requester cannot approve their own request
         if approver_id and approver_id != "anonymous_operator" and approver_id == approval.requester_id:
@@ -251,6 +277,12 @@ class ApprovalService:
 
         if approval.status != "PENDING":
             raise BadRequestException(f"Approval request is '{approval.status}', only PENDING requests can be rejected.")
+
+        # Enforce expires_at
+        if approval.expires_at and utc_now() > approval.expires_at:
+            approval.status = "EXPIRED"
+            self.db.commit()
+            raise BadRequestException("Approval request has expired.")
 
         # Check approver role
         approver_role = self._auth_service.get_user_role(event, approver_id)
@@ -330,6 +362,31 @@ class ApprovalService:
         self.db.refresh(approval)
         return approval
 
+    def expire(
+        self,
+        event_id: str,
+        approval_id: str,
+        reason: Optional[str] = "TTL expired without organizer response.",
+    ) -> Approval:
+        """Marks an approval request as EXPIRED when timeout is reached. Never auto-approves."""
+        event = self._get_event(event_id)
+        approval = (
+            self.db.query(Approval)
+            .filter(Approval.id == approval_id, Approval.event_id == event_id)
+            .first()
+        )
+        if not approval:
+            raise NotFoundException(f"Approval request '{approval_id}' not found for event '{event_id}'.")
+
+        if approval.status == "PENDING":
+            approval.status = "EXPIRED"
+            approval.rejection_reason = reason
+            approval.decided_at = utc_now()
+            self.db.commit()
+            self.db.refresh(approval)
+
+        return approval
+
     def list_requests(
         self,
         event_id: str,
@@ -363,10 +420,16 @@ class ApprovalService:
         event_id: str,
         approval_id: str,
         current_user_id: str = "anonymous_operator",
+        view_token: Optional[str] = None,
     ) -> Approval:
-        """Retrieves a single approval request."""
+        """Retrieves a single approval request. Allows read-only view via signed view_token."""
         event = self._get_event(event_id)
-        self._auth_service.get_user_role(event, current_user_id)
+        if view_token:
+            from app.core.tokens import verify_approval_view_token
+            if not verify_approval_view_token(view_token, event_id, approval_id):
+                raise ForbiddenException("Invalid or expired approval view token.")
+        else:
+            self._auth_service.get_user_role(event, current_user_id)
 
         approval = (
             self.db.query(Approval)

@@ -57,3 +57,22 @@ class ApprovalPolicy:
     def is_eligible_approver(approver_role: str, impact_level: str) -> bool:
         """Checks if a given role is eligible to approve an action."""
         return approver_role in ApprovalPolicy.eligible_approver_roles(impact_level)
+
+    @staticmethod
+    def should_notify(impact_level: str, action_type: Optional[str] = None, payload: Optional[dict] = None) -> bool:
+        """Determines if external notifications (WhatsApp/Push) should be dispatched.
+        
+        Deterministic policy to prevent notification fatigue for low-risk actions.
+        """
+        if impact_level in ("CRITICAL", "MAJOR"):
+            return True
+        if payload and payload.get("pre_authorized") is True:
+            return False
+        try:
+            from app.core.config import settings
+            cost = float((payload or {}).get("cost_delta") or (payload or {}).get("proposed_cost") or 0.0)
+            if cost <= settings.APPROVAL_LOW_RISK_THRESHOLD and impact_level == "MINOR":
+                return False
+        except Exception:
+            pass
+        return True
