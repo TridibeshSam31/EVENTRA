@@ -47,6 +47,7 @@ from app.models.state_transition import StateTransition
 from app.models.audit import Audit, AuditRecord
 from app.models.verification import VerificationResult
 from app.models.notification import Notification
+from app.models.push_subscription import PushSubscription
 from app.models.recovery import Recovery
 from app.models.pause_record import EventPauseRecord
 from app.models.requirement import Requirement
@@ -114,6 +115,7 @@ __all__ = [
     "AuditRecord",
     "VerificationResult",
     "Notification",
+    "PushSubscription",
     "Requirement",
     "Objective",
     "Constraint",

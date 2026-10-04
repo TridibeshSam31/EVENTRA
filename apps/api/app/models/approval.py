@@ -33,6 +33,7 @@ class Approval(Base):
     
     rejection_reason = Column(Text, nullable=True)
     decision_notes = Column(Text, nullable=True)
+    reply_code = Column(String(10), nullable=True, index=True)
     decided_at = Column(DateTime, nullable=True)
     expires_at = Column(DateTime, nullable=True)
     
