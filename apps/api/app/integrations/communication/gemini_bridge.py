@@ -546,6 +546,32 @@ class GeminiLiveBridge(AudioStreamListener):
             )
         )
 
+        # Stream transcript to live negotiation broker with channel=voice (Task 4)
+        if is_final:
+            try:
+                from app.services.negotiation_broker import negotiation_broker
+                from app.services.quote_extraction_service import QuoteExtractionService
+                ev_id = getattr(self.sanitized_context, "event_id", None)
+                asgn_id = getattr(self.sanitized_context, "provider_id", None) or getattr(self.session, "session_id", "voice_call")
+                if ev_id:
+                    st = "AGENT" if speaker.upper() in ("AI", "AGENT", "GEMINI") else "VENDOR"
+                    amt = QuoteExtractionService().extract_quote(cleaned_text).amount
+                    negotiation_broker.publish_sync(
+                        event_id=ev_id,
+                        assignment_id=asgn_id,
+                        event_type="message_added",
+                        data={
+                            "id": f"voice_{time.time()}_{len(self.transcript)}",
+                            "sender_type": st,
+                            "text": cleaned_text,
+                            "amount_extracted": amt,
+                            "channel": "voice",
+                            "timestamp": time.time(),
+                        },
+                    )
+            except Exception as stream_err:
+                logger.debug(f"Could not push voice transcript to negotiation stream: {stream_err}")
+
     async def _shutdown(self) -> None:
         """Internal cleanup helper."""
         self._is_running = False
