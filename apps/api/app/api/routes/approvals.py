@@ -72,13 +72,38 @@ def list_approval_requests(
 def get_approval_request(
     event_id: str,
     approval_id: str,
+    token: Optional[str] = Query(None, description="Signed view token for remote deep links"),
     db: Session = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
 ) -> ApprovalRequestResponse:
-    """Retrieves a single approval request with current decision status."""
+    """Retrieves a single approval request with current decision status. Allows view with valid token."""
     service = ApprovalService(db)
-    approval = service.get_request(event_id, approval_id, current_user_id)
+    approval = service.get_request(event_id, approval_id, current_user_id=current_user_id, view_token=token)
     return ApprovalRequestResponse.model_validate(approval)
+
+
+@router.get(
+    "/{event_id}/approvals/{approval_id}/link",
+)
+def get_approval_deep_link(
+    event_id: str,
+    approval_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Generates a signed expiring deep-link for remote approval viewing."""
+    service = ApprovalService(db)
+    approval = service.get_request(event_id, approval_id, current_user_id=current_user_id)
+    from app.core.tokens import build_approval_deep_link, generate_approval_view_token
+    token = generate_approval_view_token(event_id, approval_id, approval.expires_at)
+    link = build_approval_deep_link(event_id, approval_id, approval.expires_at)
+    return {
+        "event_id": event_id,
+        "approval_id": approval_id,
+        "url": link,
+        "token": token,
+        "expires_at": approval.expires_at.isoformat() if approval.expires_at else None,
+    }
 
 
 @router.post(

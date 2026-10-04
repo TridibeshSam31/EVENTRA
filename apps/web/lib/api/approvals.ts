@@ -16,10 +16,12 @@ export async function listApprovals(
 
 export async function getApproval(
   eventId: string,
-  approvalId: string
+  approvalId: string,
+  token?: string
 ): Promise<ApprovalRequestResponse> {
   return apiClient.get<ApprovalRequestResponse>(
-    `/events/${eventId}/approvals/${approvalId}`
+    `/events/${eventId}/approvals/${approvalId}`,
+    { params: token ? { token } : undefined }
   );
 }
 
