@@ -8,6 +8,7 @@ import logging
 import secrets
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.approval import Approval
 from app.models.event import Event
@@ -127,6 +128,18 @@ class ApprovalNotificationDispatcher:
                     approval.requester_id,
                 )
                 return results
+
+            # Record initial notified approvers in requested_action
+            req_action = dict(approval.requested_action or {})
+            existing_notified = list(req_action.get("notified_to", []))
+            for u in approvers:
+                if u.id not in existing_notified:
+                    existing_notified.append(u.id)
+            req_action["notified_to"] = existing_notified
+            approval.requested_action = req_action
+            flag_modified(approval, "requested_action")
+            self.db.add(approval)
+            self.db.commit()
 
             # Deep link URL
             deep_link = build_approval_deep_link(
@@ -299,6 +312,189 @@ class ApprovalNotificationDispatcher:
 
         except Exception as global_err:
             logger.error("Unexpected error in ApprovalNotificationDispatcher.dispatch: %s", global_err)
+            results["errors"].append(str(global_err))
+
+        return results
+
+    def dispatch_escalation(self, approval: Approval, approvers: List[User]) -> Dict[str, Any]:
+        """Dispatches escalation notifications across IN_APP, WHATSAPP, and WEB_PUSH to escalated approvers."""
+        results = {
+            "in_app": 0,
+            "whatsapp": 0,
+            "web_push": 0,
+            "errors": [],
+        }
+        if not approvers:
+            return results
+
+        try:
+            event = self.db.query(Event).filter(Event.id == approval.event_id).first()
+            event_name = event.name if event else "EVENTRA"
+
+            # Ensure reply_code exists
+            if not approval.reply_code:
+                approval.reply_code = generate_unique_reply_code(self.db)
+                self.db.add(approval)
+                self.db.commit()
+                self.db.refresh(approval)
+
+            deep_link = build_approval_deep_link(
+                event_id=approval.event_id,
+                approval_id=approval.id,
+                expires_at=approval.expires_at,
+            )
+
+            proposed_summary = build_proposed_summary_from_action(approval.requested_action)
+            base_action = approval.action_type.replace('_', ' ').title()
+            title = f"[ESCALATION] Approval Required: {base_action}"
+            escalation_msg = (
+                f"[ESCALATION: {event_name}] Urgent: Approval ticket {approval.reply_code or approval.id[:8]} "
+                f"pending for >{settings.APPROVAL_ESCALATION_MINUTES} mins. Reply YES {approval.reply_code} to approve."
+            )
+
+            for approver in approvers:
+                # 1. IN_APP
+                try:
+                    in_app_notif = Notification(
+                        event_id=approval.event_id,
+                        notification_type="APPROVAL_ESCALATED",
+                        channel="IN_APP",
+                        recipient=approver.id,
+                        title=title,
+                        message=escalation_msg,
+                        payload={
+                            "approval_id": approval.id,
+                            "impact_level": approval.impact_level,
+                            "reply_code": approval.reply_code,
+                            "deep_link": deep_link,
+                            "is_escalation": True,
+                        },
+                        status="DELIVERED",
+                    )
+                    self.db.add(in_app_notif)
+                    self.db.commit()
+                    results["in_app"] += 1
+
+                    try:
+                        live_broker.publish_sync(
+                            approval.event_id,
+                            {
+                                "type": "notification.created",
+                                "event_id": approval.event_id,
+                                "notification_id": in_app_notif.id,
+                                "title": title,
+                                "approval_id": approval.id,
+                                "reply_code": approval.reply_code,
+                                "is_escalation": True,
+                            },
+                        )
+                    except Exception:
+                        pass
+                except Exception as in_app_err:
+                    self.db.rollback()
+                    logger.error("Failed to dispatch escalation IN_APP: %s", in_app_err)
+                    results["errors"].append(f"IN_APP: {in_app_err}")
+                    self._record_audit_failure(approval, approver.id, "IN_APP", str(in_app_err))
+
+                # 2. WHATSAPP
+                phone = getattr(approver, "phone_e164", None)
+                if phone:
+                    try:
+                        comm_provider = registry.get_communication_provider()
+                        send_res = comm_provider.send_message(
+                            event_id=approval.event_id,
+                            provider_id=approver.id,
+                            message=escalation_msg,
+                            recipient_contact=phone,
+                        )
+                        wa_status = "SENT" if send_res.success else "FAILED"
+                        wa_notif = Notification(
+                            event_id=approval.event_id,
+                            notification_type="APPROVAL_ESCALATED",
+                            channel="WHATSAPP",
+                            recipient=phone,
+                            title=title,
+                            message=escalation_msg,
+                            payload={
+                                "approval_id": approval.id,
+                                "reply_code": approval.reply_code,
+                                "integration_source": str(send_res.source),
+                                "is_escalation": True,
+                            },
+                            status=wa_status,
+                        )
+                        self.db.add(wa_notif)
+                        self.db.commit()
+                        if send_res.success:
+                            results["whatsapp"] += 1
+                        else:
+                            self._record_audit_failure(approval, phone, "WHATSAPP", send_res.error or "Dispatch failed")
+                    except Exception as wa_err:
+                        self.db.rollback()
+                        logger.error("Failed to dispatch escalation WHATSAPP: %s", wa_err)
+                        results["errors"].append(f"WHATSAPP: {wa_err}")
+                        self._record_audit_failure(approval, phone, "WHATSAPP", str(wa_err))
+
+                # 3. WEB_PUSH
+                try:
+                    subscriptions = (
+                        self.db.query(PushSubscription)
+                        .filter(PushSubscription.user_id == approver.id)
+                        .all()
+                    )
+                    for sub in subscriptions:
+                        sub_info = {
+                            "endpoint": sub.endpoint,
+                            "keys": {
+                                "p256dh": sub.p256dh,
+                                "auth": sub.auth,
+                            },
+                        }
+                        push_payload = {
+                            "title": title,
+                            "body": escalation_msg,
+                            "url": f"/events/{approval.event_id}/approvals/{approval.id}?token={deep_link.split('token=')[-1]}",
+                            "data": {
+                                "approval_id": approval.id,
+                                "event_id": approval.event_id,
+                                "reply_code": approval.reply_code,
+                                "is_escalation": True,
+                            },
+                        }
+                        push_res = self._push_adapter.send_push(sub_info, push_payload)
+                        if push_res.data and push_res.data.get("is_unsubscribed"):
+                            self.db.delete(sub)
+                            self.db.commit()
+
+                        push_status = "SENT" if push_res.success else "FAILED"
+                        push_notif = Notification(
+                            event_id=approval.event_id,
+                            notification_type="APPROVAL_ESCALATED",
+                            channel="WEB_PUSH",
+                            recipient=sub.endpoint[:250],
+                            title=title,
+                            message=push_payload["body"],
+                            payload={
+                                "approval_id": approval.id,
+                                "reply_code": approval.reply_code,
+                                "is_escalation": True,
+                            },
+                            status=push_status,
+                        )
+                        self.db.add(push_notif)
+                        self.db.commit()
+                        if push_res.success:
+                            results["web_push"] += 1
+                        else:
+                            self._record_audit_failure(approval, sub.endpoint[:80], "WEB_PUSH", push_res.error or "Push error")
+                except Exception as push_err:
+                    self.db.rollback()
+                    logger.error("Failed to dispatch escalation WEB_PUSH: %s", push_err)
+                    results["errors"].append(f"WEB_PUSH: {push_err}")
+                    self._record_audit_failure(approval, approver.id, "WEB_PUSH", str(push_err))
+
+        except Exception as global_err:
+            logger.error("Unexpected error in dispatch_escalation: %s", global_err)
             results["errors"].append(str(global_err))
 
         return results
