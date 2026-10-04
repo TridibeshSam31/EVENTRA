@@ -130,6 +130,12 @@ async def receive_openwa_webhook(
     raw_body = await request.body()
 
     # 1. HMAC signature verification
+    if settings.ENVIRONMENT != "development" and not settings.OPENWA_WEBHOOK_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="OPENWA_WEBHOOK_SECRET is required in non-development environments.",
+        )
+
     if settings.OPENWA_WEBHOOK_SECRET:
         if not x_openwa_signature:
             raise HTTPException(
@@ -181,7 +187,19 @@ async def receive_openwa_webhook(
             "parsed": norm_result.to_dict(),
         }
 
-    # 2. Provider resolution & negotiation flow
+    # 2. Check for Organizer Approval Reply BEFORE vendor resolution
+    message_id = data.get("id") or data.get("messageId") or payload.get("id")
+    from app.integrations.whatsapp.webhook import process_organizer_approval_reply
+    approval_result = process_organizer_approval_reply(
+        db=db,
+        sender=sender,
+        text=text,
+        message_id=message_id,
+    )
+    if approval_result is not None:
+        return approval_result
+
+    # 3. Provider resolution & negotiation flow (Vendor path unchanged)
     neg_service = NegotiationService(db)
     vendor = neg_service.resolve_provider_by_phone(sender)
 
