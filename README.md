@@ -143,7 +143,27 @@ When the operations agent requires human approval, event organizers are notified
   - Approvals **never auto-approve** on timeout; expired approvals transition to `EXPIRED` and trigger the agent to replan alternatives.
   - Background sweeper sweeps pending approvals every 30s: dispatches reminders at 50% TTL, escalates to the Main Organizer at 75% TTL, and can trigger an urgent voice call for `CRITICAL` approvals.
 
-### 7. 🧪 Authentic Simulation Lab
+### 7. 🤝 Live Negotiation Cockpit & Autonomous-with-Control Safeguards
+- **Real-Time Observation:** Watch autonomous vendor price negotiations (via WhatsApp or Gemini Live telephony) in real time on mobile/PWA.
+- **Deterministic Budget Cap Guard:** Visual Cap Meter displays target, agent counters, vendor quote, and hard ceiling. The agent is deterministically blocked by code from exceeding `max_approved_amount`. The cap is never disclosed to vendors or sent to LLM prompts.
+- **Manual Takeover & Control Flip:**
+  - One-click "Stop Agent / Take Over" transfers authority to the human organizer (`HUMAN` mode).
+  - Outbound agent counters are strictly suppressed at the single choke point in both WhatsApp and Voice paths.
+  - Inbound vendor replies are recorded and streamed; organizers receive push and in-app alerts.
+  - Organizers send replies directly from the live screen with `sender_type="ORGANIZER"`.
+  - Seamless "Resume Agent" or "Cancel Negotiation" (disconnects active call, marks assignment `DECLINED`).
+- **Real-Time SSE Stream:** Server-Sent Events stream (`GET /api/events/{event_id}/negotiations/stream`) with `Last-Event-ID` and `?since` cursor replay, keepalive heartbeats, and polling fallback.
+- **Authoritative Endpoints:**
+  - `POST /api/events/{event_id}/negotiations/{assignment_id}/take-over` — Transfer control to human organizer
+  - `POST /api/events/{event_id}/negotiations/{assignment_id}/resume` — Resume autonomous agent control
+  - `POST /api/events/{event_id}/negotiations/{assignment_id}/cancel` — Cancel negotiation and decline vendor assignment
+  - `POST /api/events/{event_id}/negotiations/{assignment_id}/message` — Send manual organizer reply to vendor
+  - `GET /api/events/{event_id}/negotiations/{assignment_id}/live` — UI-ready live state and normalized chat transcript
+  - `GET /api/events/{event_id}/negotiations` — List active negotiations for an event
+  - `GET /api/events/{event_id}/negotiations/stream` — Real-time SSE event stream (`message_added`, `quote_updated`, `counter_sent`, `status_changed`, `control_changed`, `cap_blocked`)
+  - `POST /api/events/{event_id}/negotiations/{assignment_id}/demo-simulation` — Scripted multi-turn negotiation simulation for demos
+
+### 8. 🧪 Authentic Simulation Lab
 - Injects non-mocked, legitimate incident payloads to test system resilience:
   1. **Vendor No-Show:** Critical catering/AV supplier cancels 2 hours before curtain; engine calculates impact, locates backup vendors via OSM/Google Maps, negotiates rates via voice/WhatsApp, and routes approval.
   2. **Venue Emergency:** Downpour or electrical fault renders outdoor stage unusable; system calculates spatial delta, checks indoor hall capacity, shifts timeline, and alerts stakeholders.
