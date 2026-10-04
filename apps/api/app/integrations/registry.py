@@ -64,7 +64,9 @@ class IntegrationRegistry:
     def get_communication_provider(self) -> ProviderCommunicationProvider:
         if not self._communication_provider:
             comm_type = (settings.COMMUNICATION_PROVIDER or "mock").lower()
-            if comm_type == "twilio":
+            if comm_type == "mock":
+                self._communication_provider = MockCommunicationProvider()
+            elif comm_type == "twilio":
                 from app.integrations.communication.twilio import TwilioVoiceAdapter
                 self._communication_provider = TwilioVoiceAdapter(
                     account_sid=settings.TWILIO_ACCOUNT_SID,

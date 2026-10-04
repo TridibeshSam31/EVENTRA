@@ -139,6 +139,23 @@ class Settings(BaseSettings):
     GOOGLE_MAPS_SCRAPER_MAX_DEPTH: int = 5
     GOOGLE_MAPS_SCRAPER_FALLBACK_TO_MOCK: bool = True
 
+    # Remote Approval Notifications & Web Push Configuration
+    VAPID_PUBLIC_KEY: Union[str, None] = None
+    VAPID_PRIVATE_KEY: Union[str, None] = None
+    VAPID_CLAIM_EMAIL: str = "admin@eventra.local"
+
+    # Deep-link signing & Frontend base URL
+    DEEP_LINK_SECRET: Union[str, None] = None
+    FRONTEND_BASE_URL: str = "http://localhost:3000"
+
+    # Approval Reminders, Escalation & Sweeper
+    APPROVAL_REMINDER_FRACTION: float = 0.5
+    APPROVAL_ESCALATION_MINUTES: int = 15
+    APPROVAL_VOICE_ESCALATION_ENABLED: bool = False
+    APPROVAL_EXPIRY_SWEEPER_ENABLED: bool = True
+    APPROVAL_EXPIRY_INTERVAL_SECONDS: int = 60
+    APPROVAL_LOW_RISK_THRESHOLD: float = 1000.0
+
     model_config = SettingsConfigDict(
         env_file=(".env", "../../.env", "../.env"),
         env_file_encoding="utf-8",

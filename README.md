@@ -124,7 +124,26 @@ To maintain laser focus on operational resilience, EVENTRA strictly defines its 
   - *Tier 3 (Locked Invariant):* Life-safety, maximum physical venue capacity, and legal requirements can never be overridden by AI.
 - **Immutable Audit Trail:** Complete tamper-evident record of all AI decisions, coordinator overrides, and state changes.
 
-### 6. 🧪 Authentic Simulation Lab
+### 6. 📲 Remote Approval Notifications (Zero-Laptop Mobile Operations)
+When the operations agent requires human approval, event organizers are notified instantly on mobile and can authorize or reject decisions on the go without sitting at a laptop:
+
+- **Multi-Channel Notification Fanout:** Fault-isolated delivery across **In-App Notification Ledger**, **WhatsApp (OpenWA)**, and **Web Push (VAPID / Service Worker)**.
+- **Two-Way WhatsApp Approval:**
+  - Real-time messages with impact tier (`CRITICAL`, `MAJOR`, `MINOR`), cost delta, and a unique 4-character reply code (e.g. `YES K9P2`, `NO K9P2`).
+  - Supports English and Hindi/Hinglish reply intents (`yes`, `no`, `approve`, `reject`, `haan`, `nahi`, `theek hai`, `krdo`, `mat karo`).
+  - Inbound webhook verifies OpenWA HMAC signatures fail-closed, tracks message IDs for idempotency, verifies real approver eligibility and state freshness (`STALE` guard), and falls back seamlessly to vendor negotiation for non-organizer numbers.
+- **Signed One-Tap Deep Links:**
+  - HMAC-SHA256 signed URLs (`/events/{eventId}/approvals/{approvalId}?token=...`) with 2-hour TTL.
+  - Enables authorized organizers to securely review full diffs, cost impacts, and blast radius on mobile browsers and submit decisions directly.
+- **Web Push Progressive Web App (PWA):**
+  - Instant push notifications delivered to phones even when browser tabs are closed.
+  - Interactive notification click-throughs navigate straight to the relevant approval request.
+- **Automated Expiry, Sweeper & Escalation:**
+  - Strict TTLs enforced per impact tier (`CRITICAL`: 15 min, `MAJOR`: 30 min, `MINOR`: 60 min, `LOW`: suppressed from outbound push/SMS).
+  - Approvals **never auto-approve** on timeout; expired approvals transition to `EXPIRED` and trigger the agent to replan alternatives.
+  - Background sweeper sweeps pending approvals every 30s: dispatches reminders at 50% TTL, escalates to the Main Organizer at 75% TTL, and can trigger an urgent voice call for `CRITICAL` approvals.
+
+### 7. 🧪 Authentic Simulation Lab
 - Injects non-mocked, legitimate incident payloads to test system resilience:
   1. **Vendor No-Show:** Critical catering/AV supplier cancels 2 hours before curtain; engine calculates impact, locates backup vendors via OSM/Google Maps, negotiates rates via voice/WhatsApp, and routes approval.
   2. **Venue Emergency:** Downpour or electrical fault renders outdoor stage unusable; system calculates spatial delta, checks indoor hall capacity, shifts timeline, and alerts stakeholders.
@@ -370,6 +389,30 @@ The agent streams raw bidirectional audio to live telephone networks using Gemin
    EXOTEL_CALLER_ID=your_exotel_virtual_number
    EXOTEL_STREAM_URL=wss://<your-tunnel-subdomain>/api/v1/voice/exotel/stream
    ```
+
+### 3. Web Push Notifications (VAPID)
+1. Generate VAPID key pair (or use existing):
+   ```bash
+   npx web-push generate-vapid-keys
+   ```
+2. Configure `.env`:
+   ```dotenv
+   VAPID_PUBLIC_KEY=your_vapid_public_key
+   VAPID_PRIVATE_KEY=your_vapid_private_key
+   VAPID_CLAIM_EMAIL=mailto:admin@eventra.local
+   APPROVAL_DEEP_LINK_SECRET=your_secure_random_key_min_32_chars
+   APPROVAL_EXPIRY_SWEEPER_ENABLED=true
+   ```
+
+### 4. Configuration Matrix (Out-of-the-Box vs Real Credentials)
+| Capability | `COMMUNICATION_PROVIDER=mock` (Default) | Real Credentials Required |
+| :--- | :--- | :--- |
+| **In-App Approvals & Ledger** | Works out of the box (Local DB) | None |
+| **Signed Deep Link Review** | Works out of the box (`APPROVAL_DEEP_LINK_SECRET`) | None (uses local secret) |
+| **WhatsApp Notifications & Replies** | Dispatches to memory log; simulated inbound webhook | OpenWA Docker container (`OPENWA_*`) |
+| **Web Push Notifications** | In-memory push adapter (simulated) | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `pywebpush` |
+| **AI Voice Telephony & Escalation** | Mock call dispatch | Twilio or Exotel credentials + Public Tunnel |
+| **Approval Expiry & Escalation Sweeper** | Background asyncio loop runs every 30s | None |
 
 ---
 

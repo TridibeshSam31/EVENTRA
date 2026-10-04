@@ -27,6 +27,8 @@ settings.LLM_PROVIDER = "mock"
 settings.COMMUNICATION_PROVIDER = "mock"
 settings.EXOTEL_ENABLED = False
 settings.OPENWA_ENABLED = False
+settings.TWILIO_ENABLED = False
+settings.APPROVAL_EXPIRY_SWEEPER_ENABLED = False
 if not settings.EXOTEL_STREAM_URL:
     settings.EXOTEL_STREAM_URL = "wss://test.stream.eventra.ai/stream"
 settings.GEMINI_LIVE_MODEL = "gemini-3.8-live"
