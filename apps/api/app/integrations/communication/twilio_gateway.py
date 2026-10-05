@@ -191,6 +191,16 @@ class TwilioVoiceGateway:
         """Registers a factory function creating an AudioStreamListener per incoming call."""
         self._listener_factory = factory
 
+    def stop_session(self, call_sid: str) -> bool:
+        """Finds active session by call_sid or session_id and transitions to STOPPED."""
+        found = False
+        for s in list(self._sessions.values()):
+            if s.call_sid == call_sid or s.session_id == call_sid or s.stream_sid == call_sid:
+                s.state = TwilioSessionState.STOPPED
+                s.stopped_at = time.time()
+                found = True
+        return found
+
     async def handle_connection(self, websocket: Any) -> None:
         """Entrypoint for a new Twilio Media Streams WebSocket connection."""
         if hasattr(websocket, "accept"):

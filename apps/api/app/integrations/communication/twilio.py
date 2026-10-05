@@ -226,6 +226,100 @@ class TwilioVoiceAdapter(ProviderCommunicationProvider):
             res.error = err_msg
             return res
 
+    def hangup_call(
+        self,
+        call_sid: str,
+        reason: Optional[str] = "MANUAL_TAKEOVER",
+    ) -> IntegrationResult[Dict[str, Any]]:
+        """Ends an in-progress Twilio telephony call by updating its status to 'completed'."""
+        start_time = time.time()
+
+        # Stop local media streams WebSocket session if active
+        try:
+            from app.integrations.communication.twilio_gateway import twilio_voice_gateway
+            twilio_voice_gateway.stop_session(call_sid)
+        except Exception as gw_err:
+            logger.debug("Twilio gateway session stop error: %s", gw_err)
+
+        if not self.is_configured:
+            err_msg = "Twilio credentials not configured (TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_CALLER_NUMBER)."
+            logger.error("Twilio hangup_call failed: %s", err_msg)
+            return IntegrationResult(
+                data={"call_sid": call_sid, "status": "FAILED", "reason": reason},
+                source=IntegrationSource.REAL,
+                success=False,
+                error=err_msg,
+            )
+
+        # 1. Try using official Twilio SDK if available
+        try:
+            from twilio.rest import Client
+            client = Client(self.account_sid, self.auth_token)
+            call = client.calls(call_sid).update(status="completed")
+            latency = round((time.time() - start_time) * 1000, 2)
+            call_status = getattr(call, "status", "completed") or "completed"
+            return IntegrationResult(
+                data={
+                    "call_sid": getattr(call, "sid", call_sid),
+                    "status": call_status,
+                    "reason": reason,
+                    "direction": "outbound-api",
+                    "timestamp": time.time(),
+                },
+                source=IntegrationSource.REAL,
+                success=True,
+                latency_ms=latency,
+            )
+        except Exception as twilio_sdk_err:
+            logger.warning(
+                "Twilio SDK call hangup encountered error: %s. Attempting direct HTTP fallback.",
+                twilio_sdk_err,
+            )
+
+        # 2. Direct HTTP Basic Auth fallback to Twilio API
+        api_url = f"https://api.twilio.com/2010-04-01/Accounts/{self.account_sid}/Calls/{call_sid}.json"
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as http_client:
+                resp = http_client.post(
+                    api_url,
+                    data={"Status": "completed"},
+                    auth=(self.account_sid, self.auth_token),
+                )
+                latency = round((time.time() - start_time) * 1000, 2)
+                if resp.status_code in (200, 201):
+                    resp_json = resp.json()
+                    return IntegrationResult(
+                        data={
+                            "call_sid": resp_json.get("sid", call_sid),
+                            "status": resp_json.get("status", "completed"),
+                            "reason": reason,
+                            "direction": "outbound-api",
+                            "timestamp": time.time(),
+                        },
+                        source=IntegrationSource.REAL,
+                        success=True,
+                        latency_ms=latency,
+                    )
+                else:
+                    err_msg = f"Twilio API call hangup returned HTTP {resp.status_code}: {resp.text}"
+                    logger.error(err_msg)
+                    return IntegrationResult(
+                        data={"call_sid": call_sid, "status": "FAILED", "reason": reason},
+                        source=IntegrationSource.REAL,
+                        success=False,
+                        error=err_msg,
+                        latency_ms=latency,
+                    )
+        except Exception as http_err:
+            err_msg = f"Twilio API hangup request failed: {http_err}"
+            logger.error(err_msg)
+            return IntegrationResult(
+                data={"call_sid": call_sid, "status": "FAILED", "reason": reason},
+                source=IntegrationSource.REAL,
+                success=False,
+                error=err_msg,
+            )
+
     def send_message(
         self,
         event_id: str,

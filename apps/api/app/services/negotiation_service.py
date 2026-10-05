@@ -629,9 +629,10 @@ class NegotiationService:
         """Transfers negotiation authority from AGENT to HUMAN organizer.
         
         Guarantees:
-        - Sets negotiation_control to 'HUMAN'
+        - Sets negotiation_control to 'HUMAN' (even if call hangup fails)
         - Records user ID and timestamp
-        - Terminates any active voice call immediately
+        - Terminates any active voice call immediately via Twilio gateway
+        - If hangup fails, returns 'could not end call, agent paused instead'
         - Emits 'control_changed' on negotiation_broker
         - Records authoritative audit record NEGOTIATION_TAKEOVER
         """
@@ -641,7 +642,8 @@ class NegotiationService:
         assignment.control_changed_by = user_id
         assignment.control_changed_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        self._hangup_active_call_if_any(assignment, reason="MANUAL_TAKEOVER", user_id=user_id)
+        hangup_results = self._hangup_active_call_if_any(assignment, reason="MANUAL_TAKEOVER", user_id=user_id)
+        hangup_failed = any(not r.success for r in hangup_results) if hangup_results else False
 
         self._audit.record(
             event_id=assignment.event_id,
@@ -655,6 +657,7 @@ class NegotiationService:
                 "previous_control": prev_control,
                 "negotiation_control": "HUMAN",
                 "control_changed_by": user_id,
+                "hangup_failed": hangup_failed,
             },
         )
         self.db.commit()
@@ -669,7 +672,14 @@ class NegotiationService:
                 "changed_by": user_id,
                 "timestamp": time.time(),
                 "status": assignment.negotiation_status,
+                "hangup_failed": hangup_failed,
             },
+        )
+
+        msg = (
+            "could not end call, agent paused instead"
+            if hangup_failed
+            else "Manual takeover successful. Agent paused. Outbound messages now sent by organizer."
         )
 
         return {
@@ -678,7 +688,8 @@ class NegotiationService:
             "control_changed_by": assignment.control_changed_by,
             "control_changed_at": assignment.control_changed_at.isoformat() if assignment.control_changed_at else None,
             "status": assignment.negotiation_status,
-            "message": "Manual takeover successful. Agent paused. Outbound messages now sent by organizer.",
+            "message": msg,
+            "hangup_success": False if hangup_failed else (True if hangup_results else None),
         }
 
     def resume(self, assignment_id: str, user_id: str = "organizer") -> Dict[str, Any]:
@@ -737,8 +748,10 @@ class NegotiationService:
     def cancel(self, assignment_id: str, user_id: str = "organizer", reason: Optional[str] = None) -> Dict[str, Any]:
         """Stops negotiation and marks assignment DECLINED / CANCELLED using existing state machine."""
         assignment = self._get_assignment(assignment_id)
+        assignment.negotiation_control = "HUMAN"
 
-        self._hangup_active_call_if_any(assignment, reason="NEGOTIATION_CANCELLED", user_id=user_id)
+        hangup_results = self._hangup_active_call_if_any(assignment, reason="NEGOTIATION_CANCELLED", user_id=user_id)
+        hangup_failed = any(not r.success for r in hangup_results) if hangup_results else False
 
         assignment.negotiation_status = NegotiationStatus.DECLINED.value
         assignment.status = "CANCELLED"
@@ -756,6 +769,7 @@ class NegotiationService:
                 "negotiation_status": assignment.negotiation_status,
                 "status": assignment.status,
                 "reason": reason or "Cancelled by organizer",
+                "hangup_failed": hangup_failed,
             },
         )
         self.db.commit()
@@ -770,35 +784,60 @@ class NegotiationService:
                 "action": "CANCELLED",
                 "reason": reason or "Cancelled by organizer",
                 "timestamp": time.time(),
+                "hangup_failed": hangup_failed,
             },
+        )
+
+        msg = (
+            "could not end call, agent paused instead"
+            if hangup_failed
+            else f"Negotiation cancelled by organizer. {reason or ''}".strip()
         )
 
         return {
             "assignment_id": assignment.id,
-            "negotiation_status": assignment.negotiation_status,
+            "negotiation_control": assignment.negotiation_control,
             "status": assignment.status,
-            "message": f"Negotiation cancelled by organizer. {reason or ''}".strip(),
+            "message": msg,
+            "hangup_success": False if hangup_failed else (True if hangup_results else None),
         }
 
-    def _hangup_active_call_if_any(self, assignment: VendorAssignment, reason: str, user_id: str) -> None:
+    def _hangup_active_call_if_any(self, assignment: VendorAssignment, reason: str, user_id: str) -> List[Any]:
         """Attempts to hang up any active call on this vendor/assignment via telephony gateway."""
+        results = []
         try:
-            from app.integrations.communication.exotel_gateway import voice_gateway, SessionState
-            for session in list(voice_gateway._active_sessions.values()):
+            from app.integrations.communication.twilio_gateway import twilio_voice_gateway, TwilioSessionState
+            for session in list(twilio_voice_gateway._sessions.values()):
                 if (
                     session.session_id == assignment.id
                     or session.custom_parameters.get("assignment_id") == assignment.id
                     or session.custom_parameters.get("provider_id") == assignment.vendor_id
                 ):
-                    session.state = SessionState.CANCELLED
-                    self._comm.hangup_call(
-                        session.call_sid or session.session_id,
+                    session.state = TwilioSessionState.STOPPED
+                    call_id = session.call_sid or session.session_id
+                    res = self._comm.hangup_call(
+                        call_id,
                         reason=reason,
                         actor_id=user_id,
                         event_id=assignment.event_id,
                     )
+                    results.append(res)
         except Exception as e:
-            logger.debug("No active voice call to hang up or gateway not initialized: %s", e)
+            logger.debug("Twilio session hangup lookup error: %s", e)
+
+        # Also check if assignment metadata/summary records an active call_sid
+        if assignment.provider_response_summary and isinstance(assignment.provider_response_summary, dict):
+            stored_call_sid = assignment.provider_response_summary.get("call_sid")
+            if stored_call_sid and not any(r.data and r.data.get("call_sid") == stored_call_sid for r in results):
+                res = self._comm.hangup_call(
+                    stored_call_sid,
+                    reason=reason,
+                    actor_id=user_id,
+                    event_id=assignment.event_id,
+                )
+                results.append(res)
+
+        return results
 
     def request_approval(
         self,

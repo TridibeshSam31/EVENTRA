@@ -59,6 +59,7 @@ export interface NegotiationActionResponse {
   control_changed_at?: string | null;
   status: string;
   message: string;
+  hangup_success?: boolean | null;
 }
 
 export async function getLiveNegotiation(

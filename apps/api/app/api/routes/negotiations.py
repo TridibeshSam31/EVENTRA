@@ -42,6 +42,11 @@ router = APIRouter(prefix="/events", tags=["Negotiations"])
 
 def verify_organizer_role(db: Session, event_id: str, user_id: str) -> Event:
     """Verifies that the caller has authoritative organizer role for the event."""
+    if not user_id or user_id == "anonymous_operator":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authentication required: anonymous operator is not authorized.",
+        )
     auth_service = AuthorizationService(db)
     try:
         event = auth_service.get_event(event_id)
@@ -93,6 +98,7 @@ def take_over_negotiation(
             control_changed_at=result.get("control_changed_at"),
             status=result["status"],
             message=result["message"],
+            hangup_success=result.get("hangup_success"),
         )
     except NotFoundException as nfe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(nfe))
@@ -168,6 +174,7 @@ def cancel_negotiation(
             control_changed_at=result.get("control_changed_at"),
             status=result["status"],
             message=result["message"],
+            hangup_success=result.get("hangup_success"),
         )
     except NotFoundException as nfe:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(nfe))
@@ -520,6 +527,7 @@ async def stream_negotiation_events(
     assignment_id: Optional[str] = Query(None, description="Optional filter by assignment ID"),
     since: Optional[int] = Query(None, description="Cursor for historical replay"),
     last_event_id: Optional[str] = Header(None, alias="Last-Event-ID"),
+    max_frames: Optional[int] = Query(None, description="Cap on SSE frames for controlled streaming or testing"),
     db: Session = Depends(get_db_session),
     current_user_id: str = Depends(get_current_user_id),
 ):
@@ -545,6 +553,7 @@ async def stream_negotiation_events(
         since_cursor = str(since)
 
     async def event_generator():
+        frames_sent = 0
         # 1. Replay historical events if cursor requested
         if since_cursor is not None:
             history = negotiation_broker.get_history_since(
@@ -557,6 +566,9 @@ async def stream_negotiation_events(
                 evt_id = ev.get("id", "")
                 payload = eventra_json_dumps(ev.get("data", {}))
                 yield f"id: {evt_id}\nevent: {evt_type}\ndata: {payload}\n\n"
+                frames_sent += 1
+                if max_frames and frames_sent >= max_frames:
+                    return
 
         # 2. Subscribe to real-time broker
         queue = await negotiation_broker.subscribe(event_id=event_id, assignment_id=assignment_id)
@@ -571,6 +583,9 @@ async def stream_negotiation_events(
                 }
             )
             yield f"event: connected\ndata: {init_frame}\n\n"
+            frames_sent += 1
+            if max_frames and frames_sent >= max_frames:
+                return
 
             while True:
                 try:
@@ -579,6 +594,9 @@ async def stream_negotiation_events(
                     evt_id = event_msg.get("id", "")
                     payload = eventra_json_dumps(event_msg.get("data", {}))
                     yield f"id: {evt_id}\nevent: {evt_type}\ndata: {payload}\n\n"
+                    frames_sent += 1
+                    if max_frames and frames_sent >= max_frames:
+                        return
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
         except asyncio.CancelledError:

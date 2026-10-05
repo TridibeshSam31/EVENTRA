@@ -60,6 +60,7 @@ class NegotiationActionResponse(BaseModel):
     control_changed_at: Optional[str] = None
     status: str
     message: str
+    hangup_success: Optional[bool] = None
 
 
 class NegotiationCancelRequest(BaseModel):

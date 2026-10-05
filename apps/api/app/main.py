@@ -99,7 +99,7 @@ def log_startup_adapter_status():
     if comm_is_mock:
         warning_lines = [
             "!" * 80,
-            "⚠️  CRITICAL WARNING: VENDOR COMMUNICATION PROVIDER IS IN MOCK MODE!",
+            "[!] CRITICAL WARNING: VENDOR COMMUNICATION PROVIDER IS IN MOCK MODE!",
             "    Outbound vendor contact (WhatsApp messages / phone calls) WILL NOT REACH",
             "    real vendors. All dispatch calls will silently succeed in local memory.",
             "    To contact real vendors:",
@@ -112,11 +112,17 @@ def log_startup_adapter_status():
         ]
         for w in warning_lines:
             logger.warning(w)
-            print(w)
+            try:
+                print(w)
+            except (UnicodeEncodeError, OSError):
+                print(w.encode("ascii", errors="replace").decode("ascii"))
 
     for line in banner_lines:
         logger.info(line)
-        print(line)
+        try:
+            print(line)
+        except (UnicodeEncodeError, OSError):
+            print(line.encode("ascii", errors="replace").decode("ascii"))
 
 
 @asynccontextmanager

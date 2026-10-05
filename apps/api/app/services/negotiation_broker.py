@@ -39,8 +39,21 @@ class NegotiationEventBroker:
         self._event_history: Dict[str, List[Dict[str, Any]]] = {}
         self._event_counter: int = 0
         self._max_history: int = max_history_per_assignment
-        self._lock = asyncio.Lock()
+        self._active_lock: Optional[asyncio.Lock] = None
+        self._lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+
+    @property
+    def _lock(self) -> asyncio.Lock:
+        loop = None
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        if self._active_lock is None or self._lock_loop != loop:
+            self._active_lock = asyncio.Lock()
+            self._lock_loop = loop
+        return self._active_lock
 
     @classmethod
     def get_instance(cls) -> "NegotiationEventBroker":

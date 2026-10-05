@@ -391,3 +391,170 @@ def test_demo_simulation_flow(
     assert test_assignment.quoted_amount is not None
     # Verified: final quote sits safely under or equal to max_approved_amount
     assert test_assignment.quoted_amount <= test_assignment.max_approved_amount
+
+
+# --------------------------------------------------------------------------
+# 10. Twilio Voice Adapter Hangup Call (Success & Error Handling)
+# --------------------------------------------------------------------------
+
+def test_twilio_hangup_call_success_and_error(monkeypatch, db_session: Session, test_event: Event):
+    """Verifies TwilioVoiceAdapter.hangup_call ends call via Twilio client and handles API errors."""
+    from unittest.mock import MagicMock
+    from app.integrations.communication.twilio import TwilioVoiceAdapter
+    from app.services.provider_communication_service import ProviderCommunicationService
+    from app.models.audit import AuditRecord
+
+    adapter = TwilioVoiceAdapter(
+        account_sid="ACtest1234567890",
+        auth_token="auth_token_xyz",
+        caller_number="+14155550100",
+    )
+
+    # 1. Success case: Twilio API updates status to completed
+    mock_call_obj = MagicMock()
+    mock_call_obj.sid = "CA_success_sid"
+    mock_call_obj.status = "completed"
+
+    mock_client_instance = MagicMock()
+    mock_client_instance.calls.return_value.update.return_value = mock_call_obj
+
+    def mock_twilio_client_class(*args, **kwargs):
+        return mock_client_instance
+
+    monkeypatch.setattr("twilio.rest.Client", mock_twilio_client_class)
+
+    res_success = adapter.hangup_call("CA_success_sid", reason="MANUAL_TAKEOVER")
+    assert res_success.success is True
+    assert res_success.data["status"] == "completed"
+    assert res_success.data["call_sid"] == "CA_success_sid"
+
+    # 2. Error case: Twilio API returns error
+    mock_client_instance.calls.return_value.update.side_effect = RuntimeError("Twilio Gateway Timeout 504")
+
+    # Also make sure direct HTTP fallback returns error
+    res_error = adapter.hangup_call("CA_error_sid", reason="MANUAL_TAKEOVER")
+    assert res_error.success is False
+    assert res_error.data["status"] == "FAILED"
+    assert "Twilio" in res_error.error
+
+    # 3. ProviderCommunicationService audits both attempt and outcome
+    comm_service = ProviderCommunicationService(db_session)
+    comm_service._provider = adapter
+
+    comm_service.hangup_call(
+        "CA_audit_test",
+        reason="ORGANIZER_TAKEOVER",
+        actor_id="organizer_alice",
+        event_id=test_event.id,
+    )
+
+    records = (
+        db_session.query(AuditRecord)
+        .filter(AuditRecord.event_id == test_event.id, AuditRecord.target_id == "CA_audit_test")
+        .all()
+    )
+    actions = [r.action for r in records]
+    assert "PROVIDER_CALL_TERMINATE_ATTEMPT" in actions
+    assert "PROVIDER_CALL_TERMINATION_FAILED" in actions or "PROVIDER_CALL_TERMINATED" in actions
+
+
+# --------------------------------------------------------------------------
+# 11. ProviderCommunicationService: No Fake Success Fallback
+# --------------------------------------------------------------------------
+
+def test_provider_hangup_no_fallback_to_mock_fake_success(monkeypatch, db_session: Session, test_event: Event):
+    """When a real provider lacks or fails hangup_call, never fall back to Mock provider fake success."""
+    from app.services.provider_communication_service import ProviderCommunicationService
+    from app.integrations.base import ProviderCommunicationProvider
+
+    class UnsupportedProvider(ProviderCommunicationProvider):
+        def make_call(self, *args, **kwargs):
+            pass
+        def send_message(self, *args, **kwargs):
+            pass
+        def get_messages(self, *args, **kwargs):
+            return []
+        def receive_inbound(self, *args, **kwargs):
+            pass
+        def check_health(self):
+            return {}
+
+    comm_service = ProviderCommunicationService(db_session)
+    comm_service._provider = UnsupportedProvider()
+
+    res = comm_service.hangup_call("CA_unsupported", reason="TEST", actor_id="alice", event_id=test_event.id)
+    assert res.success is False
+    assert res.data["status"] == "FAILED"
+
+
+# --------------------------------------------------------------------------
+# 12. Take-over & Cancel Set HUMAN Control When Hangup Fails
+# --------------------------------------------------------------------------
+
+def test_takeover_and_cancel_when_hangup_fails(monkeypatch, db_session: Session, test_event: Event, test_assignment: VendorAssignment):
+    """Takeover and cancel must still set HUMAN control even when hangup fails, and return warning message."""
+    from app.integrations.base import IntegrationResult, IntegrationSource
+
+    service = NegotiationService(db_session)
+    # Simulate an active call on the assignment
+    test_assignment.provider_response_summary = {"call_sid": "CA_active_call_123"}
+    db_session.commit()
+
+    # Mock hangup_call on the communication service to fail
+    def mock_failing_hangup(call_sid, **kwargs):
+        return IntegrationResult(
+            data={"call_sid": call_sid, "status": "FAILED"},
+            source=IntegrationSource.REAL,
+            success=False,
+            error="Twilio upstream timeout",
+        )
+
+    monkeypatch.setattr(service._comm, "hangup_call", mock_failing_hangup)
+
+    # 1. Take over
+    takeover_res = service.take_over(test_assignment.id, user_id="organizer_alice")
+    db_session.refresh(test_assignment)
+
+    # Control must STILL be flipped to HUMAN
+    assert test_assignment.negotiation_control == "HUMAN"
+    assert takeover_res["negotiation_control"] == "HUMAN"
+    assert takeover_res["hangup_success"] is False
+    assert "could not end call, agent paused instead" in takeover_res["message"]
+
+    # 2. Cancel
+    cancel_res = service.cancel(test_assignment.id, user_id="organizer_alice", reason="Emergency cancel")
+    db_session.refresh(test_assignment)
+
+    # Control must STILL be HUMAN and status CANCELLED
+    assert test_assignment.negotiation_control == "HUMAN"
+    assert test_assignment.status == "CANCELLED"
+    assert cancel_res["hangup_success"] is False
+    assert "could not end call, agent paused instead" in cancel_res["message"]
+
+
+# --------------------------------------------------------------------------
+# 13. SSE Stream Authorization Headers
+# --------------------------------------------------------------------------
+
+def test_sse_stream_auth_header_and_role_checks(test_client: TestClient, db_session: Session, test_event: Event):
+    """Verifies that SSE stream endpoint verifies organizer role via headers."""
+    # 1. Anonymous user fails role check
+    resp_anon = test_client.get(
+        f"/api/events/{test_event.id}/negotiations/stream",
+    )
+    assert resp_anon.status_code == 403
+
+    # 2. Non-member user fails role check
+    resp_stranger = test_client.get(
+        f"/api/events/{test_event.id}/negotiations/stream",
+        headers={"x-user-id": "stranger_user"},
+    )
+    assert resp_stranger.status_code == 403
+
+    # 3. Valid organizer connects with 200 OK (capped at 1 frame for test isolation)
+    resp_valid = test_client.get(
+        f"/api/events/{test_event.id}/negotiations/stream?max_frames=1",
+        headers={"x-user-id": "organizer_alice"},
+    )
+    assert resp_valid.status_code == 200
+    assert "event: connected" in resp_valid.text

@@ -7,7 +7,7 @@ import logging
 from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
-from app.integrations.base import IntegrationResult
+from app.integrations.base import IntegrationResult, IntegrationSource
 from app.observability.audit import AuditRecorder
 
 logger = logging.getLogger(__name__)
@@ -223,23 +223,62 @@ class ProviderCommunicationService:
         event_id: Optional[str] = None,
     ) -> IntegrationResult[Dict[str, Any]]:
         """Terminates an in-progress telephony call to a provider/vendor."""
-        provider = self._resolve_provider()
-        if hasattr(provider, "hangup_call"):
-            result = provider.hangup_call(call_sid, reason=reason)
-        else:
-            from app.integrations.communication.mock import MockCommunicationProvider
-            result = MockCommunicationProvider().hangup_call(call_sid, reason=reason)
-
+        # 1. Audit termination attempt
         if self._audit and event_id:
             self._audit.record(
                 event_id=event_id,
                 actor_id=actor_id or "system",
                 actor_type="ORGANIZER" if actor_id else "SYSTEM",
-                action="PROVIDER_CALL_TERMINATED",
+                action="PROVIDER_CALL_TERMINATE_ATTEMPT",
                 action_type="COMMUNICATION",
                 target_type="CALL",
                 target_id=call_sid,
-                after_state={"call_sid": call_sid, "reason": reason, "success": result.success},
+                after_state={"call_sid": call_sid, "reason": reason},
+            )
+
+        provider = self._provider
+        try:
+            if hasattr(provider, "hangup_call"):
+                result = provider.hangup_call(call_sid, reason=reason)
+            else:
+                result = IntegrationResult(
+                    data={"call_sid": call_sid, "status": "FAILED", "reason": reason},
+                    source=IntegrationSource.REAL,
+                    success=False,
+                    error=f"Provider {provider.__class__.__name__} does not support hangup_call",
+                )
+        except NotImplementedError:
+            result = IntegrationResult(
+                data={"call_sid": call_sid, "status": "FAILED", "reason": reason},
+                source=IntegrationSource.REAL,
+                success=False,
+                error=f"Provider {provider.__class__.__name__} does not support hangup_call",
+            )
+        except Exception as e:
+            result = IntegrationResult(
+                data={"call_sid": call_sid, "status": "FAILED", "reason": reason},
+                source=IntegrationSource.REAL,
+                success=False,
+                error=f"Error terminating call on {provider.__class__.__name__}: {str(e)}",
+            )
+
+        # 2. Audit termination outcome
+        if self._audit and event_id:
+            self._audit.record(
+                event_id=event_id,
+                actor_id=actor_id or "system",
+                actor_type="ORGANIZER" if actor_id else "SYSTEM",
+                action="PROVIDER_CALL_TERMINATED" if result.success else "PROVIDER_CALL_TERMINATION_FAILED",
+                action_type="COMMUNICATION",
+                target_type="CALL",
+                target_id=call_sid,
+                after_state={
+                    "call_sid": call_sid,
+                    "reason": reason,
+                    "success": result.success,
+                    "status": (result.data or {}).get("status", "COMPLETED" if result.success else "FAILED"),
+                    "error": result.error,
+                },
             )
         return result
 

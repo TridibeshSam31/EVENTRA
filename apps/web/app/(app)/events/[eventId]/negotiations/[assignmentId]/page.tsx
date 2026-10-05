@@ -37,6 +37,7 @@ import {
   LiveNegotiationTimeline,
   NegotiationMessage,
 } from "@/lib/api/negotiations";
+import { getOperatorId } from "@/lib/api/client";
 import { getEvent } from "@/lib/api/events";
 import type { EventResponse } from "@/types/api";
 import { EventShell } from "@/components/v2/EventShell";
@@ -53,6 +54,7 @@ export default function LiveNegotiationPage() {
   const [loading, setLoading] = useState(true);
   const [streamConnected, setStreamConnected] = useState(false);
   const [connectionState, setConnectionState] = useState<"LIVE" | "CONNECTING" | "OFFLINE">("CONNECTING");
+  const [hangupWarning, setHangupWarning] = useState<string | null>(null);
 
   // Interaction State
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -102,21 +104,103 @@ export default function LiveNegotiationPage() {
     fetchSnapshot();
   }, [fetchSnapshot]);
 
-  // 2. Setup Server-Sent Events (SSE) Stream with Auto-Reconnect & Polling Fallback
+  // 2. Setup Server-Sent Events (SSE) Stream via fetch-based reader with Auto-Reconnect & Polling Fallback
   useEffect(() => {
     if (!eventId || !assignmentId) return;
 
     let isMounted = true;
     let fallbackInterval: NodeJS.Timeout | null = null;
+    let reconnectTimeout: NodeJS.Timeout | null = null;
+    let abortController: AbortController | null = null;
 
-    const connectSSE = () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
+    const handleEventPayload = (eventType: string, rawData: string) => {
+      if (!isMounted) return;
+      try {
+        const data = JSON.parse(rawData);
+
+        if (eventType === "message_added") {
+          setTimeline((prev) => {
+            if (!prev) return prev;
+            const exists = prev.messages.some((m) => m.id === data.id);
+            if (exists) return prev;
+            const newMessages = [...prev.messages, data].sort((a, b) => a.timestamp - b.timestamp);
+            return {
+              ...prev,
+              messages: newMessages,
+            };
+          });
+          setTimeout(scrollToBottom, 50);
+        } else if (eventType === "quote_updated") {
+          setTimeline((prev) => (prev ? { ...prev, latest_vendor_quote: data.quoted_amount } : prev));
+        } else if (eventType === "counter_sent") {
+          setTimeline((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  latest_agent_counter: data.counter_amount,
+                  round_number: data.round || prev.round_number + 1,
+                }
+              : prev
+          );
+        } else if (eventType === "control_changed") {
+          setTimeline((prev) =>
+            prev ? { ...prev, control: data.negotiation_control || data.control } : prev
+          );
+          if (data.hangup_failed) {
+            showToast("could not end call, agent paused instead", "error");
+            setHangupWarning("could not end call, agent paused instead");
+          } else {
+            showToast(`Negotiation control changed to ${data.negotiation_control || data.control}`, "info");
+          }
+        } else if (eventType === "status_changed") {
+          setTimeline((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  status: data.status || prev.status,
+                  approval_id: data.approval_id || prev.approval_id,
+                }
+              : prev
+          );
+          if (data.status === "AWAITING_APPROVAL") {
+            showToast("Negotiation reached agreement! Ready for approval.", "success");
+          }
+        } else if (eventType === "cap_blocked") {
+          showToast(
+            `Agent counter blocked: Amount exceeded budget cap of ₹${data.cap?.toLocaleString()}`,
+            "error"
+          );
+        }
+      } catch (err) {
+        console.error("Error parsing SSE frame:", err);
       }
+    };
+
+    const startPollingFallback = () => {
+      if (!fallbackInterval) {
+        fallbackInterval = setInterval(() => {
+          if (isMounted) fetchSnapshot();
+        }, 4000);
+      }
+    };
+
+    const stopPollingFallback = () => {
+      if (fallbackInterval) {
+        clearInterval(fallbackInterval);
+        fallbackInterval = null;
+      }
+    };
+
+    const readSseStream = async () => {
+      if (!isMounted) return;
+
+      if (abortController) {
+        abortController.abort();
+      }
+      abortController = new AbortController();
 
       setConnectionState("CONNECTING");
 
-      // Construct SSE URL
       const apiBase = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
       const sseUrl = new URL(`${apiBase}/events/${eventId}/negotiations/stream`);
       sseUrl.searchParams.set("assignment_id", assignmentId);
@@ -124,112 +208,98 @@ export default function LiveNegotiationPage() {
         sseUrl.searchParams.set("since", lastEventIdRef.current);
       }
 
-      const es = new EventSource(sseUrl.toString());
-      eventSourceRef.current = es;
+      const headers: Record<string, string> = {
+        Accept: "text/event-stream",
+        "x-user-id": getOperatorId(),
+      };
+      if (lastEventIdRef.current) {
+        headers["Last-Event-ID"] = lastEventIdRef.current;
+      }
 
-      es.onopen = () => {
-        if (!isMounted) return;
+      try {
+        const response = await fetch(sseUrl.toString(), {
+          headers,
+          signal: abortController.signal,
+        });
+
+        if (!response.ok || !response.body) {
+          throw new Error(`SSE stream connection failed with HTTP ${response.status}`);
+        }
+
+        // Active connection confirmed
         setStreamConnected(true);
         setConnectionState("LIVE");
-      };
+        stopPollingFallback();
 
-      const handleEvent = (event: MessageEvent, eventType: string) => {
-        if (!isMounted) return;
-        if (event.lastEventId) {
-          lastEventIdRef.current = event.lastEventId;
-        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let buffer = "";
 
-        try {
-          const data = JSON.parse(event.data);
+        while (isMounted) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-          if (eventType === "message_added") {
-            setTimeline((prev) => {
-              if (!prev) return prev;
-              const exists = prev.messages.some((m) => m.id === data.id);
-              if (exists) return prev;
-              const newMessages = [...prev.messages, data].sort((a, b) => a.timestamp - b.timestamp);
-              return {
-                ...prev,
-                messages: newMessages,
-              };
-            });
-            setTimeout(scrollToBottom, 50);
-          } else if (eventType === "quote_updated") {
-            setTimeline((prev) => (prev ? { ...prev, latest_vendor_quote: data.quoted_amount } : prev));
-          } else if (eventType === "counter_sent") {
-            setTimeline((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    latest_agent_counter: data.counter_amount,
-                    round_number: data.round || prev.round_number + 1,
-                  }
-                : prev
-            );
-          } else if (eventType === "control_changed") {
-            setTimeline((prev) =>
-              prev ? { ...prev, control: data.negotiation_control || data.control } : prev
-            );
-            showToast(`Negotiation control changed to ${data.negotiation_control}`, "info");
-          } else if (eventType === "status_changed") {
-            setTimeline((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    status: data.status || prev.status,
-                    approval_id: data.approval_id || prev.approval_id,
-                  }
-                : prev
-            );
-            if (data.status === "AWAITING_APPROVAL") {
-              showToast("Negotiation reached agreement! Ready for approval.", "success");
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split(/\r?\n\r?\n/);
+          buffer = parts.pop() || "";
+
+          for (const part of parts) {
+            if (!part.trim()) continue;
+            const lines = part.split(/\r?\n/);
+            let eventType = "message";
+            let eventIdVal = "";
+            const dataLines: string[] = [];
+
+            for (const line of lines) {
+              if (line.startsWith(":")) continue; // comment / keepalive
+              if (line.startsWith("event:")) {
+                eventType = line.slice(6).trim();
+              } else if (line.startsWith("data:")) {
+                dataLines.push(line.slice(5).trimStart());
+              } else if (line.startsWith("id:")) {
+                eventIdVal = line.slice(3).trim();
+              }
             }
-          } else if (eventType === "cap_blocked") {
-            showToast(
-              `Agent counter blocked: Amount exceeded budget cap of ₹${data.cap?.toLocaleString()}`,
-              "error"
-            );
+
+            if (eventIdVal) {
+              lastEventIdRef.current = eventIdVal;
+            }
+
+            if (dataLines.length > 0) {
+              handleEventPayload(eventType, dataLines.join("\n"));
+            }
           }
-        } catch (err) {
-          console.error("Error parsing SSE frame:", err);
         }
-      };
-
-      es.addEventListener("message_added", (e) => handleEvent(e, "message_added"));
-      es.addEventListener("quote_updated", (e) => handleEvent(e, "quote_updated"));
-      es.addEventListener("counter_sent", (e) => handleEvent(e, "counter_sent"));
-      es.addEventListener("control_changed", (e) => handleEvent(e, "control_changed"));
-      es.addEventListener("status_changed", (e) => handleEvent(e, "status_changed"));
-      es.addEventListener("cap_blocked", (e) => handleEvent(e, "cap_blocked"));
-
-      es.onerror = () => {
+      } catch (err: any) {
+        if (abortController?.signal?.aborted) return;
+        console.warn("SSE fetch reader encountered error:", err?.message || err);
+      } finally {
         if (!isMounted) return;
         setStreamConnected(false);
         setConnectionState("OFFLINE");
-        es.close();
+        startPollingFallback();
 
-        // Start fallback polling while disconnected
-        if (!fallbackInterval) {
-          fallbackInterval = setInterval(fetchSnapshot, 4000);
-        }
-
-        // Retry SSE in 5 seconds
-        setTimeout(() => {
-          if (isMounted) connectSSE();
-        }, 5000);
-      };
+        // Schedule auto-reconnect with cursor
+        reconnectTimeout = setTimeout(() => {
+          if (isMounted) {
+            readSseStream();
+          }
+        }, 3000);
+      }
     };
 
-    connectSSE();
+    // Begin stream
+    readSseStream();
 
     return () => {
       isMounted = false;
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
+      if (abortController) {
+        abortController.abort();
       }
-      if (fallbackInterval) {
-        clearInterval(fallbackInterval);
+      if (reconnectTimeout) {
+        clearTimeout(reconnectTimeout);
       }
+      stopPollingFallback();
     };
   }, [eventId, assignmentId, fetchSnapshot, scrollToBottom, showToast]);
 
@@ -238,8 +308,15 @@ export default function LiveNegotiationPage() {
     setActionLoading("takeover");
     try {
       const res = await takeOverNegotiation(eventId, assignmentId);
+      // Take-over must still set HUMAN control even when hangup fails
       setTimeline((prev) => (prev ? { ...prev, control: "HUMAN" } : prev));
-      showToast("You have taken manual control. Agent paused.", "success");
+      if (res.hangup_success === false || res.message?.toLowerCase().includes("could not end call")) {
+        showToast("could not end call, agent paused instead", "error");
+        setHangupWarning("could not end call, agent paused instead");
+      } else {
+        showToast("You have taken manual control. Agent paused.", "success");
+        setHangupWarning(null);
+      }
     } catch (err: any) {
       showToast(err?.message || "Failed to take over negotiation", "error");
     } finally {
@@ -252,6 +329,7 @@ export default function LiveNegotiationPage() {
     try {
       const res = await resumeNegotiation(eventId, assignmentId);
       setTimeline((prev) => (prev ? { ...prev, control: "AGENT" } : prev));
+      setHangupWarning(null);
       showToast("Autonomous agent resumed.", "success");
     } catch (err: any) {
       showToast(err?.message || "Failed to resume agent", "error");
@@ -264,9 +342,15 @@ export default function LiveNegotiationPage() {
     setActionLoading("cancel");
     try {
       const res = await cancelNegotiation(eventId, assignmentId, cancelReason || undefined);
-      setTimeline((prev) => (prev ? { ...prev, status: "CANCELLED" } : prev));
+      // Cancel must still set HUMAN control even when hangup fails
+      setTimeline((prev) => (prev ? { ...prev, status: "CANCELLED", control: "HUMAN" } : prev));
       setShowCancelDialog(false);
-      showToast("Negotiation cancelled.", "info");
+      if (res.hangup_success === false || res.message?.toLowerCase().includes("could not end call")) {
+        showToast("could not end call, agent paused instead", "error");
+        setHangupWarning("could not end call, agent paused instead");
+      } else {
+        showToast("Negotiation cancelled.", "info");
+      }
     } catch (err: any) {
       showToast(err?.message || "Failed to cancel negotiation", "error");
     } finally {
@@ -379,6 +463,22 @@ export default function LiveNegotiationPage() {
             {toastMessage.type === "error" && <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />}
             {toastMessage.type === "info" && <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />}
             <span>{toastMessage.text}</span>
+          </div>
+        )}
+
+        {/* Hangup Warning Alert Banner */}
+        {hangupWarning && (
+          <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-medium">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>{hangupWarning}</span>
+            </div>
+            <button
+              onClick={() => setHangupWarning(null)}
+              className="text-amber-400 hover:text-white px-2 py-0.5 rounded text-[11px] bg-amber-500/20"
+            >
+              Dismiss
+            </button>
           </div>
         )}
 
