@@ -38,6 +38,11 @@ export function AgentActivityStream({
   const [items, setItems] = useState<ActivityLogItem[]>(initialItems);
   const [loading, setLoading] = useState(false);
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   const fetchStream = useCallback(async () => {
     try {
@@ -209,11 +214,18 @@ export function AgentActivityStream({
           </div>
         ) : (
           filteredItems.map((item) => {
-            const timeStr = new Date(item.timestamp).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-            });
+            let timeStr = "";
+            if (mounted && item.timestamp) {
+              try {
+                timeStr = new Date(item.timestamp).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                  second: "2-digit",
+                });
+              } catch {
+                timeStr = "";
+              }
+            }
 
             const refLink = getRefLink(item.category, item.ref_id);
 
@@ -245,7 +257,10 @@ export function AgentActivityStream({
                       </span>
                       <ProvenanceBadge provenance={derivedProvenance} size="sm" />
                     </div>
-                    <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
+                    <span
+                      suppressHydrationWarning
+                      className="text-[10px] font-mono text-slate-400 whitespace-nowrap"
+                    >
                       {timeStr}
                     </span>
                   </div>

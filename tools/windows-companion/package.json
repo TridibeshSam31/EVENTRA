@@ -1,0 +1,13 @@
+{
+  "name": "eventra-windows-companion",
+  "version": "1.0.0",
+  "description": "EVENTRA Option A: Windows-Visible Local Browser Agent Companion",
+  "main": "companion.mjs",
+  "type": "module",
+  "scripts": {
+    "start": "node companion.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.43.0"
+  }
+}

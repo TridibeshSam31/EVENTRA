@@ -14,10 +14,14 @@ import {
   Wrench,
   Cpu,
   Layers,
+  Globe,
+  Laptop,
 } from "lucide-react";
 import Link from "next/link";
 import { ProvenanceBadge } from "./ProvenanceBadge";
 import { startOperations } from "@/lib/api/discoveryRuns";
+import { CompanionPairingModal } from "@/components/browser/CompanionPairingModal";
+import { browserCompanionApi, CompanionStatusResponse } from "@/lib/api/browserCompanion";
 
 interface AgentPanelProps {
   eventId: string;
@@ -54,6 +58,16 @@ export function AgentPanel({
 }: AgentPanelProps) {
   const [starting, setStarting] = useState(false);
   const [lastMessage, setLastMessage] = useState<string | null>(null);
+  const [isPairingOpen, setIsPairingOpen] = useState(false);
+  const [companionStatus, setCompanionStatus] = useState<CompanionStatusResponse | null>(null);
+
+  React.useEffect(() => {
+    browserCompanionApi.getStatus().then(setCompanionStatus).catch(() => {});
+    const interval = setInterval(() => {
+      browserCompanionApi.getStatus().then(setCompanionStatus).catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
+  }, []);
 
   const handleStartOperations = async () => {
     try {
@@ -221,31 +235,64 @@ export function AgentPanel({
           </Link>
         </div>
 
-        {isRunning || starting ? (
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm animate-pulse">
-            <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-            <span>{agentMessage || "Autonomous Loop Active • Sourcing & Qualifying"}</span>
-          </div>
-        ) : isWaitingForSelection ? (
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 shadow-sm">
-            <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
-            <span>{agentMessage || "Recommendations Ready • Select Preferred Options"}</span>
-          </div>
-        ) : agentStatus === "FAILED" ? (
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 shadow-sm">
-            <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-            <span>{agentMessage || "EVENTRA encountered an issue."}</span>
-          </div>
-        ) : (
-          <button
-            onClick={handleStartOperations}
-            disabled={starting}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-sm transition-all disabled:opacity-50"
+        <div className="flex items-center gap-2">
+          {companionStatus?.is_connected ? (
+            <button
+              onClick={() => setIsPairingOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm hover:bg-emerald-100 transition"
+              title="Windows Browser Companion is connected and will open visibly on desktop"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <Laptop className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Visible Desktop Ready</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setIsPairingOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 shadow-sm transition"
+              title="Click to pair with the local Windows Browser Companion"
+            >
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              <Laptop className="w-3.5 h-3.5 text-amber-700" />
+              <span>Pair Desktop Browser</span>
+            </button>
+          )}
+
+          <Link
+            href={`/browser-runtime?eventId=${eventId}`}
+            className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white border border-slate-700 shadow-sm transition-all"
+            title="Launch Headed Chromium Browser to discover venues & vendors"
           >
-            <Zap className="w-3.5 h-3.5 fill-white" />
-            <span>{isLive ? "Dispatch Autonomous Sourcing" : "Start Autonomous Operations"}</span>
-          </button>
-        )}
+            <Globe className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Browser Autonomous Agent</span>
+          </Link>
+
+          {isRunning || starting ? (
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm animate-pulse">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
+              <span>{agentMessage || "Autonomous Loop Active • Sourcing & Qualifying"}</span>
+            </div>
+          ) : isWaitingForSelection ? (
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 shadow-sm">
+              <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
+              <span>{agentMessage || "Recommendations Ready • Select Preferred Options"}</span>
+            </div>
+          ) : agentStatus === "FAILED" ? (
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 shadow-sm">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+              <span>{agentMessage || "EVENTRA encountered an issue."}</span>
+            </div>
+          ) : (
+            <button
+              onClick={handleStartOperations}
+              disabled={starting}
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-sm transition-all disabled:opacity-50"
+            >
+              <Zap className="w-3.5 h-3.5 fill-white" />
+              <span>{isLive ? "Dispatch Autonomous Sourcing" : "Start Autonomous Operations"}</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {lastMessage && (
@@ -262,6 +309,14 @@ export function AgentPanel({
           </button>
         </div>
       )}
+
+      <CompanionPairingModal
+        isOpen={isPairingOpen}
+        onClose={() => setIsPairingOpen(false)}
+        onConnected={() => {
+          browserCompanionApi.getStatus().then(setCompanionStatus).catch(() => {});
+        }}
+      />
     </div>
   );
 }
