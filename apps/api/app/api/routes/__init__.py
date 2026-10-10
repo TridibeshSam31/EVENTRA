@@ -21,3 +21,5 @@ from app.api.routes.analytics import router as analytics_router
 from app.api.routes.audit import router as audit_router
 from app.api.routes.verification import router as verification_router
 from app.api.routes.simulation import router as simulation_router
+from app.api.routes.browser_runtime import router as browser_runtime_router
+from app.api.routes.browser_agent import router as browser_agent_router

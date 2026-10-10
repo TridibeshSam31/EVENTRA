@@ -154,7 +154,10 @@ class Settings(BaseSettings):
     APPROVAL_VOICE_ESCALATION_ENABLED: bool = False
     APPROVAL_EXPIRY_SWEEPER_ENABLED: bool = True
     APPROVAL_EXPIRY_INTERVAL_SECONDS: int = 60
-    APPROVAL_LOW_RISK_THRESHOLD: float = 1000.0
+    # Browser Runtime Configuration (Phase 1)
+    BROWSER_RUNTIME_URL: str = "http://localhost:9223"
+    BROWSER_VIEWER_URL: str = "http://localhost:6080"
+    BROWSER_RUNTIME_TIMEOUT_SECONDS: int = 45
 
     model_config = SettingsConfigDict(
         env_file=(".env", "../../.env", "../.env"),

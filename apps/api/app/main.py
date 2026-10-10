@@ -30,6 +30,9 @@ from app.api.routes.shortlist import router as shortlist_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.notifications import router as notifications_router
 from app.api.routes.negotiations import router as negotiations_router
+from app.api.routes.browser_runtime import router as browser_runtime_router
+from app.api.routes.browser_agent import router as browser_agent_router
+from app.api.routes.browser_companion import router as browser_companion_router
 
 # Initialize application logging
 setup_logging()
@@ -270,6 +273,18 @@ app.include_router(notifications_router)
 # Live Negotiation Screen & Stream Routes
 app.include_router(negotiations_router, prefix=settings.API_V1_STR)
 app.include_router(negotiations_router)
+
+# Phase 1: Real Browser Runtime & Live Viewing Routes
+app.include_router(browser_runtime_router, prefix=settings.API_V1_STR)
+app.include_router(browser_runtime_router)
+
+# Phase 2: Browser Agent Execution Control & Live Event Stream Routes
+app.include_router(browser_agent_router, prefix=settings.API_V1_STR)
+app.include_router(browser_agent_router)
+
+# Option A: Windows Browser Companion Control & Hub Routes
+app.include_router(browser_companion_router, prefix=settings.API_V1_STR)
+app.include_router(browser_companion_router)
 
 
 

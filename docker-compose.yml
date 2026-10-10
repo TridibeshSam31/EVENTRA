@@ -59,11 +59,30 @@ services:
       - OPENWA_BASE_URL=${OPENWA_BASE_URL:-http://openwa:2785}
       - OPENWA_API_KEY=${OPENWA_API_KEY}
       - OPENWA_SESSION_ID=${OPENWA_SESSION_ID:-eventra_ops}
+      - BROWSER_RUNTIME_URL=${BROWSER_RUNTIME_URL:-http://browser-runtime:9223}
+      - BROWSER_VIEWER_URL=${BROWSER_VIEWER_URL:-http://localhost:6080}
     ports:
       - "8000:8000"
     volumes:
       - ./apps/api:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  browser-runtime:
+    build:
+      context: ./tools/browser-runtime
+      dockerfile: Dockerfile
+    container_name: eventra-browser-runtime
+    restart: unless-stopped
+    ports:
+      - "6080:6080"
+      - "9223:9223"
+    environment:
+      - DISPLAY=:99
+      - RESOLUTION=1280x800x24
+      - VIEWER_PORT=6080
+      - API_PORT=9223
+      - VIEWER_PUBLIC_URL=http://localhost:6080
+    shm_size: "1gb"
 
   web:
     build:

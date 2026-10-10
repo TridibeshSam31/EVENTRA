@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   History,
   FileText,
+  Globe,
   X,
 } from "lucide-react";
 
@@ -51,6 +52,7 @@ export function GlassSidebar({ onClose, className = "" }: GlassSidebarProps) {
       title: "Live Operations",
       items: [
         { label: "Live Command Cockpit", href: `/events/${eventId}/live`, icon: Radio, isLive: true },
+        { label: "Live Browser Agent", href: "/browser-runtime", icon: Globe, isLive: true },
         { label: "Comms & Vendor Calls", href: `/events/${eventId}/conversations`, icon: MessageSquare },
         { label: "Incidents & Blast Radius", href: `/events/${eventId}/incidents`, icon: AlertTriangle },
         { label: "Recovery Simulator", href: `/events/${eventId}/recovery`, icon: RotateCcw },

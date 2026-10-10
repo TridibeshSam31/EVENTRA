@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Bot,
   Activity,
@@ -56,6 +56,11 @@ export function AgentStatusCard({
   const [submitting, setSubmitting] = useState(false);
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
   const [errorFeedback, setErrorFeedback] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   // Derive authoritative agent status strictly from real backend state
   const deriveAgentStatus = (): { status: AgentOperationalState; label: string } => {
@@ -191,8 +196,8 @@ export function AgentStatusCard({
           <div className="font-semibold text-slate-900 truncate">
             {latestOperation || lastRun?.operational_intent || "Monitoring active event"}
           </div>
-          <span className="text-[10px] text-slate-400 font-mono block">
-            {lastActiveTime ? `At ${new Date(lastActiveTime).toLocaleTimeString()}` : "Active"}
+          <span suppressHydrationWarning className="text-[10px] text-slate-400 font-mono block">
+            {mounted && lastActiveTime ? `At ${new Date(lastActiveTime).toLocaleTimeString()}` : "Active"}
           </span>
         </div>
 
