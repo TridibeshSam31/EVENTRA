@@ -8,6 +8,7 @@ import { Menu, X, Bell, UserCircle, Radio, Sparkles } from "lucide-react";
 import { EventSwitcher } from "./EventSwitcher";
 import { GlassSidebar } from "./GlassSidebar";
 import { PushNotificationBanner } from "@/components/notifications";
+import { AgentRunStatusPanel } from "@/components/agent/AgentRunStatusPanel";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const params = useParams();
@@ -60,6 +61,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           {/* Right Action / System Status */}
           <div className="flex items-center space-x-2">
+            <AgentRunStatusPanel eventId={eventId} />
+
             <Link
               href={`/events/${eventId}/live`}
               className="hidden sm:inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition"

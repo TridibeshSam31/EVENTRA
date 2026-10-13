@@ -16,6 +16,7 @@ import {
 import Link from "next/link";
 import { ProvenanceBadge } from "./ProvenanceBadge";
 import { runOperationsAgent } from "@/lib/api/agent";
+import { useAgentRunStore } from "@/stores/agentRunStore";
 import type { AgentRunResponse } from "@/types/api";
 
 export type AgentOperationalState =
@@ -108,6 +109,8 @@ export function AgentStatusCard({
       });
 
       if (res) {
+        // Restore the persisted run (tool steps, approval-required state) into the shared agent panel.
+        void useAgentRunStore.getState().hydrate(eventId);
         setActionFeedback(res.response || `Agent completed with status: ${res.status}`);
         if (onRunComplete) {
           onRunComplete(res);

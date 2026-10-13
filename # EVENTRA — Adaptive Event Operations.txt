@@ -1,0 +1,15 @@
+# EVENTRA — Adaptive Event Operations
+
+
+# EVENTRA Real Browser AgentPhase 3: Real Discovery
+Headed Chromium Virtual Desktop • Live Google Search & Maps • Evidence-Backed Persistence
+[Standalone Viewer ↗](http://localhost:6080/vnc.html?autoconnect=true&resize=scale)
+
+## Real Browser-Based Venue & Vendor Discovery
+Select an authorized event to extract its actual requirements and command the browser to research candidates on Google Maps.
+
+## Discovered Candidates & Qualification Results
+No candidates discovered yet.
+Launch Browser Discovery above to instruct the real browser to search Google Maps and inspect businesses.
+
+## Live Activity Event Stream (WebSocket Telemetry)

@@ -11,6 +11,7 @@ from app.api.dependencies import get_current_user_id, get_db_session
 from app.services.live_state_service import LiveStateService
 from app.services.live_broker import live_broker
 from app.core.serialization import eventra_json_dumps
+from app.core.event_access import verify_event_access
 from app.schemas.live_state import (
     EventLiveState,
     GoLiveRequest,
@@ -118,6 +119,7 @@ async def live_stream(
     Emits an initial connection frame containing the authoritative operations snapshot
     followed by live agent, discovery, shortlist, task, and incident updates.
     """
+    verify_event_access(db, event_id, current_user_id)
     service = LiveStateService(db)
     initial_state = service.get_live_state(event_id)
 

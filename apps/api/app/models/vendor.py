@@ -24,14 +24,14 @@ class Vendor(Base):
     contact_email = Column(String(255), nullable=True)
     contact_phone = Column(String(50), nullable=True)
     website = Column(String(500), nullable=True)
-    maps_url = Column(String(500), nullable=True)
+    maps_url = Column(String(1000), nullable=True)
     base_cost = Column(Float, nullable=True)
     rating = Column(Float, nullable=True)
     review_count = Column(Integer, nullable=True)
     service_description = Column(Text, nullable=True)
     status = Column(String(50), default="ACTIVE", nullable=False, index=True)  # ACTIVE, INACTIVE, UNAVAILABLE
     source = Column(String(50), default="INTERNAL", nullable=False, index=True)  # INTERNAL, GOOGLE_MAPS, EXTERNAL_DIRECTORY
-    source_id = Column(String(255), nullable=True, index=True)  # Google Maps CID / Place ID
+    source_id = Column(String(1000), nullable=True, index=True)  # Google Maps CID / Place ID
     raw_category = Column(String(255), nullable=True)  # Raw unclassified category string from source
     capabilities = Column(JSON, default=list, nullable=True)  # Specific detected capabilities
     classification_confidence = Column(Float, nullable=True)  # Classifier confidence score

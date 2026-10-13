@@ -25,6 +25,7 @@ import {
   Sparkles,
   ShieldAlert,
   AlertTriangle,
+  Globe,
 } from "lucide-react";
 
 import { getEvent } from "@/lib/api/events";
@@ -816,6 +817,16 @@ export function DiscoveryCommand({
                 </select>
               </div>
             )}
+
+            {/* Autonomous Browser Agent Button */}
+            <Link
+              href={`/browser-runtime?eventId=${encodeURIComponent(eventId)}&category=${encodeURIComponent(category)}`}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition border border-slate-700"
+              title="Launch autonomous headed browser on Windows Companion for live web scouring"
+            >
+              <Globe className="w-3.5 h-3.5 text-rose-400" />
+              <span>Browser Agent</span>
+            </Link>
 
             {/* Start Discovery Button */}
             <button

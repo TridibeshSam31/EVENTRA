@@ -17,25 +17,13 @@ from app.services.provider_classifier import ProviderClassifier
 
 logger = logging.getLogger(__name__)
 
-# Non-vendor / Institution keywords to reject unconditionally (Priority 4b extended denylist)
-DISQUALIFIED_INSTITUTION_KEYWORDS = [
-    # Educational / training institutions
-    "institute of hotel management", "ihm", "hotel management college",
-    "hotel management institute", "catering college", "catering school",
-    "catering institute", "food technology college",
-    "training center", "training institute", "degree college",
-    "university department", "polytechnic",
-    # Government / PSU entities
-    "irctc", "railway catering", "railways", "railway",
-    "government office", "govt office", "government canteen",
-    "police station", "municipal corporation", "nagar nigam",
-    "panchayat", "cantonment board", "public health center",
-    "hospital canteen", "doordarshan", "bsnl", "ntpc", "ongc",
-    "bhel", "sail", "iocl", "gail",
-    # Associations / Federations
-    "association of", "federation of", "council of", "chamber of",
-    "trade union", "welfare society",
-]
+from app.core.institution_filter import (  # noqa: F401  (re-exported for backward compatibility)
+    DISQUALIFIED_ACRONYMS_ANY_CASE,
+    DISQUALIFIED_ACRONYMS_UPPER_ONLY,
+    DISQUALIFIED_INSTITUTION_KEYWORDS,
+    INSTITUTION_DOMAIN_SUFFIXES,
+    find_institution_marker,
+)
 
 
 class QualificationResult(BaseModel):
@@ -58,10 +46,10 @@ class QualificationEngine:
         # Check raw_data flag set by ProviderNormalizer (Priority 4b)
         if candidate.raw_data and candidate.raw_data.get("_non_commercial"):
             return True, candidate.raw_data.get("_non_commercial_reason", "Flagged as non-commercial entity")
-        combined_text = f"{candidate.name} {candidate.raw_category or ''} {' '.join(candidate.categories)} {candidate.description or ''}".lower()
-        for kw in DISQUALIFIED_INSTITUTION_KEYWORDS:
-            if kw in combined_text:
-                return True, f"Identified as non-commercial entity / institution matching '{kw}'"
+        combined_text = f"{candidate.name} {candidate.raw_category or ''} {' '.join(candidate.categories)} {candidate.description or ''}"
+        marker = find_institution_marker(combined_text, candidate.website)
+        if marker:
+            return True, f"Identified as non-commercial entity / institution matching '{marker}'"
         return False, None
 
     @classmethod

@@ -174,11 +174,26 @@ class BrowserCompanionService:
         )
 
     async def unregister_connection(self, session: CompanionSession) -> None:
-        """Cleans up a disconnected companion session."""
+        """Cleans up a disconnected companion session and updates execution state."""
         if session.websocket:
             session.websocket = None
+        exec_id = session.active_execution_id
         session.active_execution_id = None
         logger.info("Windows Browser Companion disconnected for user '%s'", session.user_id)
+        if exec_id:
+            try:
+                from app.schemas.browser_agent import AgentEventType, ExecutionStatus
+                from app.services.browser_agent_service import browser_agent_service
+                record = browser_agent_service._executions.get(exec_id)
+                if record and record.status in (ExecutionStatus.RUNNING, ExecutionStatus.STARTING):
+                    record.transition_status(ExecutionStatus.DISCONNECTED, error="Windows Browser Companion disconnected.")
+                    record.emit_event(
+                        AgentEventType.BROWSER_DISCONNECTED,
+                        "Windows Browser Companion disconnected from server.",
+                        {"execution_id": exec_id, "user_id": session.user_id},
+                    )
+            except Exception as e:
+                logger.debug("Error updating disconnected execution: %s", e)
 
     def is_companion_connected(self, user_id: str) -> bool:
         """Checks if the user has an active, connected local Windows companion."""
