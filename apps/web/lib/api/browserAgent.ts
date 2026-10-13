@@ -68,6 +68,10 @@ export interface DiscoveredCandidate {
   is_persisted: boolean;
   vendor_id?: string | null;
   is_new_vendor?: boolean | null;
+  score?: number | null;
+  rank?: number | null;
+  recommended?: boolean;
+  recommendation_reasons?: string[];
 }
 
 export interface BrowserDiscoveryRequest {

@@ -36,7 +36,12 @@ CATEGORY_KEYWORD_RULES = {
         },
     },
     "VENUE": {
-        "keywords": ["banquet hall", "resort", "convention center", "wedding lawn", "farmhouse", "party plot", "auditorium"],
+        "keywords": [
+            "banquet hall", "banquet", "banquets", "venue", "venues", "event venue",
+            "wedding venue", "marriage hall", "party hall", "resort", "hotel",
+            "convention center", "convention centre", "wedding lawn", "farmhouse",
+            "party plot", "auditorium", "community hall", "kalyana mandapam", "palace"
+        ],
         "subcategory": "EVENT_VENUE",
         "capabilities_map": {
             "lawn": "outdoor_lawn",

@@ -15,6 +15,7 @@ from app.services.activity_log_service import ActivityLogService
 from app.services.autonomous_operations_service import AutonomousOperationsService
 from app.services.negotiation_service import NegotiationService
 from app.models.enums import EventType
+from app.core.event_access import verify_event_access
 from app.core.exceptions import NotFoundException, BadRequestException
 
 logger = logging.getLogger(__name__)
@@ -562,7 +563,11 @@ def start_operations(
 ) -> Dict[str, Any]:
     """Transitions event to LIVE and initiates autonomous operations & discovery in background.
     (Decision 1: start_operations must not run discovery synchronously in the request)
+
+    Idempotent while a run is executing: returns ALREADY_RUNNING with the active run_id
+    instead of starting a second worker.
     """
+    verify_event_access(db, event_id, current_user_id)
     service = AutonomousOperationsService(db)
     try:
         init_result = service.initiate_operations_run(event_id=event_id, user_id=current_user_id)

@@ -18,6 +18,7 @@ from app.agent.state import AgentState
 from app.agent.graph import EventOperationsAgentGraph, MAX_AGENT_STEPS
 from app.agent.provider import LLMProvider, get_default_llm_provider
 from app.models.agent_run import AgentRun
+from app.services.agent_run_events import AgentRunEventRecorder, latest_event_type
 
 logger = logging.getLogger(__name__)
 
@@ -124,33 +125,88 @@ class EventOperationsAgent:
         }
 
         start_time = utc_now()
-        # Invoke LangGraph StateGraph with DB and LLM injected through configuration
-        final_state: AgentState = self.graph.invoke(
-            initial_state,
-            config={"configurable": {"db": self.db, "llm_provider": self.llm_provider}},
-        )
 
-        completed_time = utc_now()
-        resolved_run_id = final_state.get("run_id", run_id)
-
-        # Persist AgentRun record to DB (B10)
+        # Persist the run before executing so progress events can reference it
+        # while the graph runs (B10 + live progress).
+        agent_run: Optional[AgentRun] = None
         try:
             agent_run = AgentRun(
-                run_id=resolved_run_id,
+                run_id=run_id,
                 event_id=event_id,
                 user_id=user_id,
                 trigger_message=message,
                 objective=objective,
-                status=final_state.get("status", "COMPLETED"),
-                termination_status=final_state.get("termination_status"),
+                status="RUNNING",
                 started_at=start_time,
-                completed_at=completed_time,
-                tool_history=_sanitize_agent_payload(final_state.get("tool_history", [])),
-                decision_trace=_sanitize_agent_payload(final_state.get("decision_trace")),
-                final_response=final_state.get("final_response"),
-                error=str(final_state.get("error")) if final_state.get("error") else None,
             )
             self.db.add(agent_run)
+            self.db.commit()
+        except Exception as exc:
+            logger.warning("Failed to persist AgentRun %s at start: %s", run_id, exc)
+            agent_run = None
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+
+        run_events = AgentRunEventRecorder(self.db)
+        events_run_id = run_id if agent_run else None
+        run_events.record(
+            events_run_id, event_id, "agent.run_started",
+            {"status": "RUNNING", "trigger": "directive", "objective": objective, "approval_id": approval_id},
+        )
+
+        # Invoke LangGraph StateGraph with DB and LLM injected through configuration
+        try:
+            final_state: AgentState = self.graph.invoke(
+                initial_state,
+                config={
+                    "configurable": {
+                        "db": self.db,
+                        "llm_provider": self.llm_provider,
+                        "run_events": run_events,
+                        "events_run_id": events_run_id,
+                    }
+                },
+            )
+        except Exception as exc:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            if agent_run:
+                try:
+                    agent_run.status = "FAILED"
+                    agent_run.error = str(exc)[:2000]
+                    agent_run.completed_at = utc_now()
+                    self.db.commit()
+                except Exception:
+                    self.db.rollback()
+            run_events.record(events_run_id, event_id, "agent.run_failed", {"status": "FAILED", "error": str(exc)[:500]})
+            raise
+
+        completed_time = utc_now()
+        resolved_run_id = final_state.get("run_id", run_id)
+
+        # Persist final AgentRun state (B10)
+        try:
+            if agent_run is None:
+                agent_run = AgentRun(
+                    run_id=resolved_run_id,
+                    event_id=event_id,
+                    user_id=user_id,
+                    trigger_message=message,
+                    objective=objective,
+                    started_at=start_time,
+                )
+                self.db.add(agent_run)
+            agent_run.status = final_state.get("status", "COMPLETED")
+            agent_run.termination_status = final_state.get("termination_status")
+            agent_run.completed_at = completed_time
+            agent_run.tool_history = _sanitize_agent_payload(final_state.get("tool_history", []))
+            agent_run.decision_trace = _sanitize_agent_payload(final_state.get("decision_trace"))
+            agent_run.final_response = final_state.get("final_response")
+            agent_run.error = str(final_state.get("error")) if final_state.get("error") else None
             self.db.commit()
         except Exception as exc:
             logger.warning("Failed to persist AgentRun %s: %s", resolved_run_id, exc)
@@ -158,6 +214,8 @@ class EventOperationsAgent:
                 self.db.rollback()
             except Exception:
                 pass
+
+        self._record_terminal_event(run_events, events_run_id, event_id, final_state)
 
         return {
             "run_id": resolved_run_id,
@@ -190,3 +248,41 @@ class EventOperationsAgent:
             "step_count": final_state.get("step_count"),
             "error": final_state.get("error"),
         }
+
+    def _record_terminal_event(
+        self,
+        run_events: AgentRunEventRecorder,
+        run_id: Optional[str],
+        event_id: str,
+        final_state: AgentState,
+    ) -> None:
+        """Records how the run ended. Waiting on a human is never reported as success."""
+        if not run_id:
+            return
+        status = final_state.get("status") or "COMPLETED"
+        if status in ("PENDING_APPROVAL", "WAITING_FOR_APPROVAL") or final_state.get("pending_approval"):
+            approval = final_state.get("approval_result") or {}
+            event_type, data = "approval.required", {
+                "status": status,
+                "approval_id": final_state.get("approval_id"),
+                "action": approval.get("action_type"),
+                "reason": approval.get("notes"),
+            }
+        elif status == "WAITING_FOR_USER_SELECTION":
+            event_type, data = "selection.required", {"status": status, "summary": final_state.get("final_response")}
+        elif status in ("FAILED", "RECOVERY_FAILED"):
+            event_type, data = "agent.run_failed", {
+                "status": status,
+                "error": str(final_state.get("error") or final_state.get("final_response") or "Run failed")[:500],
+            }
+        elif status == "PAUSED":
+            event_type, data = "agent.run_paused", {"status": status, "reason": final_state.get("final_response")}
+        else:
+            event_type, data = "agent.run_completed", {
+                "status": status,
+                "termination_status": final_state.get("termination_status"),
+            }
+        # A nested operations pipeline may already have recorded this outcome.
+        if latest_event_type(self.db, run_id) == event_type:
+            return
+        run_events.record(run_id, event_id, event_type, _sanitize_agent_payload(data))

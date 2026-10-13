@@ -152,6 +152,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning("Could not initialize canonical users at startup: %s", e)
 
+    # Agent runs execute in-process; any run still marked executing belongs to a dead process.
+    if settings.ENVIRONMENT != "test":
+        try:
+            from app.db.session import SessionLocal
+            from app.services.agent_run_events import fail_orphaned_runs
+            with SessionLocal() as db:
+                orphaned = fail_orphaned_runs(db)
+                if orphaned:
+                    logger.warning("Marked %d agent run(s) interrupted by the previous shutdown as failed.", orphaned)
+        except Exception as e:
+            logger.warning("Could not reconcile orphaned agent runs at startup: %s", e)
+
     sweeper_task = None
     if settings.APPROVAL_EXPIRY_SWEEPER_ENABLED and settings.ENVIRONMENT != "test":
         import asyncio

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import {
   Bot,
   Zap,
@@ -19,7 +19,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { ProvenanceBadge } from "./ProvenanceBadge";
-import { startOperations } from "@/lib/api/discoveryRuns";
+import { useAgentRunStore } from "@/stores/agentRunStore";
+import { deriveRunView, isExecuting } from "@/lib/agentRun/view";
 import { CompanionPairingModal } from "@/components/browser/CompanionPairingModal";
 import { browserCompanionApi, CompanionStatusResponse } from "@/lib/api/browserCompanion";
 
@@ -69,17 +70,35 @@ export function AgentPanel({
     return () => clearInterval(interval);
   }, []);
 
+  // Authoritative run state from the backend (persisted run + progress events).
+  const startRun = useAgentRunStore((s) => s.startRun);
+  const storeStarting = useAgentRunStore((s) => s.starting);
+  const storeEventId = useAgentRunStore((s) => s.eventId);
+  const run = useAgentRunStore((s) => s.run);
+  const runEvents = useAgentRunStore((s) => s.events);
+  const runView = useMemo(
+    () => (storeEventId === eventId && run ? deriveRunView(run, runEvents) : null),
+    [storeEventId, eventId, run, runEvents]
+  );
+
+  const runExecuting = runView ? isExecuting(runView.lifecycle) : false;
+  const showRunning = starting || storeStarting || (runView ? runExecuting : isRunning);
+  const showWaiting = runView ? runView.lifecycle === "awaiting_selection" : isWaitingForSelection;
+  const showFailed = runView ? runView.lifecycle === "failed" : agentStatus === "FAILED";
+  const runningLabel = runView?.phase?.label || agentMessage;
+
   const handleStartOperations = async () => {
+    // The store ignores clicks while a start request or an executing run is in flight.
+    if (starting || storeStarting || runExecuting) return;
     try {
       setStarting(true);
-      const res = await startOperations(eventId);
-      setLastMessage(res.message);
-      if (onOperationsStarted) {
-        onOperationsStarted(res.run_id);
+      await startRun(eventId);
+      const { startError, run: startedRun } = useAgentRunStore.getState();
+      if (startError) {
+        setLastMessage(startError);
+      } else if (onOperationsStarted) {
+        onOperationsStarted(startedRun?.run_id);
       }
-    } catch (err: any) {
-      console.error("Start operations failed:", err);
-      setLastMessage(err.message || "Failed to start autonomous operations");
     } finally {
       setStarting(false);
     }
@@ -118,17 +137,17 @@ export function AgentPanel({
               <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
               <span>Waiting For Approval</span>
             </span>
-          ) : isWaitingForSelection ? (
+          ) : showWaiting ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
               <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
               <span>Waiting For Selection</span>
             </span>
-          ) : agentStatus === "FAILED" ? (
+          ) : showFailed ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
               <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
               <span>Failed</span>
             </span>
-          ) : isRunning ? (
+          ) : showRunning ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
               <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
               <span>Sourcing & Qualifying</span>
@@ -267,25 +286,37 @@ export function AgentPanel({
             <span>Browser Autonomous Agent</span>
           </Link>
 
-          {isRunning || starting ? (
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm animate-pulse">
+          {showRunning ? (
+            <div
+              role="status"
+              className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm"
+            >
               <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-              <span>{agentMessage || "Autonomous Loop Active • Sourcing & Qualifying"}</span>
+              <span>{runningLabel || (starting || storeStarting ? "Starting agent run…" : "Agent run in progress")}</span>
             </div>
-          ) : isWaitingForSelection ? (
+          ) : showWaiting ? (
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 shadow-sm">
               <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
               <span>{agentMessage || "Recommendations Ready • Select Preferred Options"}</span>
             </div>
-          ) : agentStatus === "FAILED" ? (
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 shadow-sm">
-              <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-              <span>{agentMessage || "EVENTRA encountered an issue."}</span>
+          ) : showFailed ? (
+            <div className="inline-flex items-center gap-2">
+              <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 shadow-sm">
+                <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
+                <span>{runView?.error || agentMessage || "EVENTRA encountered an issue."}</span>
+              </div>
+              <button
+                onClick={handleStartOperations}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Retry</span>
+              </button>
             </div>
           ) : (
             <button
               onClick={handleStartOperations}
-              disabled={starting}
+              disabled={starting || storeStarting || runExecuting}
               className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-sm transition-all disabled:opacity-50"
             >
               <Zap className="w-3.5 h-3.5 fill-white" />

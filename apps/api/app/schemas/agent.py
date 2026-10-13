@@ -72,3 +72,28 @@ class AgentRunListResponse(BaseModel):
     items: List[AgentRunRecordResponse]
     limit: int
     offset: int
+
+
+class AgentRunEventResponse(BaseModel):
+    """A persisted agent run progress event (also the SSE `data:` payload)."""
+    id: str
+    run_id: str
+    event_id: str
+    sequence: int
+    type: str
+    timestamp: Optional[str] = None
+    data: Dict[str, Any] = Field(default_factory=dict)
+
+
+class AgentRunEventListResponse(BaseModel):
+    run_id: str
+    run_status: str
+    items: List[AgentRunEventResponse]
+    last_sequence: int
+
+
+class AgentRunSnapshotResponse(BaseModel):
+    """Authoritative state for restoring the agent UI after refresh/reconnect."""
+    run: Optional[AgentRunRecordResponse] = None
+    events: List[AgentRunEventResponse] = Field(default_factory=list)
+    last_sequence: int = 0

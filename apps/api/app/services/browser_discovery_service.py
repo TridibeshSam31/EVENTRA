@@ -13,7 +13,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
-from app.api.routes.events import DEMO_EVENTS
 from app.integrations.google_maps_scraper.models import NormalizedProvider
 from app.schemas.browser_agent import AgentEventType, ExecutionStatus
 from app.schemas.browser_discovery import (
@@ -44,8 +43,9 @@ def sanitize_untrusted_text(raw_text: Optional[str]) -> Optional[str]:
     """
     if not raw_text:
         return raw_text
-    # Unescape HTML entities, strip null bytes and excessive whitespace
-    cleaned = html.unescape(raw_text).replace("\x00", "").strip()
+    # Unescape HTML entities, strip null bytes, private use glyphs, and excessive whitespace
+    cleaned = html.unescape(raw_text).replace("\x00", "")
+    cleaned = re.sub(r"[\ue000-\uf8ff]", "", cleaned).strip()
     # Normalize internal spaces
     return re.sub(r"\s+", " ", cleaned)
 
@@ -59,9 +59,16 @@ class BrowserDiscoveryService:
         runtime_service: Optional[BrowserRuntimeService] = None,
         companion_service: Optional[BrowserCompanionService] = None,
     ):
-        self.agent_service = agent_service or browser_agent_service
         self.runtime_service = runtime_service or browser_runtime_service
         self.companion_service = companion_service or browser_companion_service
+        if agent_service:
+            self.agent_service = agent_service
+        else:
+            self.agent_service = browser_agent_service
+            if companion_service:
+                self.agent_service.companion = companion_service
+            if runtime_service:
+                self.agent_service.runtime = runtime_service
 
     def load_event_requirements(
         self,
@@ -85,6 +92,7 @@ class BrowserDiscoveryService:
                 logger.debug("DB lookup failed for event %s: %s", event_id, e)
 
         # 2. Fallback to demo events store
+        from app.api.routes.events import DEMO_EVENTS
         if not event_data and event_id in DEMO_EVENTS:
             event_data = DEMO_EVENTS[event_id]
 
@@ -177,6 +185,10 @@ class BrowserDiscoveryService:
 
             raw_address = sanitize_untrusted_text(item.get("address"))
             raw_phone = sanitize_untrusted_text(item.get("phone"))
+            normalized_phone = None
+            if raw_phone:
+                from app.integrations.google_maps_scraper.mapper import ProviderNormalizer
+                normalized_phone = ProviderNormalizer.normalize_phone(raw_phone)
             raw_website = sanitize_untrusted_text(item.get("website"))
             maps_url = sanitize_untrusted_text(item.get("maps_url"))
             rating = item.get("rating")
@@ -235,7 +247,7 @@ class BrowserDiscoveryService:
                 city=requirements.city,
                 latitude=lat,
                 longitude=lon,
-                phone=raw_phone,
+                phone=normalized_phone or raw_phone,
                 website=raw_website,
                 maps_url=maps_url,
                 rating=float(rating) if rating is not None else None,
@@ -291,6 +303,57 @@ class BrowserDiscoveryService:
             results.append((norm_provider, candidate))
 
         return results
+
+    def rank_and_order(
+        self,
+        items: List[Tuple[NormalizedProvider, DiscoveredCandidate]],
+        requirements: EventSearchRequirements,
+    ) -> List[Tuple[NormalizedProvider, DiscoveredCandidate]]:
+        """Scores non-rejected candidates, flags one recommendation, and puts rejected ones last.
+
+        The single recommendation must be a qualified candidate with a phone number, since the
+        next step is a call. Rejected candidates stay in the list (with their reason) for
+        transparency, but never get a score, rank or recommendation.
+        """
+        from app.services.discovery_qualification_engine import QualificationResult
+        from app.services.discovery_ranking_engine import DiscoveryRankingEngine
+
+        def key_of(norm_p: NormalizedProvider) -> str:
+            return norm_p.source_id or norm_p.name
+
+        by_key: Dict[str, Tuple[NormalizedProvider, DiscoveredCandidate]] = {}
+        qual_results: Dict[str, QualificationResult] = {}
+        for norm_p, cand in items:
+            by_key[key_of(norm_p)] = (norm_p, cand)
+            qual_results[key_of(norm_p)] = QualificationResult(
+                qualification=cand.qualification_status,
+                reasons=list(cand.qualification_reasons),
+            )
+
+        ranked = DiscoveryRankingEngine.rank_candidates(
+            candidates=[n for n, _ in items],
+            event_type=requirements.event_type,
+            distances={},
+            qual_results=qual_results,
+            max_budget=requirements.budget,
+            guest_count=requirements.guest_count,
+        )
+
+        ordered: List[Tuple[NormalizedProvider, DiscoveredCandidate]] = []
+        recommended_set = False
+        for r in ranked:
+            norm_p, cand = by_key[key_of(r.candidate)]
+            cand.score = r.score
+            cand.rank = r.rank
+            cand.recommendation_reasons = r.reasons
+            if not recommended_set and cand.qualification_status == "qualified" and cand.phone:
+                cand.recommended = True
+                recommended_set = True
+            ordered.append((norm_p, cand))
+
+        ranked_keys = {key_of(n) for n, _ in ordered}
+        ordered.extend(pair for pair in items if key_of(pair[0]) not in ranked_keys)
+        return ordered
 
     async def discover(
         self,
@@ -529,6 +592,7 @@ class BrowserDiscoveryService:
 
         # 6. Normalize and qualify discovered candidates
         norm_and_candidates = self.normalize_and_qualify(raw_items, requirements)
+        norm_and_candidates = self.rank_and_order(norm_and_candidates, requirements)
         total_found = len(norm_and_candidates)
         total_qualified = 0
         total_persisted = 0
@@ -599,6 +663,7 @@ class BrowserDiscoveryService:
                             },
                         )
                     except Exception as persist_err:
+                        db.rollback()
                         logger.error("Failed to persist candidate %s: %s", cand.name, persist_err)
                         warnings.append(f"Persistence error for {cand.name}: {persist_err}")
 

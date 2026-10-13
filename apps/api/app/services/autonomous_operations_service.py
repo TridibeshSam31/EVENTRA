@@ -44,6 +44,12 @@ from app.models.discovery_run import DiscoveryRun
 from app.models.agent_run import AgentRun
 from app.services.live_broker import live_broker
 from app.services.agentic_discovery_controller import AgenticDiscoveryController
+from app.services.agent_run_events import (
+    ACTIVE_RUN_STATUSES,
+    TERMINAL_RUN_STATUSES,
+    AgentRunEventRecorder,
+    RunCancelled,
+)
 import uuid
 import logging
 
@@ -71,6 +77,7 @@ class AutonomousOperationsService:
         self._action_service = ActionService(db)
         self._verification_service = VerificationService(db)
         self._audit = AuditRecorder(db)
+        self._run_events = AgentRunEventRecorder(db)
 
     @staticmethod
     def _resolve_categories_to_source(
@@ -125,7 +132,7 @@ class AutonomousOperationsService:
             self.db.query(AgentRun)
             .filter(
                 AgentRun.event_id == event_id,
-                AgentRun.status.in_(["RUNNING", "INITIALIZED", "DISCOVERING"]),
+                AgentRun.status.in_(ACTIVE_RUN_STATUSES),
             )
             .first()
         )
@@ -209,6 +216,19 @@ class AutonomousOperationsService:
         self.db.commit()
         self.db.refresh(agent_run)
 
+        self._run_events.record(
+            agent_run_id,
+            event.id,
+            "agent.run_started",
+            {
+                "status": "RUNNING",
+                "trigger": "start_operations",
+                "objective": agent_run.objective,
+                "planned_categories": categories_to_source,
+                "location": clean_city,
+            },
+        )
+
         # 5. Broadcast agent started event across workspace
         live_broker.publish_sync(
             event.id,
@@ -242,20 +262,56 @@ class AutonomousOperationsService:
         try:
             service = cls(db)
             service.start_operations(event_id=event_id, user_id=user_id, run_id=run_id)
+        except RunCancelled:
+            logger.info(f"Autonomous operations run {run_id} cancelled for event {event_id}")
+            cls._finalize_run(db, event_id, run_id, "CANCELLED")
         except Exception as exc:
             logger.error(f"Background operations execution failed for event {event_id}: {exc}", exc_info=True)
-            if run_id:
-                try:
-                    agent_run = db.query(AgentRun).filter(AgentRun.run_id == run_id).first()
-                    if agent_run:
-                        agent_run.status = "FAILED"
-                        agent_run.error = str(exc)
-                        agent_run.completed_at = utc_now()
-                        db.commit()
-                except Exception:
-                    pass
+            db.rollback()
+            cls._finalize_run(db, event_id, run_id, "FAILED", error=str(exc))
         finally:
             db.close()
+
+    @staticmethod
+    def _finalize_run(
+        db: Session,
+        event_id: str,
+        run_id: Optional[str],
+        status: str,
+        error: Optional[str] = None,
+    ) -> None:
+        """Moves a run to a terminal status once and records the terminal event."""
+        if not run_id:
+            return
+        try:
+            agent_run = db.query(AgentRun).filter(AgentRun.run_id == run_id).first()
+            if not agent_run or agent_run.status in TERMINAL_RUN_STATUSES:
+                return
+            agent_run.status = status
+            agent_run.error = error[:2000] if error else None
+            agent_run.completed_at = utc_now()
+            db.commit()
+            recorder = AgentRunEventRecorder(db)
+            if status == "CANCELLED":
+                recorder.record(run_id, event_id, "agent.run_cancelled", {"status": "CANCELLED"})
+            else:
+                recorder.record(
+                    run_id, event_id, "agent.run_failed",
+                    {"status": "FAILED", "error": (error or "Unknown error")[:500]},
+                )
+            # Keep the legacy workspace stream consistent (it only knows agent.failed).
+            live_broker.publish_sync(
+                event_id,
+                {
+                    "type": "agent.failed",
+                    "event_id": event_id,
+                    "run_id": run_id,
+                    "error": "Cancelled by user" if status == "CANCELLED" else (error or "Unknown error")[:500],
+                },
+            )
+        except Exception as fin_err:
+            logger.error(f"Could not finalize run {run_id} as {status}: {fin_err}")
+            db.rollback()
 
     def start_operations(
         self,
@@ -282,9 +338,19 @@ class AutonomousOperationsService:
                 .first()
             )
 
+        rid = agent_run.run_id if agent_run else run_id
+        # The user may have cancelled before the background worker picked the run up.
+        self._run_events.ensure_not_cancelled(rid)
+
         if agent_run:
             agent_run.status = "DISCOVERING"
             self.db.commit()
+            self._run_events.record(
+                rid,
+                event.id,
+                "agent.phase_changed",
+                {"phase": "PREPARING", "status": "DISCOVERING", "label": "Checking operational plan and live state"},
+            )
             live_broker.publish_sync(
                 event.id,
                 {
@@ -334,6 +400,12 @@ class AutonomousOperationsService:
                     agent_run.error = f"Failed to transition to LIVE: {live_err}"
                     agent_run.completed_at = utc_now()
                     self.db.commit()
+                    self._run_events.record(
+                        rid,
+                        event.id,
+                        "agent.run_failed",
+                        {"status": "FAILED", "phase": "PREPARING", "error": agent_run.error[:500]},
+                    )
                 live_broker.publish_sync(
                     event.id,
                     {
@@ -369,14 +441,31 @@ class AutonomousOperationsService:
 
         # 4. Venue Operations (Discovery & Qualification only)
         if "VENUE" in categories_to_source:
-            venue_res = self._execute_venue_operations(event, city, pax, date_str, agent_run_id=run_id)
+            self._run_events.ensure_not_cancelled(rid)
+            self._run_events.record(
+                rid, event.id, "agent.phase_changed",
+                {"phase": "VENUE_DISCOVERY", "status": "DISCOVERING", "label": f"Discovering venues in {city}"},
+            )
+            venue_res = self._execute_venue_operations(event, city, pax, date_str, agent_run_id=rid)
             operations_report.append(venue_res)
 
         # 5. Vendor Operations (Catering, AV, Photography, Security, Transport, etc. - Discovery & Qualification only)
         vendor_categories = [c for c in categories_to_source if c != "VENUE"]
         for category in vendor_categories:
-            cat_res = self._execute_vendor_operations(event, category, city, pax, date_str, agent_run_id=run_id)
+            self._run_events.ensure_not_cancelled(rid)
+            self._run_events.record(
+                rid, event.id, "agent.phase_changed",
+                {
+                    "phase": "PROVIDER_DISCOVERY",
+                    "status": "DISCOVERING",
+                    "category": category,
+                    "label": f"Discovering {category.replace('_', ' ').title()} providers in {city}",
+                },
+            )
+            cat_res = self._execute_vendor_operations(event, category, city, pax, date_str, agent_run_id=rid)
             operations_report.append(cat_res)
+
+        self._run_events.ensure_not_cancelled(rid)
 
         # 6. Complete operations and transition AgentRun to WAITING_FOR_USER_SELECTION (Requirements 10 & 11)
         if not agent_run and run_id:
@@ -416,6 +505,26 @@ class AutonomousOperationsService:
             agent_run.completed_at = utc_now()
             agent_run.final_response = summary_msg
             self.db.commit()
+
+        # Not a success terminal: the run stops here until the organizer selects
+        # candidates (communication only happens after an explicit approval).
+        self._run_events.record(
+            rid,
+            event.id,
+            "selection.required",
+            {
+                "status": "WAITING_FOR_USER_SELECTION",
+                "categories": [
+                    {
+                        "category": item.get("category"),
+                        "status": item.get("status"),
+                        "candidates_count": item.get("candidates_count", 0),
+                    }
+                    for item in operations_report
+                ],
+                "summary": summary_msg,
+            },
+        )
 
         # Emit realtime lifecycle events
         live_broker.publish_sync(
@@ -555,9 +664,44 @@ class AutonomousOperationsService:
             },
         )
 
-        venues, total = self._venue_service.search_venues(city=city, min_capacity=int(pax * 0.8), limit=5)
-        if not venues:
-            venues, total = self._venue_service.search_venues(city=city, limit=5)
+        min_capacity = int(pax * 0.8)
+        self._run_events.record(
+            agent_run_id,
+            event.id,
+            "venue.discovery_started",
+            {
+                "discovery_run_id": disc_run.id,
+                "location": city,
+                "guest_count": pax,
+                "min_capacity": min_capacity,
+                "source": "EVENTRA_VENUE_CATALOG",
+            },
+        )
+        search_args = {"city": city, "min_capacity": min_capacity, "limit": 5}
+        self._run_events.record(
+            agent_run_id, event.id, "agent.tool_started", {"tool": "venue_search", "arguments": search_args},
+        )
+        try:
+            venues, total = self._venue_service.search_venues(**search_args)
+            relaxed_capacity = False
+            if not venues:
+                venues, total = self._venue_service.search_venues(city=city, limit=5)
+                relaxed_capacity = bool(venues)
+        except Exception as search_err:
+            self._run_events.record(
+                agent_run_id, event.id, "agent.tool_completed",
+                {"tool": "venue_search", "status": "FAILED", "error": str(search_err)[:300]},
+            )
+            raise
+        self._run_events.record(
+            agent_run_id, event.id, "agent.tool_completed",
+            {
+                "tool": "venue_search",
+                "status": "SUCCESS",
+                "result_count": len(venues),
+                "capacity_filter_relaxed": relaxed_capacity,
+            },
+        )
 
         # Requirement 8: NO FAKE VENDOR/VENUE FALLBACK!
         if not venues:
@@ -565,6 +709,13 @@ class AutonomousOperationsService:
             disc_run.summary = "No suitable venue candidates were found."
             disc_run.completed_at = utc_now()
             self.db.commit()
+
+            self._run_events.record(
+                agent_run_id,
+                event.id,
+                "venue.results_updated",
+                {"discovery_run_id": disc_run.id, "status": "EMPTY", "total": 0, "candidates": []},
+            )
 
             live_broker.publish_sync(
                 event.id,
@@ -591,12 +742,15 @@ class AutonomousOperationsService:
         scored_candidates.sort(key=lambda x: x[1], reverse=True)
 
         # Requirement 4 & 5: Persist multiple candidates as RECOMMENDED (do NOT auto-select top_matches[0])
+        persisted_entries: List[Tuple[int, Venue, float, EventShortlistEntry]] = []
         for rank, (cand_venue, v_score) in enumerate(scored_candidates[:5], start=1):
             cand_id = cand_venue.id or str(uuid.uuid4())
             existing_sl = self.db.query(EventShortlistEntry).filter(
                 EventShortlistEntry.event_id == event.id,
                 (EventShortlistEntry.candidate_id == cand_id) | (EventShortlistEntry.candidate_name == cand_venue.name),
             ).first()
+            if existing_sl:
+                persisted_entries.append((rank, cand_venue, v_score, existing_sl))
             if not existing_sl:
                 sl_entry = EventShortlistEntry(
                     event_id=event.id,
@@ -621,9 +775,11 @@ class AutonomousOperationsService:
                         "status": "RECOMMENDED",
                         "selection_source": "AGENT_RECOMMENDATION",
                         "source": getattr(cand_venue, "source", "DATABASE") or "DATABASE",
+                        "agent_run_id": agent_run_id,
                     },
                 )
                 self.db.add(sl_entry)
+                persisted_entries.append((rank, cand_venue, v_score, sl_entry))
         self.db.commit()
 
         # Update DiscoveryRun
@@ -631,6 +787,34 @@ class AutonomousOperationsService:
         disc_run.summary = f"Discovered and evaluated {len(scored_candidates)} venue recommendations."
         disc_run.completed_at = utc_now()
         self.db.commit()
+
+        self._run_events.record(
+            agent_run_id,
+            event.id,
+            "venue.results_updated",
+            {
+                "discovery_run_id": disc_run.id,
+                "status": "COMPLETED",
+                "total": len(scored_candidates),
+                "candidates": [
+                    {
+                        "shortlist_entry_id": entry.id,
+                        "venue_id": cand_venue.id,
+                        "name": cand_venue.name,
+                        "capacity": cand_venue.capacity,
+                        "city": cand_venue.city,
+                        "address": cand_venue.address,
+                        "hourly_rate": cand_venue.hourly_rate,
+                        "has_contact_phone": bool(cand_venue.contact_phone),
+                        "score": v_score,
+                        "rank": rank,
+                        "shortlist_status": entry.status,
+                        "source": getattr(cand_venue, "source", None) or "EVENTRA_VENUE_CATALOG",
+                    }
+                    for rank, cand_venue, v_score, entry in persisted_entries
+                ],
+            },
+        )
 
         live_broker.publish_sync(
             event.id,
@@ -739,31 +923,100 @@ class AutonomousOperationsService:
         )
 
         # 1. Run Agentic Discovery (Multi-iteration scraping + qualification + ranking)
+        max_iterations, target_count = 2, 3
         controller = AgenticDiscoveryController(
             self.db,
-            max_iterations=2,
-            target_count=3,
+            max_iterations=max_iterations,
+            target_count=target_count,
         )
-        discovery_res = controller.execute_discovery(
-            event_id=event.id,
-            category=category,
-            location=city,
-            guest_count=pax,
-            run_id=disc_run.id,
-            trigger="operations",
-            simulate_outreach=False,
+        cat_upper = category.upper()
+        self._run_events.record(
+            agent_run_id,
+            event.id,
+            "provider.discovery_started",
+            {
+                "category": cat_upper,
+                "discovery_run_id": disc_run.id,
+                "location": city,
+                "guest_count": pax,
+                "target_count": target_count,
+                "max_iterations": max_iterations,
+            },
         )
+        self._run_events.record(
+            agent_run_id, event.id, "agent.tool_started",
+            {
+                "tool": "agentic_provider_discovery",
+                "arguments": {"category": cat_upper, "location": city, "guest_count": pax},
+            },
+        )
+
+        def _relay_milestone(ev_type: str, message: str, data: Dict[str, Any], iteration: int) -> None:
+            self._run_events.record(
+                agent_run_id,
+                event.id,
+                "provider.discovery_progress",
+                {
+                    "category": cat_upper,
+                    "discovery_run_id": disc_run.id,
+                    "milestone": ev_type,
+                    "iteration": iteration,
+                    "message": message,
+                    "data": data,
+                },
+            )
+
+        try:
+            discovery_res = controller.execute_discovery(
+                event_id=event.id,
+                category=category,
+                location=city,
+                guest_count=pax,
+                run_id=disc_run.id,
+                trigger="operations",
+                simulate_outreach=False,
+                progress_callback=_relay_milestone if agent_run_id else None,
+            )
+        except Exception as disc_err:
+            self._run_events.record(
+                agent_run_id, event.id, "agent.tool_completed",
+                {"tool": "agentic_provider_discovery", "category": cat_upper, "status": "FAILED", "error": str(disc_err)[:300]},
+            )
+            raise
 
         # Aggregate candidates from top_matches and other_available_options
         candidates_pool = list(discovery_res.top_matches or [])
         if discovery_res.other_available_options:
             candidates_pool.extend(discovery_res.other_available_options)
 
+        funnel = discovery_res.funnel_stats
+        qualifications = [getattr(c, "qualification", None) for c in candidates_pool]
+        discovery_counts = {
+            "discovered": getattr(funnel, "discovered", 0) or 0,
+            "unique": getattr(funnel, "unique", 0) or 0,
+            "qualified": qualifications.count("qualified"),
+            "pending_verification": qualifications.count("uncertain"),
+            "rejected": len(discovery_res.rejected_candidates or []),
+        }
+        self._run_events.record(
+            agent_run_id, event.id, "agent.tool_completed",
+            {
+                "tool": "agentic_provider_discovery",
+                "category": cat_upper,
+                "status": "SUCCESS",
+                "result_count": len(candidates_pool),
+                "counts": discovery_counts,
+                "target_met": bool(discovery_res.target_count_met),
+            },
+        )
+
         # If empty, check cached DB vendors
+        used_cache = False
         if not candidates_pool:
             cached_vendors = self._vendor_service.get_cached_candidates(category=category, city=city, limit=3)
             for cv in cached_vendors:
                 candidates_pool.append(cv)
+            used_cache = bool(cached_vendors)
 
         # Requirement 8: NO FAKE VENDOR FALLBACK (Do NOT create DEMO_FALLBACK or fake phones)
         if not candidates_pool:
@@ -771,6 +1024,19 @@ class AutonomousOperationsService:
             disc_run.summary = f"No suitable {cat_title} candidates were found."
             disc_run.completed_at = utc_now()
             self.db.commit()
+
+            self._run_events.record(
+                agent_run_id,
+                event.id,
+                "provider.results_updated",
+                {
+                    "category": cat_upper,
+                    "discovery_run_id": disc_run.id,
+                    "status": "EMPTY",
+                    "counts": discovery_counts,
+                    "candidates": [],
+                },
+            )
 
             live_broker.publish_sync(
                 event.id,
@@ -793,13 +1059,19 @@ class AutonomousOperationsService:
             }
 
         # Requirement 4 & 5: Persist multiple candidates as RECOMMENDED (never auto-select top_matches[0])
+        result_items: List[Dict[str, Any]] = []
         for rank, item in enumerate(candidates_pool[:5], start=1):
             if hasattr(item, "candidate"):
                 cand = item.candidate
-                score = getattr(item, "score", 0.85) or 0.85
+                score = getattr(item, "score", None)
+                qualification = getattr(item, "qualification", None)
+                qualification_reason = (getattr(item, "reasons", None) or [None])[0]
             else:
+                # Cached vendor from an earlier discovery: not re-qualified for this event.
                 cand = item
-                score = 0.85
+                score = None
+                qualification = None
+                qualification_reason = "Previously discovered provider; not re-verified in this run"
 
             cand_name = cand.name
             cand_id = getattr(cand, "id", None) or getattr(cand, "source_id", None) or str(uuid.uuid4())
@@ -829,8 +1101,8 @@ class AutonomousOperationsService:
                     contact_email=getattr(cand, "email", None),
                     website=getattr(cand, "website", None),
                     base_cost=float(pax * 450) if "cater" in cat_lower else (getattr(cand, "base_cost", None) or 45000.0),
-                    rating=getattr(cand, "rating", None) or 4.5,
-                    review_count=getattr(cand, "review_count", None) or 10,
+                    rating=getattr(cand, "rating", None),
+                    review_count=getattr(cand, "review_count", None),
                     status="ACTIVE",
                     source=cand_source,
                 )
@@ -842,6 +1114,7 @@ class AutonomousOperationsService:
                 EventShortlistEntry.event_id == event.id,
                 (EventShortlistEntry.candidate_id == str(cand_id)) | (EventShortlistEntry.candidate_name == cand_name),
             ).first()
+            sl_entry = existing_sl
             if not existing_sl:
                 sl_entry = EventShortlistEntry(
                     event_id=event.id,
@@ -863,9 +1136,29 @@ class AutonomousOperationsService:
                         "status": "RECOMMENDED",
                         "selection_source": "AGENT_RECOMMENDATION",
                         "source": cand_source,
+                        "qualification": qualification,
+                        "qualification_reason": qualification_reason,
+                        "agent_run_id": agent_run_id,
                     },
                 )
                 self.db.add(sl_entry)
+            result_items.append(
+                {
+                    "entry": sl_entry,
+                    "vendor_id": vendor_record.id if vendor_record else None,
+                    "name": cand_name,
+                    "city": getattr(cand, "city", None) or city,
+                    "rating": getattr(cand, "rating", None),
+                    "has_contact_phone": bool(cand_phone),
+                    "score": score,
+                    "rank": rank,
+                    # uncertain = qualified on available evidence but key facts unverified
+                    "qualification": {"uncertain": "pending_verification"}.get(qualification, qualification),
+                    "qualification_reason": qualification_reason,
+                    "source": cand_source,
+                    "from_cache": not hasattr(item, "candidate"),
+                }
+            )
         self.db.commit()
 
         # Update DiscoveryRun
@@ -873,6 +1166,24 @@ class AutonomousOperationsService:
         disc_run.summary = f"Discovered and ranked {len(candidates_pool[:5])} {cat_title} recommendations."
         disc_run.completed_at = utc_now()
         self.db.commit()
+
+        candidates_payload = []
+        for r in result_items:
+            entry = r.pop("entry")
+            candidates_payload.append({**r, "shortlist_entry_id": entry.id, "shortlist_status": entry.status})
+        self._run_events.record(
+            agent_run_id,
+            event.id,
+            "provider.results_updated",
+            {
+                "category": cat_upper,
+                "discovery_run_id": disc_run.id,
+                "status": "COMPLETED",
+                "used_cached_providers": used_cache,
+                "counts": {**discovery_counts, "recommended": len(candidates_payload)},
+                "candidates": candidates_payload,
+            },
+        )
 
         live_broker.publish_sync(
             event.id,

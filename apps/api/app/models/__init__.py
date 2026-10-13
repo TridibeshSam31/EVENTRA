@@ -57,11 +57,13 @@ from app.models.discovery_run import DiscoveryRun, DiscoveryRunEvent
 from app.models.communication import Conversation, Message
 from app.models.activity_log import EventActivityLog
 from app.models.agent_run import AgentRun
+from app.models.agent_run_event import AgentRunEvent
 from app.models.idempotency import IdempotencyRecord
 from app.models.shortlist import EventShortlistEntry
 
 __all__ = [
     "AgentRun",
+    "AgentRunEvent",
     "IdempotencyRecord",
     "EventType",
     "EventState",

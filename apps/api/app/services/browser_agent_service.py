@@ -20,8 +20,14 @@ from app.schemas.browser_agent import (
     VALID_TRANSITIONS,
     utc_now_iso,
 )
+from app.schemas.browser_companion import CompanionCommandType
+from app.services.browser_companion_service import (
+    BrowserCompanionService,
+    browser_companion_service,
+)
 from app.services.browser_runtime_service import (
     BrowserRuntimeService,
+    TabInfo,
     browser_runtime_service,
     validate_browser_url,
 )
@@ -138,10 +144,15 @@ class ExecutionRecord:
 
 
 class BrowserAgentService:
-    """Coordinates Browser Agent executions and binds them to the underlying runtime."""
+    """Coordinates Browser Agent executions and binds them to the underlying runtime or Windows companion."""
 
-    def __init__(self, runtime_service: Optional[BrowserRuntimeService] = None):
+    def __init__(
+        self,
+        runtime_service: Optional[BrowserRuntimeService] = None,
+        companion_service: Optional[BrowserCompanionService] = None,
+    ):
         self.runtime = runtime_service or browser_runtime_service
+        self.companion = companion_service or browser_companion_service
         self._executions: Dict[str, ExecutionRecord] = {}
         self._global_lock = asyncio.Lock()
 
@@ -213,13 +224,64 @@ class BrowserAgentService:
             )
 
             record.transition_status(ExecutionStatus.STARTING)
+
+            # Check if user has an active Windows Browser Companion connected
+            if self.companion.is_companion_connected(user_id):
+                record.emit_event(
+                    AgentEventType.EXECUTION_STARTING,
+                    "Attaching to authenticated Windows Browser Companion on operator desktop...",
+                    {"runner": "windows_companion"},
+                )
+                record.session_id = f"comp_{exec_id}"
+                record.viewer_url = "windows_companion"
+                record.active_tab_id = "tab_1"
+                initial_tab = TabInfo(tab_id="tab_1", url=target_url, title="Windows Desktop Browser", is_active=True)
+                record.tabs = [initial_tab]
+                record.current_url = target_url
+                record.current_title = "Windows Desktop Browser"
+
+                if target_url and target_url != "about:blank":
+                    try:
+                        cmd_resp = await self.companion.send_command(
+                            user_id=user_id,
+                            command=CompanionCommandType.NAVIGATE,
+                            payload={"url": target_url},
+                            execution_id=exec_id,
+                            timeout_seconds=5.0,
+                        )
+                        meta = cmd_resp.get("metadata", {})
+                        if meta.get("current_url"):
+                            record.current_url = meta["current_url"]
+                        if meta.get("current_title"):
+                            record.current_title = meta["current_title"]
+                        if "tabs" in meta and meta["tabs"]:
+                            record.tabs = [TabInfo(**t) if isinstance(t, dict) else t for t in meta["tabs"]]
+                    except Exception as e:
+                        logger.warning("Could not pre-navigate Windows companion: %s", e)
+
+                record.transition_status(ExecutionStatus.RUNNING)
+                record.emit_event(
+                    AgentEventType.EXECUTION_RUNNING,
+                    "Windows Browser Companion attached and active on operator desktop.",
+                    {
+                        "runner": "windows_companion",
+                        "session_id": record.session_id,
+                        "viewer_url": record.viewer_url,
+                        "active_tab_id": record.active_tab_id,
+                        "current_url": record.current_url,
+                        "current_title": record.current_title,
+                    },
+                )
+                return record.to_response()
+
+            # Otherwise attempt connecting to container browser runtime daemon
             record.emit_event(
                 AgentEventType.EXECUTION_STARTING,
                 "Requesting browser session from runtime daemon...",
+                {"runner": "container_sandbox"},
             )
 
             try:
-                # Attach to Phase 1 browser runtime
                 session_name = f"sess_{exec_id[:16]}"
                 session_state = await self.runtime.start_session(
                     session_id=session_name,
@@ -244,6 +306,7 @@ class BrowserAgentService:
                     AgentEventType.EXECUTION_RUNNING,
                     f"Browser session '{session_state.session_id}' attached and active.",
                     {
+                        "runner": "container_sandbox",
                         "session_id": session_state.session_id,
                         "viewer_url": session_state.viewer_url,
                         "active_tab_id": session_state.active_tab_id,
@@ -282,8 +345,8 @@ class BrowserAgentService:
 
         self._authorize(record, user_id)
 
-        # If running, sync latest tab details from runtime if reachable
-        if record.status == ExecutionStatus.RUNNING and record.session_id:
+        # If running and backed by container runtime, sync latest tab details from runtime if reachable
+        if record.status == ExecutionStatus.RUNNING and record.session_id and not record.session_id.startswith("comp_"):
             try:
                 latest = await self.runtime.get_session(record.session_id)
                 record.active_tab_id = latest.active_tab_id
@@ -338,20 +401,45 @@ class BrowserAgentService:
             )
 
             try:
-                session_state = await self.runtime.navigate(
-                    session_id=record.session_id,
-                    url=validated_url,
-                    tab_id=tab_id,
-                    timeout_ms=timeout_ms,
-                )
+                if record.session_id.startswith("comp_"):
+                    cmd_resp = await self.companion.send_command(
+                        user_id=record.user_id,
+                        command=CompanionCommandType.NAVIGATE,
+                        payload={"url": validated_url, "tab_id": tab_id},
+                        execution_id=execution_id,
+                        timeout_seconds=float(timeout_ms) / 1000.0,
+                    )
+                    if not cmd_resp.get("success", False):
+                        err = cmd_resp.get("error", "Navigation failed in Windows companion.")
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=err)
 
-                record.active_tab_id = session_state.active_tab_id
-                record.tabs = session_state.tabs
-                for tab in session_state.tabs:
-                    if tab.is_active:
-                        record.current_url = tab.url
-                        record.current_title = tab.title
-                        break
+                    meta = cmd_resp.get("metadata", {})
+                    record.current_url = meta.get("current_url") or validated_url
+                    record.current_title = meta.get("current_title")
+                    if "active_tab_id" in meta:
+                        record.active_tab_id = meta["active_tab_id"]
+                    if "tabs" in meta and meta["tabs"]:
+                        record.tabs = [TabInfo(**t) if isinstance(t, dict) else t for t in meta["tabs"]]
+                    elif record.tabs:
+                        for t in record.tabs:
+                            if t.is_active:
+                                t.url = record.current_url
+                                t.title = record.current_title or t.title
+                else:
+                    session_state = await self.runtime.navigate(
+                        session_id=record.session_id,
+                        url=validated_url,
+                        tab_id=tab_id,
+                        timeout_ms=timeout_ms,
+                    )
+
+                    record.active_tab_id = session_state.active_tab_id
+                    record.tabs = session_state.tabs
+                    for tab in session_state.tabs:
+                        if tab.is_active:
+                            record.current_url = tab.url
+                            record.current_title = tab.title
+                            break
 
                 record.updated_at = utc_now_iso()
                 record.emit_event(
@@ -400,19 +488,44 @@ class BrowserAgentService:
 
         async with record.lock:
             try:
-                session_state = await self.runtime.create_tab(
-                    session_id=record.session_id,
-                    url=validated_url,
-                    timeout_ms=timeout_ms,
-                )
+                if record.session_id and record.session_id.startswith("comp_"):
+                    cmd_resp = await self.companion.send_command(
+                        user_id=record.user_id,
+                        command=CompanionCommandType.OPEN_TAB,
+                        payload={"url": validated_url},
+                        execution_id=execution_id,
+                        timeout_seconds=float(timeout_ms) / 1000.0,
+                    )
+                    if not cmd_resp.get("success", False):
+                        err = cmd_resp.get("error", "Failed to open tab in Windows companion.")
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=err)
 
-                record.active_tab_id = session_state.active_tab_id
-                record.tabs = session_state.tabs
-                for tab in session_state.tabs:
-                    if tab.is_active:
-                        record.current_url = tab.url
-                        record.current_title = tab.title
-                        break
+                    meta = cmd_resp.get("metadata", {})
+                    record.active_tab_id = meta.get("active_tab_id") or record.active_tab_id
+                    record.current_url = meta.get("current_url") or record.current_url
+                    record.current_title = meta.get("current_title") or record.current_title
+                    if "tabs" in meta and meta["tabs"]:
+                        record.tabs = [TabInfo(**t) if isinstance(t, dict) else t for t in meta["tabs"]]
+                    else:
+                        new_tab = TabInfo(tab_id=f"tab_{len(record.tabs)+1}", url=validated_url or "about:blank", title="New Tab", is_active=True)
+                        for t in record.tabs:
+                            t.is_active = False
+                        record.tabs.append(new_tab)
+                        record.active_tab_id = new_tab.tab_id
+                else:
+                    session_state = await self.runtime.create_tab(
+                        session_id=record.session_id,
+                        url=validated_url,
+                        timeout_ms=timeout_ms,
+                    )
+
+                    record.active_tab_id = session_state.active_tab_id
+                    record.tabs = session_state.tabs
+                    for tab in session_state.tabs:
+                        if tab.is_active:
+                            record.current_url = tab.url
+                            record.current_title = tab.title
+                            break
 
                 record.updated_at = utc_now_iso()
                 record.emit_event(
@@ -452,18 +565,40 @@ class BrowserAgentService:
 
         async with record.lock:
             try:
-                session_state = await self.runtime.activate_tab(
-                    session_id=record.session_id,
-                    tab_id=tab_id,
-                )
+                if record.session_id and record.session_id.startswith("comp_"):
+                    cmd_resp = await self.companion.send_command(
+                        user_id=record.user_id,
+                        command=CompanionCommandType.SWITCH_TAB,
+                        payload={"tab_id": tab_id},
+                        execution_id=execution_id,
+                    )
+                    if not cmd_resp.get("success", False):
+                        err = cmd_resp.get("error", f"Failed to activate tab {tab_id} in Windows companion.")
+                        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=err)
 
-                record.active_tab_id = session_state.active_tab_id
-                record.tabs = session_state.tabs
-                for tab in session_state.tabs:
-                    if tab.is_active:
-                        record.current_url = tab.url
-                        record.current_title = tab.title
-                        break
+                    meta = cmd_resp.get("metadata", {})
+                    record.active_tab_id = tab_id
+                    if "tabs" in meta and meta["tabs"]:
+                        record.tabs = [TabInfo(**t) if isinstance(t, dict) else t for t in meta["tabs"]]
+                    else:
+                        for t in record.tabs:
+                            t.is_active = (t.tab_id == tab_id)
+                            if t.is_active:
+                                record.current_url = t.url
+                                record.current_title = t.title
+                else:
+                    session_state = await self.runtime.activate_tab(
+                        session_id=record.session_id,
+                        tab_id=tab_id,
+                    )
+
+                    record.active_tab_id = session_state.active_tab_id
+                    record.tabs = session_state.tabs
+                    for tab in session_state.tabs:
+                        if tab.is_active:
+                            record.current_url = tab.url
+                            record.current_title = tab.title
+                            break
 
                 record.updated_at = utc_now_iso()
                 record.emit_event(
@@ -508,10 +643,22 @@ class BrowserAgentService:
             )
 
             if record.session_id:
-                try:
-                    await self.runtime.stop_session(record.session_id)
-                except Exception as e:
-                    logger.warning("Error stopping underlying browser runtime session: %s", e)
+                if record.session_id.startswith("comp_"):
+                    try:
+                        await self.companion.send_command(
+                            user_id=record.user_id,
+                            command=CompanionCommandType.STOP_SESSION,
+                            payload={"reason": reason},
+                            execution_id=execution_id,
+                            timeout_seconds=15.0,
+                        )
+                    except Exception as e:
+                        logger.warning("Error stopping Windows companion session: %s", e)
+                else:
+                    try:
+                        await self.runtime.stop_session(record.session_id)
+                    except Exception as e:
+                        logger.warning("Error stopping underlying browser runtime session: %s", e)
 
             record.transition_status(ExecutionStatus.CANCELLED)
             record.tabs = []

@@ -223,7 +223,18 @@ async def test_discovery_service_routes_to_windows_companion():
         async def send_text(self, text: str):
             data = json.loads(text)
             cid = data.get("correlation_id")
-            if data.get("command") == "START_DISCOVERY":
+            if data.get("command") == "NAVIGATE":
+                res = {
+                    "type": "RESULT",
+                    "correlation_id": cid,
+                    "success": True,
+                    "metadata": {
+                        "current_url": data.get("payload", {}).get("url", "https://www.google.com/maps"),
+                        "current_title": "Google Maps",
+                    },
+                }
+                asyncio.create_task(self.comp_svc.handle_companion_message(self.sess, json.dumps(res)))
+            elif data.get("command") == "START_DISCOVERY":
                 # Send candidate event
                 evt = {
                     "type": "EVENT",

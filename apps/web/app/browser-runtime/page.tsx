@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import {
   browserAgentApi,
   ExecutionResponse,
@@ -14,8 +14,14 @@ import { useSearchParams } from "next/navigation";
 import { CompanionPairingModal } from "@/components/browser/CompanionPairingModal";
 import { browserCompanionApi, CompanionStatusResponse } from "@/lib/api/browserCompanion";
 import { Laptop } from "lucide-react";
+import {
+  addShortlistEntry,
+  selectShortlistCandidate,
+  approveShortlistCommunication,
+} from "@/lib/api/shortlist";
 
 const PRESET_EVENTS = [
+  { id: "b134fac2-3642-43d5-b38c-64899bae0753", label: "Annual Corporate Gala (Delhi • 350 guests • ₹15L)", city: "Delhi", type: "CONFERENCE" },
   { id: "wedding_demo", label: "Demo Wedding (San Francisco • 150 guests • $25k)", city: "San Francisco", type: "WEDDING" },
   { id: "college_fest_demo", label: "Demo College Fest (Boston • 800 guests • $50k)", city: "Boston", type: "COLLEGE_FEST" },
   { id: "conference_demo", label: "Demo Tech Conference (Seattle • 300 guests • $40k)", city: "Seattle", type: "CONFERENCE" },
@@ -32,7 +38,7 @@ const CATEGORIES = [
   { id: "SECURITY", label: "Security & Guarding" },
 ];
 
-export default function BrowserRuntimePage() {
+function BrowserRuntimeContent() {
   const [activeTab, setActiveTab] = useState<"discovery" | "manual">("discovery");
 
   // Core execution state
@@ -48,13 +54,23 @@ export default function BrowserRuntimePage() {
   const [events, setEvents] = useState<ExecutionEvent[]>([]);
   const searchParams = useSearchParams();
   const queryEventId = searchParams ? searchParams.get("eventId") : null;
+  const queryCategory = searchParams ? searchParams.get("category") : null;
+  const [showVncFallback, setShowVncFallback] = useState<boolean>(false);
 
   useEffect(() => {
     if (queryEventId) {
       setEventId("custom");
       setCustomEventId(queryEventId);
     }
-  }, [queryEventId]);
+    if (queryCategory) {
+      const match = CATEGORIES.find(
+        (c) => c.id.toUpperCase() === queryCategory.toUpperCase()
+      );
+      if (match) {
+        setDiscoveryCategory(match.id);
+      }
+    }
+  }, [queryEventId, queryCategory]);
 
   const [isPairingOpen, setIsPairingOpen] = useState<boolean>(false);
   const [companionStatus, setCompanionStatus] = useState<CompanionStatusResponse | null>(null);
@@ -73,6 +89,10 @@ export default function BrowserRuntimePage() {
   const [customQuery, setCustomQuery] = useState<string>("");
   const [persistDiscovery, setPersistDiscovery] = useState<boolean>(true);
   const [candidates, setCandidates] = useState<DiscoveredCandidate[]>([]);
+  const [showRejected, setShowRejected] = useState<boolean>(false);
+  const [callStates, setCallStates] = useState<
+    Record<string, { phase: "confirm" | "running" | "done" | "error"; message?: string }>
+  >({});
   const [isDiscovering, setIsDiscovering] = useState<boolean>(false);
   const [discoveryStatus, setDiscoveryStatus] = useState<string | null>(null);
   const [discoverySummary, setDiscoverySummary] = useState<BrowserDiscoveryResponse | null>(null);
@@ -179,6 +199,47 @@ export default function BrowserRuntimePage() {
 
   // Effective event ID (preset or custom input)
   const effectiveEventId = eventId === "custom" ? customEventId.trim() : eventId;
+
+  const activeCandidates = candidates.filter((c) => c.qualification_status !== "rejected");
+  const rejectedCandidates = candidates.filter((c) => c.qualification_status === "rejected");
+
+  // Human-in-the-loop call: shortlist -> select -> approve-communication (existing gated flow).
+  // The approve step is what actually places the Twilio call + WhatsApp message, and it only
+  // runs after the organizer confirms in the card.
+  const handleCallCandidate = async (cand: DiscoveredCandidate) => {
+    if (!cand.vendor_id) return;
+    const eventForCall = effectiveEventId;
+    setCallStates((prev) => ({ ...prev, [cand.id]: { phase: "running" } }));
+    try {
+      await addShortlistEntry(eventForCall, {
+        candidate_id: cand.vendor_id,
+        provider_id: cand.vendor_id,
+        category: cand.category,
+        candidate_name: cand.name,
+        ranking: cand.rank ?? null,
+        selection_source: "BROWSER_AGENT",
+        candidate_data: {
+          address: cand.address,
+          city: cand.city,
+          rating: cand.rating,
+          score: cand.score,
+          maps_url: cand.maps_url,
+          recommendation_reasons: cand.recommendation_reasons,
+        },
+      });
+      await selectShortlistCandidate(eventForCall, cand.vendor_id);
+      await approveShortlistCommunication(eventForCall, cand.vendor_id);
+      setCallStates((prev) => ({
+        ...prev,
+        [cand.id]: { phase: "done", message: "Call + WhatsApp dispatched. Track it on the event's Negotiations page." },
+      }));
+    } catch (err: any) {
+      setCallStates((prev) => ({
+        ...prev,
+        [cand.id]: { phase: "error", message: err?.message || "Could not start the call." },
+      }));
+    }
+  };
 
   // Launch Phase 3 Discovery Workflow
   const handleStartDiscovery = async () => {
@@ -685,34 +746,169 @@ export default function BrowserRuntimePage() {
           </section>
         )}
 
-        {/* Real Live Graphical Desktop Canvas (noVNC) */}
-        <section className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl relative min-h-[520px]">
+        {/* Real Live Graphical Desktop Canvas (Windows Companion or noVNC Container) */}
+        <section className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl relative min-h-[460px]">
           <div className="bg-slate-950/90 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs">
             <div className="flex items-center gap-2 font-mono text-slate-400">
               <span className="w-2.5 h-2.5 rounded-full bg-rose-500/80 inline-block" />
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block" />
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block" />
-              <span className="ml-2 text-slate-300 font-semibold">Live Chromium Graphical Desktop (noVNC)</span>
+              <span className="ml-2 text-slate-300 font-semibold">
+                {companionStatus?.is_connected && !showVncFallback
+                  ? "Windows Companion Headed Browser (Active on Desktop)"
+                  : "Live Chromium Graphical Desktop (noVNC)"}
+              </span>
               <span className="text-slate-600">|</span>
-              <span className="text-slate-500">Virtual Display :99 &bull; Real-Time Playwright Navigation</span>
+              <span className="text-slate-500">
+                {companionStatus?.is_connected && !showVncFallback
+                  ? "Real visible browser running on host Windows desktop"
+                  : "Virtual Display :99 • Real-Time Playwright Navigation"}
+              </span>
             </div>
-            <button
-              onClick={() => setViewerKey((k) => k + 1)}
-              className="text-xs text-slate-400 hover:text-white underline font-mono"
-            >
-              Reload Frame
-            </button>
+            {companionStatus?.is_connected && !showVncFallback ? (
+              <button
+                onClick={() => setShowVncFallback(true)}
+                className="text-xs text-indigo-400 hover:text-indigo-300 underline font-mono"
+              >
+                Switch to Container noVNC View
+              </button>
+            ) : (
+              <div className="flex items-center gap-3">
+                {companionStatus?.is_connected && (
+                  <button
+                    onClick={() => setShowVncFallback(false)}
+                    className="text-xs text-emerald-400 hover:text-emerald-300 underline font-mono"
+                  >
+                    Switch to Windows Desktop View
+                  </button>
+                )}
+                <button
+                  onClick={() => setViewerKey((k) => k + 1)}
+                  className="text-xs text-slate-400 hover:text-white underline font-mono"
+                >
+                  Reload Frame
+                </button>
+              </div>
+            )}
           </div>
 
-          <div className="flex-1 w-full bg-black relative min-h-[500px]">
-            <iframe
-              key={viewerKey}
-              src={viewerUrl}
-              title="EVENTRA Live Chromium Desktop (noVNC)"
-              className="w-full h-full min-h-[500px] border-0"
-              allow="clipboard-read; clipboard-write; fullscreen"
-            />
-          </div>
+          {companionStatus?.is_connected && !showVncFallback ? (
+            <div className="flex-1 w-full bg-slate-950 p-6 flex flex-col justify-between relative min-h-[420px]">
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                      <Laptop className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">Headed Windows Desktop Browser</span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                          Live on User Monitor
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Connected to Companion ({companionStatus.device_name || "Windows Desktop"}) &bull; Operating real browser window
+                      </p>
+                    </div>
+                  </div>
+                  {execution?.execution_id && (
+                    <div className="text-xs font-mono text-slate-400">
+                      Session ID: <span className="text-indigo-400 font-semibold">{execution.session_id || execution.execution_id}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Active Session & Tab Overview */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">
+                      Active URL
+                    </span>
+                    <a
+                      href={execution?.current_url || "#"}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs font-mono text-indigo-400 hover:underline truncate block"
+                      title={execution?.current_url || "Waiting for navigation..."}
+                    >
+                      {execution?.current_url || "Waiting for navigation..."}
+                    </a>
+                  </div>
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">
+                      Active Tab / Page Title
+                    </span>
+                    <span className="text-xs font-medium text-slate-200 truncate block">
+                      {execution?.current_title || "Untitled Tab"}
+                    </span>
+                  </div>
+                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">
+                      Browser Profile & State
+                    </span>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-slate-300">
+                        {execution?.tabs?.length ?? 1} Tab(s) Open
+                      </span>
+                      <span className="text-slate-600">&bull;</span>
+                      <span className="capitalize text-slate-400">
+                        Status: <strong className="text-indigo-400">{execution?.status || "Idle"}</strong>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Real-time Browser Navigation Telemetry */}
+                <div className="bg-slate-900/50 border border-slate-800/80 rounded-lg p-3">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
+                    Live Autonomous Browser Telemetry
+                  </span>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto font-mono text-[11px]">
+                    {events.slice(0, 5).map((evt) => (
+                      <div key={evt.seq} className="flex items-start gap-2 text-slate-300">
+                        <span className="text-slate-500">[{new Date(evt.timestamp).toLocaleTimeString()}]</span>
+                        <span className="text-indigo-400 font-semibold">{evt.event_type}:</span>
+                        <span className="text-slate-300 truncate">{evt.message}</span>
+                      </div>
+                    ))}
+                    {events.length === 0 && (
+                      <span className="text-slate-500 text-xs italic">
+                        Companion connected and ready. A real visible browser window will navigate on your desktop when a task starts.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Toolbar */}
+              <div className="flex items-center justify-between pt-4 border-t border-slate-800/80 text-xs text-slate-400">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span>Chromium/Edge PID Active &bull; Managed by Playwright</span>
+                </div>
+                {execution?.status === "running" && (
+                  <button
+                    onClick={handleStop}
+                    className="px-3 py-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 rounded border border-rose-500/30 transition font-semibold"
+                  >
+                    Halt Browser Execution
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 w-full bg-black relative min-h-[500px]">
+              <iframe
+                key={viewerKey}
+                src={viewerUrl}
+                title="EVENTRA Live Chromium Desktop (noVNC)"
+                className="w-full h-full min-h-[500px] border-0"
+                allow="clipboard-read; clipboard-write; fullscreen"
+              />
+            </div>
+          )}
         </section>
 
         {/* Discovered Candidates Grid */}
@@ -743,7 +939,7 @@ export default function BrowserRuntimePage() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {candidates.map((cand) => (
+              {[...activeCandidates, ...(showRejected ? rejectedCandidates : [])].map((cand) => (
                 <div
                   key={cand.id}
                   className="bg-slate-950 border border-slate-800/90 rounded-xl p-4 flex flex-col justify-between gap-3 hover:border-slate-700 transition shadow-lg relative group"
@@ -758,6 +954,11 @@ export default function BrowserRuntimePage() {
                         <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                           {cand.category} &bull; {cand.city}
                         </span>
+                        {cand.recommended && (
+                          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                            ★ Recommended{typeof cand.score === "number" ? ` · ${Math.round(cand.score * 100)}%` : ""}
+                          </span>
+                        )}
                       </div>
                       <span
                         className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 border ${
@@ -848,6 +1049,50 @@ export default function BrowserRuntimePage() {
                     </div>
                   </div>
 
+                  {/* Call action (human-in-the-loop) */}
+                  {cand.qualification_status !== "rejected" && cand.vendor_id && cand.phone && (
+                    <div className="pt-2 border-t border-slate-900/80 text-[11px] space-y-1.5">
+                      {!callStates[cand.id] && (
+                        <button
+                          onClick={() => setCallStates((prev) => ({ ...prev, [cand.id]: { phase: "confirm" } }))}
+                          className="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-1.5 transition"
+                        >
+                          📞 Call this {cand.category.toLowerCase() === "venue" ? "venue" : "vendor"}
+                        </button>
+                      )}
+                      {callStates[cand.id]?.phase === "confirm" && (
+                        <div className="space-y-1.5">
+                          <p className="text-slate-300">
+                            Agent will call <span className="font-mono">{cand.phone}</span> ({cand.name}) and message them on WhatsApp.
+                          </p>
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => handleCallCandidate(cand)}
+                              className="flex-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-1.5"
+                            >
+                              Confirm call
+                            </button>
+                            <button
+                              onClick={() =>
+                                setCallStates((prev) => {
+                                  const next = { ...prev };
+                                  delete next[cand.id];
+                                  return next;
+                                })
+                              }
+                              className="flex-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {callStates[cand.id]?.phase === "running" && <p className="text-indigo-300">Starting call…</p>}
+                      {callStates[cand.id]?.phase === "done" && <p className="text-emerald-400">{callStates[cand.id]?.message}</p>}
+                      {callStates[cand.id]?.phase === "error" && <p className="text-rose-400">{callStates[cand.id]?.message}</p>}
+                    </div>
+                  )}
+
                   {/* Persistence Badge */}
                   <div className="pt-2 border-t border-slate-900/80 flex items-center justify-between text-[11px]">
                     {cand.is_persisted ? (
@@ -866,6 +1111,16 @@ export default function BrowserRuntimePage() {
                 </div>
               ))}
             </div>
+          )}
+          {rejectedCandidates.length > 0 && (
+            <button
+              onClick={() => setShowRejected((v) => !v)}
+              className="mt-3 text-[11px] text-slate-400 hover:text-slate-200 underline"
+            >
+              {showRejected
+                ? "Hide excluded candidates"
+                : `${rejectedCandidates.length} excluded (government / institutions / non-hireable) — review`}
+            </button>
           )}
         </section>
 
@@ -920,5 +1175,19 @@ export default function BrowserRuntimePage() {
         onConnected={() => browserCompanionApi.getStatus().then(setCompanionStatus).catch(() => {})}
       />
     </div>
+  );
+}
+
+export default function BrowserRuntimePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
+          Loading Browser Runtime...
+        </div>
+      }
+    >
+      <BrowserRuntimeContent />
+    </Suspense>
   );
 }

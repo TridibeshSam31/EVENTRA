@@ -399,6 +399,28 @@ class ProviderCommunicationService:
 
         phone = str(phone).strip() if phone else None
 
+        # Agent run that recommended this candidate (if any): its progress log
+        # also records this real outreach so the agent UI can follow it.
+        from app.services.agent_run_events import AgentRunEventRecorder
+        run_events = AgentRunEventRecorder(self.db)
+        agent_run_id = c_data.get("agent_run_id")
+
+        def _record_run_event(event_type: str, data: Dict[str, Any]) -> None:
+            run_events.record(
+                agent_run_id,
+                event_id,
+                event_type,
+                {
+                    "candidate_id": entry.candidate_id,
+                    "candidate_name": entry.candidate_name,
+                    "category": entry.category,
+                    "approval_id": approval_id,
+                    **data,
+                },
+            )
+
+        _record_run_event("communication.started", {"has_contact_phone": bool(phone)})
+
         # Emit communication.started
         live_broker.publish_sync(
             event_id,
@@ -426,6 +448,10 @@ class ProviderCommunicationService:
             whatsapp_error = "No contact phone number available"
             overall_status = "UNAVAILABLE"
             logger.info(f"Communication for {entry.candidate_name} not attempted: phone number missing.")
+            _record_run_event(
+                "communication.status_changed",
+                {"channel": "ALL", "status": "NOT_ATTEMPTED", "detail": "No contact phone number available"},
+            )
         else:
             # --- OPERATION 1: VOICE CALL ---
             voice_configured = False
@@ -442,6 +468,10 @@ class ProviderCommunicationService:
             if not voice_configured:
                 call_status = "UNAVAILABLE"
                 call_error = "Voice provider is not configured"
+                _record_run_event(
+                    "communication.status_changed",
+                    {"channel": "CALL", "status": "UNAVAILABLE", "detail": call_error},
+                )
                 logger.info(f"Voice call unavailable for {entry.candidate_name}: provider not configured")
                 live_broker.publish_sync(
                     event_id,
@@ -474,6 +504,12 @@ class ProviderCommunicationService:
                     )
                     if call_res.success:
                         call_status = "COMPLETED"
+                        # The provider accepted the call request; the conversation outcome
+                        # arrives separately through the voice/negotiation stream.
+                        _record_run_event(
+                            "communication.status_changed",
+                            {"channel": "CALL", "status": "CALL_PLACED", "detail": "Call request accepted by voice provider"},
+                        )
                         live_broker.publish_sync(
                             event_id,
                             {
@@ -487,6 +523,10 @@ class ProviderCommunicationService:
                     else:
                         call_status = "FAILED"
                         call_error = call_res.error or "Voice call attempt failed"
+                        _record_run_event(
+                            "communication.status_changed",
+                            {"channel": "CALL", "status": "FAILED", "detail": call_error[:300]},
+                        )
                         live_broker.publish_sync(
                             event_id,
                             {
@@ -501,6 +541,10 @@ class ProviderCommunicationService:
                     logger.error(f"Voice call dispatch exception for {entry.candidate_name}: {exc}")
                     call_status = "FAILED"
                     call_error = str(exc)
+                    _record_run_event(
+                        "communication.status_changed",
+                        {"channel": "CALL", "status": "FAILED", "detail": call_error[:300]},
+                    )
                     live_broker.publish_sync(
                         event_id,
                         {
@@ -520,6 +564,10 @@ class ProviderCommunicationService:
             if not whatsapp_configured:
                 whatsapp_status = "UNAVAILABLE"
                 whatsapp_error = "WhatsApp provider is not configured"
+                _record_run_event(
+                    "communication.status_changed",
+                    {"channel": "WHATSAPP", "status": "UNAVAILABLE", "detail": whatsapp_error},
+                )
                 logger.info(f"WhatsApp unavailable for {entry.candidate_name}: provider not configured")
                 live_broker.publish_sync(
                     event_id,
@@ -557,6 +605,16 @@ class ProviderCommunicationService:
                     )
                     if wa_res.success:
                         whatsapp_status = "SENT"
+                        # No delivery-receipt webhook exists, so delivery is never claimed.
+                        _record_run_event(
+                            "communication.status_changed",
+                            {
+                                "channel": "WHATSAPP",
+                                "status": "SENT",
+                                "delivery_confirmed": False,
+                                "detail": "Accepted by WhatsApp provider; delivery not confirmed",
+                            },
+                        )
                         live_broker.publish_sync(
                             event_id,
                             {
@@ -569,6 +627,10 @@ class ProviderCommunicationService:
                     else:
                         whatsapp_status = "FAILED"
                         whatsapp_error = wa_res.error or "WhatsApp dispatch failed"
+                        _record_run_event(
+                            "communication.status_changed",
+                            {"channel": "WHATSAPP", "status": "FAILED", "detail": whatsapp_error[:300]},
+                        )
                         live_broker.publish_sync(
                             event_id,
                             {
@@ -583,6 +645,10 @@ class ProviderCommunicationService:
                     logger.error(f"WhatsApp dispatch exception for {entry.candidate_name}: {exc}")
                     whatsapp_status = "FAILED"
                     whatsapp_error = str(exc)
+                    _record_run_event(
+                        "communication.status_changed",
+                        {"channel": "WHATSAPP", "status": "FAILED", "detail": whatsapp_error[:300]},
+                    )
                     live_broker.publish_sync(
                         event_id,
                         {
@@ -629,6 +695,16 @@ class ProviderCommunicationService:
 
         self.db.commit()
         self.db.refresh(entry)
+
+        _record_run_event(
+            "communication.status_changed",
+            {
+                "channel": "OVERALL",
+                "status": overall_status,
+                "call_status": call_status,
+                "whatsapp_status": whatsapp_status,
+            },
+        )
 
         # 5. Broadcast Final Realtime Events
         end_event_type = "communication.completed" if overall_status in ("COMPLETED", "PARTIAL") else "communication.failed"

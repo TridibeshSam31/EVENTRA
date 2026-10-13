@@ -12,7 +12,7 @@ Implements the multi-iteration agentic discovery pipeline:
 """
 import logging
 import math
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -101,8 +101,13 @@ class AgenticDiscoveryController:
         run_id: Optional[str] = None,
         trigger: str = "routine",
         incident_id: Optional[str] = None,
+        progress_callback: Optional[Callable[[str, str, Dict[str, Any], int], None]] = None,
     ) -> TieredShortlistResult:
-        """Executes the complete agentic discovery loop end-to-end with persisted run telemetry."""
+        """Executes the complete agentic discovery loop end-to-end with persisted run telemetry.
+
+        `progress_callback(event_type, message, data, iteration)` is invoked at each
+        logged discovery milestone so callers can relay real progress.
+        """
         # 1. Resolve coordinates
         clean_loc = geospatial_discovery.clean_city_name(location or "Delhi")
         if latitude is None or longitude is None:
@@ -177,6 +182,12 @@ class AgenticDiscoveryController:
                     )
                 except Exception:
                     pass
+
+            if progress_callback:
+                try:
+                    progress_callback(ev_type, message, data or {}, iteration or 1)
+                except Exception as cb_err:
+                    logger.warning(f"Discovery progress callback failed: {cb_err}")
 
         seen_ids: Set[str] = set()
         tried_queries: Set[str] = set()

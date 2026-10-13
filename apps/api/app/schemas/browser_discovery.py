@@ -56,6 +56,10 @@ class DiscoveredCandidate(BaseModel):
     is_persisted: bool = Field(False, description="Whether record was successfully saved to Vendor DB")
     vendor_id: Optional[str] = Field(None, description="Database Vendor ID if persisted")
     is_new_vendor: Optional[bool] = Field(None, description="True if new vendor created; False if deduplicated/enriched")
+    score: Optional[float] = Field(None, description="Deterministic ranking score (0.0 - 1.0); None for rejected candidates")
+    rank: Optional[int] = Field(None, description="1-based rank among non-rejected candidates")
+    recommended: bool = Field(False, description="True for the single best, contactable candidate the agent recommends calling")
+    recommendation_reasons: List[str] = Field(default_factory=list, description="Evidence behind the score / recommendation")
 
 
 class BrowserDiscoveryResponse(BaseModel):

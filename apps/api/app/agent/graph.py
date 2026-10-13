@@ -58,6 +58,14 @@ def _get_context(config: Optional[RunnableConfig]):
     return db, llm
 
 
+def _record_run_event(config: Optional[RunnableConfig], event_id: str, event_type: str, data: Dict[str, Any]) -> None:
+    """Records a progress event when the run was started with a progress recorder."""
+    configurable = (config or {}).get("configurable", {})
+    recorder = configurable.get("run_events")
+    if recorder is not None:
+        recorder.record(configurable.get("events_run_id"), event_id, event_type, data)
+
+
 def observe_node(state: AgentState, config: Optional[RunnableConfig] = None) -> Dict[str, Any]:
     """Phase 1: OBSERVE authoritative event state, incidents, and constraints."""
     db, _ = _get_context(config)
@@ -404,12 +412,27 @@ def tool_execution_node(state: AgentState, config: Optional[RunnableConfig] = No
     tool_name = last_dec.get("tool_name", "")
     tool_args = last_dec.get("tool_arguments") or {}
 
+    safe_args = {k: v for k, v in tool_args.items() if k != "db"}
+    _record_run_event(config, event_id, "agent.tool_started", {"tool": tool_name, "step": step_count, "arguments": safe_args})
+
     tool_result = default_registry.execute(
         tool_name=tool_name,
         arguments=tool_args,
         db=db,
         user_id=user_id,
         event_id=event_id,
+    )
+
+    _record_run_event(
+        config,
+        event_id,
+        "agent.tool_completed",
+        {
+            "tool": tool_name,
+            "step": step_count,
+            "status": tool_result.status.value,
+            "summary": str(tool_result.summary())[:300],
+        },
     )
 
     # Build structured history entry (operational facts, NOT chain-of-thought)
