@@ -2,22 +2,12 @@
 
 import React from "react";
 import Link from "next/link";
-import {
-  FileText,
-  Calendar,
-  Clock,
-  MapPin,
-  Users,
-  DollarSign,
-  Layers,
-  ShieldCheck,
-  Tag,
-  AlertCircle,
-  Building2,
-  ExternalLink,
-} from "lucide-react";
+import { ArrowUpRight, FileText, Pencil } from "lucide-react";
 import type { EventResponse, EventSummary } from "@/types/api";
 import { ProvenanceBadge } from "./ProvenanceBadge";
+import { EmptyState } from "@/components/ds";
+import { humanizeCode } from "@/lib/humanize";
+import { isMidnight } from "./planningFormat";
 
 interface EventBlueprintProps {
   event: EventResponse | null;
@@ -25,23 +15,32 @@ interface EventBlueprintProps {
   className?: string;
 }
 
-export function EventBlueprint({
-  event,
-  summary,
-  className = "",
-}: EventBlueprintProps) {
+/** Date always; clock time only when it's a real time (not a date-only midnight). */
+function fmtWhen(iso: string | null) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return {
+    date: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" }),
+    time: isMidnight(iso) ? null : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }),
+  };
+}
+
+/** The event spec as a compact production spec sheet. */
+export function EventBlueprint({ event, summary, className = "" }: EventBlueprintProps) {
   if (!event && !summary) {
     return (
-      <div className={`p-8 bg-white border border-slate-200 rounded-xl text-center text-slate-500 ${className}`}>
-        <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-        <p className="text-sm font-semibold text-slate-700">Event Blueprint Not Available</p>
-        <p className="text-xs text-slate-400 mt-1">Authoritative event specification could not be retrieved from backend.</p>
-      </div>
+      <EmptyState
+        className={className}
+        icon={<FileText className="h-5 w-5" />}
+        title="Event details not available"
+        description="The event specification could not be loaded from the server."
+      />
     );
   }
 
-  const name = event?.name || summary?.event_name || "UNKNOWN";
-  const type = event?.event_type || summary?.event_type || "UNKNOWN";
+  const name = event?.name || summary?.event_name || "Untitled event";
+  const type = event?.event_type || summary?.event_type || null;
   const location = event?.location || summary?.location || null;
   const startDatetime = event?.start_datetime || summary?.start_datetime || null;
   const endDatetime = event?.end_datetime || summary?.end_datetime || null;
@@ -49,125 +48,102 @@ export function EventBlueprint({
   const totalBudget = event?.total_budget ?? summary?.total_budget ?? null;
   const currency = event?.currency || summary?.currency || "INR";
   const currSym = currency === "INR" ? "₹" : `${currency} `;
-  const state = event?.lifecycle_state || event?.state || summary?.lifecycle_state || "UNKNOWN";
+  const state = event?.lifecycle_state || event?.state || summary?.lifecycle_state || null;
   const description = event?.description || null;
+  const start = fmtWhen(startDatetime);
+  const end = fmtWhen(endDatetime);
+  const eventId = event?.id || summary?.event_id || null;
+
+  const specs: Array<{ label: string; value: string; missing?: boolean }> = [
+    { label: "Type", value: type ? humanizeCode(type) : "Not set", missing: !type },
+    {
+      label: "Guests",
+      value: guestCount != null ? Number(guestCount).toLocaleString() : "Not set",
+      missing: guestCount == null,
+    },
+    {
+      label: "Budget",
+      value: totalBudget != null ? `${currSym}${Number(totalBudget).toLocaleString()}` : "Not set",
+      missing: totalBudget == null,
+    },
+    { label: "Location", value: location || "Not set", missing: !location },
+  ];
+
+  const whenRows = [
+    { label: "Starts", v: start },
+    { label: "Ends", v: end },
+  ];
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden ${className}`}>
-      {/* Header */}
-      <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
-              <FileText className="w-3 h-3 text-[#D6003C]" />
-              Event Specification Blueprint
-            </span>
+    <section className={`surface overflow-hidden ${className}`}>
+      <header className="flex items-start justify-between gap-3 border-b border-ink-200 px-5 py-4">
+        <div className="min-w-0">
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className="eyebrow">The brief</span>
             <ProvenanceBadge provenance="SOURCE" size="sm" />
-            <span className="text-[10px] font-mono text-slate-400">
-              ID: {event?.id || summary?.event_id || "UNKNOWN"}
-            </span>
-          </div>
-          <h2 className="text-xl font-bold text-slate-900 tracking-tight">{name}</h2>
-          {description && (
-            <p className="text-xs text-slate-500 mt-1 max-w-2xl leading-relaxed">{description}</p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
-            <span>State: <strong className="font-mono">{state}</strong></span>
-          </div>
-        </div>
-      </div>
-
-      {/* Primary Spec Grid */}
-      <div className="p-5 grid grid-cols-2 md:grid-cols-4 gap-4">
-        {/* Event Type */}
-        <div className="p-3 rounded-lg border border-slate-100 bg-slate-50/60">
-          <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5 mb-1">
-            <Tag className="w-3 h-3 text-slate-400" /> Event Type
-          </span>
-          <span className="text-sm font-semibold text-slate-900 font-mono">
-            {type}
-          </span>
-        </div>
-
-        {/* Expected Attendees */}
-        <div className="p-3 rounded-lg border border-slate-100 bg-slate-50/60">
-          <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5 mb-1">
-            <Users className="w-3 h-3 text-slate-400" /> Attendees
-          </span>
-          <span className="text-sm font-semibold text-slate-900 font-mono">
-            {guestCount != null ? Number(guestCount).toLocaleString() : "NOT AVAILABLE"}
-          </span>
-        </div>
-
-        {/* Budget Allocation Ceiling */}
-        <div className="p-3 rounded-lg border border-slate-100 bg-slate-50/60">
-          <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5 mb-1">
-            <DollarSign className="w-3 h-3 text-slate-400" /> Target Budget
-          </span>
-          <span className="text-sm font-semibold text-slate-900 font-mono">
-            {totalBudget != null ? `${currSym}${Number(totalBudget).toLocaleString()}` : "UNSET"}
-          </span>
-        </div>
-
-        {/* Location & Venue */}
-        <div className="p-3 rounded-lg border border-slate-100 bg-slate-50/60">
-          <span className="text-[10px] uppercase font-bold text-slate-400 flex items-center gap-1.5 mb-1">
-            <MapPin className="w-3 h-3 text-slate-400" /> Location / Venue
-          </span>
-          {location ? (
-            <div className="text-xs font-semibold text-slate-900 truncate" title={location}>
-              {location}
-            </div>
-          ) : (
-            <span className="text-xs text-amber-600 font-medium">VENUE UNASSIGNED</span>
-          )}
-        </div>
-      </div>
-
-      {/* Operational Timing & Metadata Bar */}
-      <div className="px-5 pb-5">
-        <div className="p-3.5 rounded-lg border border-slate-200/70 bg-white grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 text-xs">
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-              Start Datetime
-            </span>
-            <span className="font-mono text-slate-700">
-              {startDatetime ? new Date(startDatetime).toLocaleString() : "NOT AVAILABLE"}
-            </span>
-          </div>
-
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-              End Datetime
-            </span>
-            <span className="font-mono text-slate-700">
-              {endDatetime ? new Date(endDatetime).toLocaleString() : "NOT AVAILABLE"}
-            </span>
-          </div>
-
-          <div>
-            <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-              Venue Navigation
-            </span>
-            {event?.id ? (
-              <Link
-                href={`/events/${event.id}/venue`}
-                className="text-xs font-semibold text-[#D6003C] hover:underline inline-flex items-center gap-1"
-              >
-                <Building2 className="w-3.5 h-3.5" />
-                Inspect Venue Selection
-                <ExternalLink className="w-3 h-3" />
-              </Link>
-            ) : (
-              <span className="text-slate-400">N/A</span>
+            {state && (
+              <span className="chip border-ink-200 bg-ink-50 text-ink-700">
+                <span className="cue-light bg-go-500" />
+                {humanizeCode(state)}
+              </span>
             )}
           </div>
+          <h3
+            className="font-display text-[20px] font-bold leading-tight tracking-[-0.02em] text-ink-900"
+            style={{ fontStretch: "90%" }}
+          >
+            {name}
+          </h3>
+          {description && <p className="mt-1 line-clamp-2 text-[13px] leading-relaxed text-ink-600">{description}</p>}
         </div>
-      </div>
-    </div>
+        {eventId && (
+          <Link
+            href={`/events/${eventId}/setup`}
+            className="btn-ghost h-8 shrink-0 px-2.5 text-[12px]"
+            title="Edit event details"
+          >
+            <Pencil className="h-3.5 w-3.5" /> Edit
+          </Link>
+        )}
+      </header>
+
+      <dl className="grid grid-cols-2 gap-px bg-ink-200">
+        {specs.map((s) => (
+          <div key={s.label} className="min-w-0 bg-[#FDFCFA] px-5 py-3">
+            <dt className="eyebrow">{s.label}</dt>
+            <dd
+              className={`mt-1 truncate text-[14px] font-semibold ${s.missing ? "text-standby-700" : "text-ink-900"}`}
+              title={s.value}
+            >
+              {s.value}
+            </dd>
+          </div>
+        ))}
+        {whenRows.map((row) => (
+          <div key={row.label} className="min-w-0 bg-[#FDFCFA] px-5 py-3">
+            <dt className="eyebrow">{row.label}</dt>
+            {row.v ? (
+              <dd className="mt-1 flex flex-wrap items-baseline gap-x-2">
+                <span className="text-[14px] font-semibold text-ink-900">{row.v.date}</span>
+                {row.v.time && <span className="timecode text-[13px] text-ink-500">{row.v.time}</span>}
+              </dd>
+            ) : (
+              <dd className="mt-1 text-[14px] font-semibold text-standby-700">Not scheduled</dd>
+            )}
+          </div>
+        ))}
+      </dl>
+
+      {eventId && (
+        <div className="border-t border-ink-200 px-5 py-3">
+          <Link
+            href={`/events/${eventId}/venue`}
+            className="inline-flex items-center gap-1 text-[12.5px] font-semibold text-ink-700 hover:text-cue-700"
+          >
+            Venue selection <ArrowUpRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+      )}
+    </section>
   );
 }

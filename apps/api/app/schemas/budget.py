@@ -34,6 +34,12 @@ class BudgetSummaryResponse(BaseModel):
     item_count: int = 0
     categories: Dict[str, float] = {}
     items: List[BudgetItemResponse] = []
+    # UX v3: single committed definition (agreed cost of CONFIRMED assignments)
+    total_committed: float = 0.0
+    committed_by_category: Dict[str, float] = {}
+    remaining_after_committed: float = 0.0
+    utilization_percent: float = 0.0
+    committed_basis: str = "committed = agreed cost of confirmed vendor assignments"
 
 
 class BudgetVarianceResponse(BaseModel):

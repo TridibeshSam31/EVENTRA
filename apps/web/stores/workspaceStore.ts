@@ -9,12 +9,18 @@ import {
   selectShortlistCandidate,
   approveShortlistCommunication,
   dismissShortlistCommunication,
+  retryShortlistCommunication,
+  type CommunicationChannel,
   type ShortlistEntry,
 } from "@/lib/api/shortlist";
 import { listApprovals } from "@/lib/api/approvals";
 import { listIncidents } from "@/lib/api/incidents";
+import { onTabVisibilityChange } from "@/lib/sse";
 
 let activeEventSource: EventSource | null = null;
+// Live stream paused while the tab is in the background (see onTabVisibilityChange).
+let pausedLiveEventId: string | null = null;
+let liveVisibilityBound = false;
 let activeEventId: string | null = null;
 
 interface WorkspaceState {
@@ -25,7 +31,11 @@ interface WorkspaceState {
   approvals: any[];
   incidents: any[];
   isLoading: boolean;
+  // Event whose first workspace fetch has finished (success or failure).
+  loadedEventId: string | null;
   sseConnected: boolean;
+  // Bumped on every live frame (incl. the reconnect snapshot) so views can refetch.
+  liveVersion: number;
   isAgentRunning: boolean;
   isWaitingForSelection: boolean;
   agentMessage: string | null;
@@ -41,6 +51,7 @@ interface WorkspaceState {
   selectCandidate: (candidateId: string) => Promise<ShortlistEntry>;
   approveCommunication: (candidateId: string) => Promise<ShortlistEntry>;
   dismissCommunication: (candidateId: string) => Promise<ShortlistEntry>;
+  retryCommunication: (candidateId: string, channel: CommunicationChannel) => Promise<ShortlistEntry>;
   isShortlisted: (candidateId: string) => boolean;
   isCandidateSelected: (candidateId: string) => boolean;
   connectSSE: (eventId: string) => void;
@@ -56,7 +67,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   approvals: [],
   incidents: [],
   isLoading: false,
+  loadedEventId: null,
   sseConnected: false,
+  liveVersion: 0,
   isAgentRunning: false,
   isWaitingForSelection: false,
   agentMessage: null,
@@ -64,7 +77,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   setEventId: (eventId: string) => {
     const currentId = get().eventId;
     if (currentId !== eventId) {
-      set({ eventId });
+      // Drop the previous event's data so it never flashes on the new page.
+      set({
+        eventId,
+        event: null,
+        opsStatus: null,
+        shortlist: [],
+        approvals: [],
+        incidents: [],
+        isLoading: true,
+        loadedEventId: null,
+      });
       get().connectSSE(eventId);
       get().refreshWorkspace(eventId);
     }
@@ -113,7 +136,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       isWaitingForSelection: !!agentWaiting,
       isAgentRunning: !!agentRunning,
       agentMessage: agentMsg,
-      isLoading: false,
       sseConnected: true,
     });
   },
@@ -131,6 +153,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         listApprovals(eventId),
         listIncidents(eventId),
       ]);
+      // The user switched events while this was in flight.
+      if (get().eventId !== eventId) return;
 
       const opsVal = opsRes.status === "fulfilled" ? opsRes.value : get().opsStatus;
       const agentWaiting =
@@ -147,6 +171,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         approvals: appRes.status === "fulfilled" ? appRes.value.items : get().approvals,
         incidents: incRes.status === "fulfilled" ? incRes.value.items : get().incidents,
         isLoading: false,
+        loadedEventId: eventId,
         isWaitingForSelection: !!agentWaiting,
         isAgentRunning: !!agentRunning,
         agentMessage: agentWaiting
@@ -155,7 +180,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       });
     } catch (err) {
       console.error("[WorkspaceStore] refresh error:", err);
-      set({ isLoading: false });
+      if (get().eventId === eventId) set({ isLoading: false, loadedEventId: eventId });
     }
   },
 
@@ -314,6 +339,20 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
   },
 
+  retryCommunication: async (candidateId: string, channel: CommunicationChannel) => {
+    const eventId = get().eventId;
+    if (!eventId) throw new Error("No active event ID in workspace");
+
+    try {
+      const updated = await retryShortlistCommunication(eventId, candidateId, channel);
+      await get().refreshOpsStatus(eventId);
+      return updated;
+    } catch (err) {
+      console.error("[WorkspaceStore] retryCommunication error:", err);
+      throw err;
+    }
+  },
+
   dismissCommunication: async (candidateId: string) => {
     const eventId = get().eventId;
     if (!eventId) throw new Error("No active event ID in workspace");
@@ -331,6 +370,26 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   connectSSE: (eventId: string) => {
 
     if (typeof window === "undefined") return;
+
+    if (!liveVisibilityBound) {
+      liveVisibilityBound = true;
+      onTabVisibilityChange(
+        () => {
+          if (activeEventSource && activeEventId) {
+            pausedLiveEventId = activeEventId;
+            activeEventSource.close();
+            activeEventSource = null;
+            set({ sseConnected: false });
+          }
+        },
+        () => {
+          const paused = pausedLiveEventId;
+          pausedLiveEventId = null;
+          // Reconnecting delivers a fresh snapshot, so nothing missed while hidden is lost.
+          if (paused && activeEventId === paused) get().connectSSE(paused);
+        },
+      );
+    }
 
     // Deduplicate: avoid reopening stream if already active for this event
     if (activeEventId === eventId && activeEventSource && activeEventSource.readyState !== 2) {
@@ -360,6 +419,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
       const handleEventMessage = (type: string, data: any) => {
         const normalizedType = (type || "").toLowerCase();
+        if (activeEventId === eventId) set({ liveVersion: get().liveVersion + 1 });
 
         // 1. Initial snapshot hydration on connect / reconnect
         if (normalizedType === "connected") {
@@ -516,6 +576,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         "communication.started",
         "communication.completed",
         "communication.failed",
+        "communication.updated",
         "call.started",
         "call.completed",
         "call.failed",
@@ -525,7 +586,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         "assignment.created",
         "assignment.updated",
         "incident.created",
+        "incident.updated",
         "incident.resolved",
+        "approval.decided",
+        "recovery.executed",
+        "recovery.options_updated",
+        "vendor.signal",
+        "TASK_UPDATED",
+        "TASK_VERIFIED",
       ];
 
 
@@ -557,6 +625,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   disconnectSSE: () => {
+    pausedLiveEventId = null;
     if (activeEventSource) {
       activeEventSource.close();
       activeEventSource = null;

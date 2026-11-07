@@ -96,133 +96,146 @@ export function CompanionPairingModal({
     setLoading(false);
   };
 
+  const code = pairingData?.pairing_code;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/60 p-4 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Pair the Windows browser companion"
+      onKeyDown={(e) => e.key === "Escape" && onClose()}
+    >
+      <div className="flex w-full max-w-lg animate-rise-in flex-col overflow-hidden rounded-2xl bg-paper text-ink-900 shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
-              <Laptop className="w-5 h-5" />
+        <div className="flex items-start justify-between gap-3 px-6 pb-4 pt-5">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink-900 text-ink-50">
+              <Laptop className="h-5 w-5" />
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white">Windows Browser Companion</h3>
-              <p className="text-xs text-slate-400">Option A: Genuine Visible Chromium / Edge on Desktop</p>
+              <h3 className="text-[16px] font-bold text-ink-900">Windows browser companion</h3>
+              <p className="text-[12.5px] text-ink-500">Lets the agent drive a real, visible browser on your PC.</p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 transition"
+            className="rounded-lg p-1.5 text-ink-400 transition hover:bg-ink-100 hover:text-ink-800"
+            aria-label="Close"
+            autoFocus
           >
-            <X className="w-4 h-4" />
+            <X className="h-4 w-4" />
           </button>
         </div>
 
         {/* Body */}
-        <div className="p-6 space-y-5">
+        <div className="space-y-5 px-6 pb-6">
           {status?.is_connected ? (
-            <div className="p-4 rounded-xl bg-emerald-950/40 border border-emerald-800/80 flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-go-200 bg-go-50 p-4">
               <div className="flex items-center gap-3">
-                <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="cue-light h-2.5 w-2.5 bg-go-500 animate-cue-blink" />
                 <div>
-                  <h4 className="text-xs font-bold text-emerald-300">Desktop Companion Connected</h4>
-                  <p className="text-[11px] text-emerald-400/80">
-                    Device: {status.device_name || "Windows PC"} • Ready for visible browser tasks
+                  <h4 className="text-[13.5px] font-semibold text-go-900">Companion connected</h4>
+                  <p className="text-[12px] text-go-700">
+                    {status.device_name || "Windows PC"} · ready for visible browser tasks
                   </p>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold shadow-sm"
-              >
+              <button onClick={onClose} className="btn h-8 bg-go-600 px-3 text-[12px] text-white hover:bg-go-700">
                 Done
               </button>
             </div>
           ) : (
             <>
-              <div>
-                <p className="text-xs text-slate-300 leading-relaxed">
-                  To view the genuine browser window opening on your physical Windows screen, start the local
-                  companion in PowerShell using the pairing code below:
-                </p>
-              </div>
+              <ol className="space-y-1 text-[13px] text-ink-700">
+                <li className="flex gap-2">
+                  <span className="font-mono text-[11px] text-ink-400">01</span> Open a terminal in the EVENTRA folder on your PC.
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-mono text-[11px] text-ink-400">02</span> Run the command below — it includes your code.
+                </li>
+                <li className="flex gap-2">
+                  <span className="font-mono text-[11px] text-ink-400">03</span> This window updates as soon as it connects.
+                </li>
+              </ol>
 
-              {/* Pairing Code Box */}
-              <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex items-center justify-between">
+              {/* Pairing code */}
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-ink-200 bg-[#FDFCFA] px-4 py-3.5 shadow-sm">
                 <div>
-                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-                    Your 6-Digit Pairing Code
-                  </span>
-                  <div className="text-2xl font-mono font-extrabold text-indigo-400 tracking-widest mt-1">
-                    {loading ? "..." : pairingData?.pairing_code || "------"}
+                  <span className="eyebrow">Pairing code</span>
+                  <div className="mt-1.5 flex gap-1.5" aria-label={code ? `Pairing code ${code}` : "No pairing code yet"}>
+                    {(loading ? "······" : code || "------").split("").map((ch, i) => (
+                      <span
+                        key={i}
+                        className="grid h-10 w-8 place-items-center rounded-md bg-ink-100 font-mono text-[20px] font-bold text-ink-900"
+                      >
+                        {ch}
+                      </span>
+                    ))}
                   </div>
                 </div>
                 <button
                   onClick={handleRefreshCode}
                   disabled={loading}
-                  title="Generate new code"
-                  className="p-2 text-slate-400 hover:text-slate-200 hover:bg-slate-850 rounded-lg transition"
+                  title="Generate a new code"
+                  aria-label="Generate a new code"
+                  className="rounded-lg p-2 text-ink-500 transition hover:bg-ink-100 hover:text-ink-900"
                 >
-                  <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                  <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                 </button>
               </div>
 
-              {/* Terminal Command Selector */}
+              {/* Command */}
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-[11px] font-semibold text-slate-400">
-                    Run in your Windows terminal:
-                  </label>
-                  <div className="flex items-center gap-1 bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-[10px] font-medium">
-                    <button
-                      type="button"
-                      onClick={() => setTerminalType("cmd")}
-                      className={`px-2 py-0.5 rounded transition ${
-                        terminalType === "cmd"
-                          ? "bg-indigo-600 text-white font-semibold"
-                          : "text-slate-400 hover:text-slate-200"
-                      }`}
-                    >
-                      Command Prompt (cmd)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTerminalType("powershell")}
-                      className={`px-2 py-0.5 rounded transition ${
-                        terminalType === "powershell"
-                          ? "bg-indigo-600 text-white font-semibold"
-                          : "text-slate-400 hover:text-slate-200"
-                      }`}
-                    >
-                      PowerShell
-                    </button>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="eyebrow">Run in your terminal</span>
+                  <div className="inline-flex rounded-lg border border-ink-200 bg-ink-100/70 p-0.5 text-[11.5px] font-semibold">
+                    {(
+                      [
+                        { id: "cmd", label: "Command Prompt" },
+                        { id: "powershell", label: "PowerShell" },
+                      ] as const
+                    ).map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => setTerminalType(t.id)}
+                        className={`rounded-md px-2.5 py-1 transition ${
+                          terminalType === t.id ? "bg-[#FDFCFA] text-ink-900 shadow-sm" : "text-ink-500 hover:text-ink-800"
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
                   </div>
                 </div>
-                <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono text-xs text-slate-300 flex items-center justify-between gap-3">
-                  <span className="truncate select-all text-indigo-300">{activeCommand}</span>
+                <div className="flex items-center justify-between gap-3 rounded-xl bg-ink-950 px-4 py-3 font-mono text-[12px]">
+                  <span className="min-w-0 select-all truncate text-ink-100">
+                    <span className="text-ink-500">&gt; </span>
+                    {activeCommand}
+                  </span>
                   <button
                     onClick={handleCopy}
-                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium flex items-center gap-1 transition flex-shrink-0"
+                    className="btn h-7 shrink-0 bg-white/10 px-2.5 text-[11.5px] text-ink-100 hover:bg-white/15"
                   >
-                    {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copied ? "Copied" : "Copy"}</span>
+                    {copied ? <Check className="h-3.5 w-3.5 text-go-300" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied ? "Copied" : "Copy"}
                   </button>
                 </div>
               </div>
 
-              {/* Waiting Indicator */}
-              <div className="flex items-center justify-center gap-2 text-xs text-slate-400 py-2">
-                <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-                <span>Waiting for companion to connect...</span>
+              <div className="flex items-center justify-center gap-2 text-[12.5px] text-ink-500" aria-live="polite">
+                <span className="cue-light bg-standby-500 animate-cue-blink" />
+                Waiting for the companion to connect…
               </div>
             </>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3.5 bg-slate-950/60 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
-          <span>Option A: Visible Playwright Desktop</span>
-          <button onClick={onClose} className="hover:text-slate-300 font-medium">
+        <div className="flex items-center justify-between border-t border-ink-200 bg-[#FDFCFA] px-6 py-3 text-[12px] text-ink-500">
+          <span className="font-mono text-[11px]">Visible Playwright browser</span>
+          <button onClick={onClose} className="font-semibold text-ink-700 hover:text-ink-900">
             Close
           </button>
         </div>

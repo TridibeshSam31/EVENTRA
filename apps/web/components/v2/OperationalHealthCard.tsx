@@ -45,7 +45,7 @@ export function OperationalHealthCard({
 
   if (!liveState) {
     return (
-      <div className={`p-5 bg-white border border-slate-200 rounded-xl text-center text-xs text-slate-500 shadow-xs ${className}`}>
+      <div className={`p-5 bg-[#FDFCFA] border border-ink-200 rounded-xl text-center text-xs text-slate-500 shadow-sm ${className}`}>
         <Activity className="w-5 h-5 mx-auto mb-1.5 text-slate-300" />
         <p className="font-semibold text-slate-700">Operational Health</p>
         <p className="text-slate-400 mt-0.5">Live operational state is unavailable.</p>
@@ -125,12 +125,12 @@ export function OperationalHealthCard({
   };
 
   return (
-    <div className={`p-5 bg-white border border-slate-200 rounded-xl shadow-xs space-y-4 ${className}`}>
+    <div className={`p-5 bg-[#FDFCFA] border border-ink-200 rounded-xl shadow-sm space-y-4 ${className}`}>
       {/* Header & Status Indicator */}
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 border-b border-slate-100 pb-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400">
               Live Operations Health
             </span>
             <ProvenanceBadge source="ENGINE" size="sm" />
@@ -160,7 +160,7 @@ export function OperationalHealthCard({
             <button
               onClick={handleResume}
               disabled={isResuming}
-              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition flex items-center gap-1.5 shadow-sm disabled:opacity-50"
             >
               {isResuming ? (
                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -197,7 +197,7 @@ export function OperationalHealthCard({
       {/* Primary Live Telemetry Strip */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
         <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400 block mb-0.5">
             Active Incidents
           </span>
           <span
@@ -210,7 +210,7 @@ export function OperationalHealthCard({
         </div>
 
         <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400 block mb-0.5">
             Schedule Deviations
           </span>
           <span
@@ -223,7 +223,7 @@ export function OperationalHealthCard({
         </div>
 
         <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400 block mb-0.5">
             Task Progress
           </span>
           <span className="font-mono font-bold text-slate-800 text-sm block">
@@ -232,7 +232,7 @@ export function OperationalHealthCard({
         </div>
 
         <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400 block mb-0.5">
             Execution State
           </span>
           <span className="font-mono font-bold text-slate-800 text-sm block">
@@ -244,7 +244,7 @@ export function OperationalHealthCard({
       {/* Pause Confirmation Modal */}
       {showPauseModal && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl border border-slate-200 max-w-md w-full p-5 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+          <div className="bg-[#FDFCFA] rounded-xl border border-slate-200 max-w-md w-full p-5 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
             <div className="flex items-center gap-2 text-rose-700 font-bold text-sm">
               <PauseCircle className="w-4 h-4 text-rose-600" />
               <span>Pause Live Event Operations</span>

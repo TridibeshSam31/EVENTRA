@@ -2,19 +2,21 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import {
-  Calendar,
-  MapPin,
-  Users,
-  PlusCircle,
-  Loader2,
-  ArrowRight,
-  ShieldCheck,
-  Building2,
-  Radio,
-} from "lucide-react";
+import { Calendar, MapPin, Users, Plus, ArrowRight, CalendarPlus } from "lucide-react";
 import { listEvents } from "@/lib/api/events";
 import type { EventResponse } from "@/types/api";
+import { PageHeader, CueChip, EmptyState } from "@/components/ds";
+
+const LIFECYCLE_LABELS: Record<string, string> = {
+  DRAFT: "Draft",
+  PLANNED: "Planning",
+  PLANNING: "Planning",
+  READY: "Ready",
+  LIVE: "Happening now",
+  COMPLETED: "Finished",
+  CONCLUDED: "Finished",
+  CANCELLED: "Cancelled",
+};
 
 export default function EventsListPage() {
   const [events, setEvents] = useState<EventResponse[]>([]);
@@ -37,121 +39,100 @@ export default function EventsListPage() {
   }, []);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-        <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-            Fleet Operations
-          </span>
-          <h1 className="text-2xl font-bold text-slate-900 tracking-tight mt-1">
-            Registered Event Workspaces
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Active and configured event operations running on the EVENTRA adaptive runtime.
-          </p>
-        </div>
+    <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8">
+      <PageHeader
+        eyebrow={loading ? "Events" : `Events · ${events.length}`}
+        title="All events"
+        description="Every event EVENTRA is planning or running for you."
+        actions={
+          <Link href="/events/new" className="btn-primary">
+            <Plus className="h-4 w-4" />
+            Create New Event
+          </Link>
+        }
+      />
 
-        <Link
-          href="/events/new"
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs transition self-start sm:self-auto"
-        >
-          <PlusCircle className="w-4 h-4" />
-          Create New Event
-        </Link>
-      </div>
-
-      {/* Events Grid */}
       {loading ? (
-        <div className="p-16 text-center text-slate-400 bg-white rounded-xl border border-slate-200 shadow-sm">
-          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-[#D6003C]" />
-          <p className="text-xs font-medium text-slate-600">Loading operational events…</p>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3" aria-busy="true">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="workspace-shimmer h-[210px] rounded-xl" />
+          ))}
         </div>
       ) : events.length === 0 ? (
-        <div className="p-16 text-center bg-white rounded-xl border border-slate-200 shadow-sm space-y-4">
-          <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center mx-auto">
-            <Building2 className="w-6 h-6" />
-          </div>
-          <div>
-            <h3 className="text-sm font-bold text-slate-900">No Events Found</h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1">
-              No events are currently registered. Initialize a new event protocol to start autonomous planning and live operations.
-            </p>
-          </div>
-          <Link
-            href="/events/new"
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs transition"
-          >
-            <PlusCircle className="w-3.5 h-3.5" />
-            Initialize Event
-          </Link>
-        </div>
+        <EmptyState
+          icon={<CalendarPlus className="h-5 w-5" />}
+          title="No events yet"
+          description="Describe your first event and EVENTRA will build the plan, find vendors and help you run the day."
+          action={
+            <Link href="/events/new" className="btn-cue">
+              <Plus className="h-4 w-4" />
+              Plan an event
+            </Link>
+          }
+        />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="stagger grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {events.map((ev) => {
             const curr = ev.currency === "INR" || !ev.currency ? "₹" : `${ev.currency} `;
-            const isLive = ev.lifecycle_state === "LIVE" || ev.state === "NORMAL";
+            const isLive = ev.lifecycle_state === "LIVE";
+            const lifecycle = LIFECYCLE_LABELS[(ev.lifecycle_state || "").toUpperCase()] || "Planning";
 
             return (
               <Link
                 key={ev.id}
                 href={`/events/${ev.id}`}
-                className="bg-white rounded-xl border border-slate-200 hover:border-slate-300 p-5 shadow-sm hover:shadow-md transition flex flex-col justify-between group"
+                className="group flex flex-col justify-between rounded-xl border border-ink-200 bg-[#FDFCFA] p-5 shadow-sm transition hover:-translate-y-0.5 hover:border-ink-300 hover:shadow-lg"
               >
                 <div>
-                  <div className="flex items-center justify-between gap-2 mb-2">
-                    <span className="text-[10px] font-mono text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-                      {ev.id.slice(0, 12)}
-                    </span>
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
-                        ev.lifecycle_state === "LIVE"
-                          ? "bg-rose-50 text-rose-700 border-rose-200"
-                          : "bg-slate-100 text-slate-700 border-slate-200"
-                      }`}
-                    >
-                      {ev.lifecycle_state || "PLANNED"}
-                    </span>
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <CueChip tone={isLive ? "cue" : "idle"} pulse={isLive}>
+                      {lifecycle}
+                    </CueChip>
+                    <span className="font-mono text-[10px] text-ink-400">{ev.id.slice(0, 8)}</span>
                   </div>
 
-                  <h3 className="text-base font-bold text-slate-900 group-hover:text-[#D6003C] transition leading-snug">
+                  <h3
+                    className="font-display text-[20px] font-bold leading-[1.1] tracking-[-0.015em] text-ink-900"
+                    style={{ fontStretch: "90%" }}
+                  >
                     {ev.name}
                   </h3>
 
                   {ev.description && (
-                    <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
-                      {ev.description}
-                    </p>
+                    <p className="mt-1.5 line-clamp-2 text-[12.5px] leading-relaxed text-ink-500">{ev.description}</p>
                   )}
 
-                  <div className="grid grid-cols-2 gap-2 mt-4 pt-3 border-t border-slate-100 text-[11px] text-slate-600">
-                    <div className="flex items-center gap-1.5 truncate">
-                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span className="truncate">{ev.location || "Location unset"}</span>
+                  <div className="mt-4 space-y-1.5 border-t border-dashed border-ink-200 pt-3 text-[12px] text-ink-600">
+                    <div className="flex items-center gap-2 truncate">
+                      <Calendar className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                      {ev.start_datetime ? (
+                        new Date(ev.start_datetime).toLocaleDateString(undefined, {
+                          weekday: "short",
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })
+                      ) : (
+                        <span className="text-ink-400">Date not scheduled</span>
+                      )}
                     </div>
-
-                    <div className="flex items-center gap-1.5">
-                      <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span>{ev.guest_count ? `${ev.guest_count.toLocaleString()} guests` : "Capacity unset"}</span>
+                    <div className="flex items-center gap-2 truncate">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                      {ev.location ? <span className="truncate">{ev.location}</span> : <span className="text-ink-400">Location unset</span>}
                     </div>
-
-                    <div className="flex items-center gap-1.5 truncate col-span-2">
-                      <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                      <span>
-                        {ev.start_datetime
-                          ? new Date(ev.start_datetime).toLocaleDateString()
-                          : "Date not scheduled"}
-                      </span>
+                    <div className="flex items-center gap-2">
+                      <Users className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                      {ev.guest_count ? `${ev.guest_count.toLocaleString()} guests` : <span className="text-ink-400">Capacity unset</span>}
                     </div>
                   </div>
                 </div>
 
-                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <span className="font-mono font-bold text-slate-800">
-                    {ev.total_budget != null ? `${curr}${Number(ev.total_budget).toLocaleString()}` : "Budget Unset"}
+                <div className="mt-4 flex items-center justify-between border-t border-ink-200 pt-3">
+                  <span className="font-mono text-[12px] font-semibold text-ink-800">
+                    {ev.total_budget != null ? `${curr}${Number(ev.total_budget).toLocaleString()}` : <span className="text-ink-400">Budget unset</span>}
                   </span>
-                  <span className="text-[#D6003C] font-semibold flex items-center gap-1 group-hover:translate-x-0.5 transition-transform">
-                    Enter Workspace <ArrowRight className="w-3.5 h-3.5" />
+                  <span className="flex items-center gap-1 text-[12.5px] font-semibold text-ink-700 transition group-hover:translate-x-0.5 group-hover:text-ink-900">
+                    Open <ArrowRight className="h-3.5 w-3.5" />
                   </span>
                 </div>
               </Link>

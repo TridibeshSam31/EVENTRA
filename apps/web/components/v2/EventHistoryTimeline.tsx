@@ -139,7 +139,7 @@ export function EventHistoryTimeline({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Controls Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-sm">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-[#FDFCFA] border border-ink-200 rounded-xl shadow-sm">
         <div className="flex items-center gap-1.5 overflow-x-auto text-xs">
           <button
             onClick={() => setSourceFilter("ALL")}
@@ -188,7 +188,7 @@ export function EventHistoryTimeline({
       </div>
 
       {/* Timeline List */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm divide-y divide-slate-100 overflow-hidden">
+      <div className="bg-[#FDFCFA] border border-ink-200 rounded-xl shadow-sm divide-y divide-slate-100 overflow-hidden">
         {filteredItems.length === 0 ? (
           <div className="py-12 text-center text-xs text-slate-400 space-y-1">
             <p className="font-semibold text-slate-600">No events found in timeline</p>

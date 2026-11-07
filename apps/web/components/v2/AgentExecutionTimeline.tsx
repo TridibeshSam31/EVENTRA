@@ -30,7 +30,7 @@ export function AgentExecutionTimeline({
   const tools = run?.tool_history?.length ? run.tool_history : toolHistory;
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
+    <div className={`bg-[#FDFCFA] border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
         <div className="flex items-center gap-2.5">
@@ -39,7 +39,7 @@ export function AgentExecutionTimeline({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+              <h3 className="text-[13.5px] font-semibold text-slate-900">
                 Agent Action Execution Timeline
               </h3>
               <ProvenanceBadge provenance="AGENT" size="sm" />

@@ -1,6 +1,8 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useRef } from "react";
+import Link from "next/link";
+import { Bookmark, BookmarkCheck, CalendarCheck2 } from "lucide-react";
 import {
   X,
   MapPin,
@@ -8,14 +10,11 @@ import {
   Mail,
   Globe,
   Star,
-  CheckCircle2,
-  AlertCircle,
   ExternalLink,
-  ShieldCheck,
-  Building2,
   Users,
-  DollarSign,
-  Info,
+  IndianRupee,
+  Navigation,
+  MessageSquareText,
 } from "lucide-react";
 import { ProvenanceBadge } from "./ProvenanceBadge";
 
@@ -61,6 +60,96 @@ interface CandidateEvidenceDrawerProps {
   onSelectPrimary?: (candidate: CandidateEvidenceData) => void;
   isShortlisted?: boolean;
   isSelecting?: boolean;
+  /** a booking request for this candidate was already sent (shows status instead of the button) */
+  isRequested?: boolean;
+  /** where "Booking requested" links to */
+  approvalsHref?: string;
+}
+
+/**
+ * The qualification engine phrases presence checks as "Verified …". Having a
+ * phone number or a web link is not verification, so we say what it actually is.
+ * A Google search URL is only a search link, never "web presence".
+ */
+export function describeQualificationReason(reason?: string | null): string {
+  if (!reason) return "";
+  const text = reason.trim();
+  const phone = text.match(/^Verified contact phone:\s*(.+)$/i);
+  if (phone) return `Phone listed: ${phone[1]}`;
+  const web = text.match(/^Verified web presence:\s*(\S+)/i);
+  if (web) {
+    return isSearchLink(web[1]) ? "Search link only — no website on record" : `Website listed: ${web[1]}`;
+  }
+  if (/^Verified Google Maps listing$/i.test(text)) return "Google Maps listing on record";
+  return text;
+}
+
+/** True when a URL is just a Google search, not the vendor's own site. */
+export function isSearchLink(url?: string | null): boolean {
+  return !!url && /google\.[a-z.]+\/search/i.test(url);
+}
+
+export const EXCLUSION_FALLBACK = "The engine did not give a reason";
+
+export function humanizeCategory(cat?: string | null) {
+  if (!cat) return "Uncategorized";
+  const map: Record<string, string> = {
+    AV_TECH: "AV & tech",
+    DECOR: "Décor",
+    VENUE: "Venue",
+  };
+  const up = cat.toUpperCase();
+  if (map[up]) return map[up];
+  const s = cat.replace(/_/g, " ").toLowerCase();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/** One evidence fact: label, value, and whether it is known. Unknowns are never guessed. */
+function Fact({
+  icon,
+  label,
+  value,
+  known,
+  mono,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: React.ReactNode;
+  known: boolean;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-3 py-2.5">
+      <span className="mt-0.5 text-ink-400">{icon}</span>
+      <div className="min-w-0 flex-1">
+        <div className="text-[12px] text-ink-500">{label}</div>
+        <div
+          className={`truncate text-[13.5px] ${
+            known ? `font-semibold text-ink-900 ${mono ? "font-mono text-[12.5px]" : ""}` : "italic text-ink-400"
+          }`}
+        >
+          {known ? value : "Not provided by source"}
+        </div>
+      </div>
+      <span
+        className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full text-[10px] font-bold ${
+          known ? "bg-go-50 text-go-600 ring-1 ring-go-200" : "border border-dashed border-ink-300 bg-ink-100 text-ink-400"
+        }`}
+        title={known ? "Present in source data" : "Unknown — not verified"}
+      >
+        {known ? "✓" : "?"}
+      </span>
+    </div>
+  );
+}
+
+function SectionLabel({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
+  return (
+    <div className="mb-2 flex items-center justify-between gap-2">
+      <h4 className="eyebrow">{children}</h4>
+      {right}
+    </div>
+  );
 }
 
 export function CandidateEvidenceDrawer({
@@ -70,320 +159,340 @@ export function CandidateEvidenceDrawer({
   onSelectPrimary,
   isShortlisted = false,
   isSelecting = false,
+  isRequested = false,
+  approvalsHref,
 }: CandidateEvidenceDrawerProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!candidate) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    panelRef.current?.focus();
+    return () => window.removeEventListener("keydown", onKey);
+  }, [candidate, onClose]);
+
   if (!candidate) return null;
 
-  const phoneDisplay = candidate.phone || "UNKNOWN";
-  const emailDisplay = candidate.email || "UNKNOWN";
-  const websiteDisplay = candidate.website || null;
-  const ratingDisplay =
-    candidate.rating != null ? `${candidate.rating.toFixed(1)} / 5.0` : "UNKNOWN";
-  const reviewsDisplay =
-    candidate.review_count != null ? `${candidate.review_count} reviews` : "UNKNOWN";
-  const capacityDisplay =
-    candidate.capacity != null ? `${candidate.capacity} attendees` : "UNKNOWN";
-  const priceDisplay =
-    candidate.hourly_rate != null ? `₹${candidate.hourly_rate.toLocaleString()}/hr` : "UNKNOWN";
-  const distanceDisplay =
-    candidate.distance_km != null ? `${candidate.distance_km.toFixed(1)} km from event` : "UNKNOWN";
-  const scoreDisplay =
-    candidate.score != null ? `${Math.round(candidate.score)} / 100` : "CALCULATING";
+  const isRejected = candidate.qualification_status === "rejected";
+  const isUncertain = candidate.qualification_status === "uncertain";
+  const score = candidate.score != null ? Math.round(candidate.score) : null;
+  const breakdown = candidate.score_breakdown ? Object.entries(candidate.score_breakdown) : [];
+  const reasons = (candidate.matching_reasons || []).filter(Boolean);
+  const extras = [...(candidate.amenities || []), ...(candidate.capabilities || [])];
+
+  const verdict = isRejected
+    ? { label: "Disqualified by engine", cls: "border-cue-200 bg-cue-50 text-cue-700", dot: "bg-cue-600" }
+    : isUncertain
+    ? { label: "Uncertain match", cls: "border-standby-200 bg-standby-50 text-standby-800", dot: "bg-standby-500" }
+    : { label: "Qualified fit", cls: "border-go-200 bg-go-50 text-go-700", dot: "bg-go-500" };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-hidden flex justify-end">
-      {/* Backdrop */}
+    <div className="fixed inset-0 z-50 flex justify-end overflow-hidden" role="dialog" aria-modal="true" aria-label={`Evidence for ${candidate.name}`}>
       <div
-        className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs transition-opacity"
+        className="fixed inset-0 bg-ink-950/45 backdrop-blur-[2px] animate-[workspace-fade-in_200ms_ease-out]"
         onClick={onClose}
         aria-hidden="true"
       />
 
-      {/* Slide-over panel */}
-      <div className="relative w-full max-w-lg bg-white border-l border-slate-200 shadow-2xl h-full flex flex-col z-50 overflow-hidden">
-        {/* Header */}
-        <div className="px-5 py-4 border-b border-slate-200 flex items-start justify-between bg-slate-50/60">
-          <div className="min-w-0 pr-3">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                {candidate.category}
-              </span>
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className="relative z-50 flex h-full w-full max-w-[520px] flex-col overflow-hidden bg-paper shadow-2xl outline-none animate-rise-in sm:rounded-l-2xl"
+      >
+        {/* Header — ink band with the verdict and score */}
+        <div className="relative overflow-hidden bg-ink-950 px-6 pb-5 pt-5 text-ink-50">
+          <div className="pointer-events-none absolute inset-0 bg-dots-dark opacity-70" aria-hidden />
+          <div className="relative flex items-start justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="chip border-white/10 bg-white/5 text-ink-200">{humanizeCategory(candidate.category)}</span>
               <ProvenanceBadge source={candidate.provenance} size="sm" />
             </div>
-            <h3 className="text-base font-bold text-slate-900 tracking-tight truncate">
-              {candidate.name}
-            </h3>
-            <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-              <MapPin className="w-3 h-3 text-slate-400 flex-shrink-0" />
-              <span className="truncate">{candidate.address || candidate.city || "Location unknown"}</span>
-            </p>
+            <button
+              onClick={onClose}
+              className="-mr-2 -mt-1 rounded-lg p-1.5 text-ink-400 transition hover:bg-white/10 hover:text-white"
+              aria-label="Close drawer"
+            >
+              <X className="h-5 w-5" />
+            </button>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition"
-            aria-label="Close drawer"
+          <h3
+            className="relative mt-3 font-display text-[26px] font-extrabold leading-[1.05] tracking-[-0.02em] text-white"
+            style={{ fontStretch: "88%" }}
           >
-            <X className="w-5 h-5" />
-          </button>
+            {candidate.name}
+          </h3>
+          <p className="relative mt-1.5 flex items-center gap-1.5 text-[12.5px] text-ink-400">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{candidate.address || candidate.city || "Location unknown"}</span>
+          </p>
+
+          <div className="relative mt-5 flex items-end justify-between gap-4">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-label text-ink-500">Match score</div>
+              <div className="mt-1 flex items-baseline gap-1 font-display tabular-nums" style={{ fontStretch: "85%" }}>
+                <span className={`text-[44px] font-extrabold leading-none ${score == null ? "text-ink-600" : "text-white"}`}>
+                  {score ?? "—"}
+                </span>
+                <span className="text-[16px] font-bold text-ink-500">/100</span>
+              </div>
+            </div>
+            <span className={`chip ${verdict.cls}`}>
+              <span className={`cue-light ${verdict.dot}`} />
+              {verdict.label}
+            </span>
+          </div>
+          {score != null && (
+            <div className="relative mt-3 h-1 overflow-hidden rounded-full bg-white/10" aria-hidden>
+              <div
+                className={`h-full rounded-full ${isRejected ? "bg-cue-500" : "bg-go-400"}`}
+                style={{ width: `${Math.max(0, Math.min(100, score))}%` }}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Scrollable Content Body */}
-        <div className="flex-1 overflow-y-auto p-5 space-y-5 text-xs text-slate-700 divide-y divide-slate-100">
-          {/* Section: Match & Suitability Score */}
-          <div className="pt-1">
-            <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2">
-              Qualification & Match Score
-            </h4>
-            <div className={`rounded-xl p-3.5 border flex items-center justify-between ${
-              candidate.qualification_status === "rejected"
-                ? "bg-rose-50/70 border-rose-200"
-                : candidate.qualification_status === "uncertain"
-                ? "bg-amber-50/70 border-amber-200"
-                : "bg-slate-50 border-slate-200"
-            }`}>
-              <div>
-                <div className="text-2xl font-bold text-slate-900">{scoreDisplay}</div>
-                <div className="text-[11px] text-slate-500 mt-0.5 capitalize">
-                  {candidate.qualification_status
-                    ? `Status: ${candidate.qualification_status}`
-                    : "Constraint Satisfied"}
-                </div>
+        {/* Body */}
+        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
+          {isRejected && (
+            <div className="rounded-xl border border-cue-200 bg-cue-50 p-4">
+              <div className="flex items-center gap-2 text-[12.5px] font-semibold text-cue-800">
+                <ProvenanceBadge provenance="ENGINE" size="sm" />
+                Why it was excluded
               </div>
-              <div className="text-right">
-                {candidate.qualification_status === "rejected" ? (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-100 text-rose-800 border border-rose-300">
-                    <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-                    Disqualified by Engine
+              <p className="mt-2 text-[13px] leading-relaxed text-cue-900">
+                {describeQualificationReason(candidate.qualification_reason || candidate.matching_reasons?.[0]) || EXCLUSION_FALLBACK}
+              </p>
+              <p className="mt-2 text-[11.5px] text-cue-700/80">
+                Filtered out during automated qualification. Saving it anyway needs an explicit manual override.
+              </p>
+            </div>
+          )}
+
+          {/* Why it matches */}
+          {!isRejected && (reasons.length > 0 || candidate.qualification_reason) && (
+            <section>
+              <SectionLabel right={<ProvenanceBadge provenance="ENGINE" size="sm" />}>Why it matches</SectionLabel>
+              <ul className="space-y-1.5">
+                {candidate.qualification_reason && (
+                  <li className="flex items-start gap-2 text-[13px] text-ink-800">
+                    <span className="mt-0.5 font-bold text-engine-600">✓</span>
+                    {describeQualificationReason(candidate.qualification_reason)}
+                  </li>
+                )}
+                {reasons.map((r, i) => (
+                  <li key={i} className="flex items-start gap-2 text-[13px] text-ink-800">
+                    <span className="mt-0.5 font-bold text-engine-600">✓</span>
+                    {r}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+          {/* Component reasoning */}
+          <section>
+            <SectionLabel>Score components</SectionLabel>
+            {breakdown.length > 0 ? (
+              <div className="surface divide-y divide-dashed divide-ink-200 px-4">
+                {breakdown.map(([k, v]) => {
+                  const num = typeof v === "number" ? v : Number(v);
+                  const isNum = !Number.isNaN(num);
+                  const pct = isNum ? (num <= 1 ? num * 100 : num) : 0;
+                  return (
+                    <div key={k} className="py-2.5">
+                      <div className="flex items-center justify-between text-[12.5px]">
+                        <span className="capitalize text-ink-600">{k.replace(/_/g, " ")}</span>
+                        <span className="font-mono font-semibold tabular-nums text-ink-900">{String(v)}</span>
+                      </div>
+                      {isNum && (
+                        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-ink-200/70">
+                          <div className="h-full rounded-full bg-engine-500" style={{ width: `${Math.max(0, Math.min(100, pct))}%` }} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="rounded-lg border border-dashed border-ink-300 px-3 py-2.5 text-[12.5px] italic text-ink-500">
+                {score == null
+                  ? "The engine did not return a score for this candidate."
+                  : "No component breakdown was returned for this score."}
+              </p>
+            )}
+          </section>
+
+          {/* Facts */}
+          <section>
+            <SectionLabel>Facts on record</SectionLabel>
+            <div className="surface divide-y divide-dashed divide-ink-200 px-4">
+              <Fact
+                icon={<Users className="h-4 w-4" />}
+                label="Capacity"
+                known={candidate.capacity != null}
+                value={`${candidate.capacity?.toLocaleString()} guests`}
+              />
+              <Fact
+                icon={<IndianRupee className="h-4 w-4" />}
+                label="Rate"
+                known={candidate.hourly_rate != null}
+                value={`₹${candidate.hourly_rate?.toLocaleString()} / hr`}
+              />
+              <Fact
+                icon={<Navigation className="h-4 w-4" />}
+                label="Distance from event"
+                known={candidate.distance_km != null}
+                value={`${candidate.distance_km?.toFixed(1)} km`}
+              />
+              <Fact
+                icon={<Star className="h-4 w-4" />}
+                label="Public rating"
+                known={candidate.rating != null}
+                value={
+                  <>
+                    {candidate.rating?.toFixed(1)} ★
+                    {candidate.review_count != null && (
+                      <span className="font-normal text-ink-500"> · {candidate.review_count.toLocaleString()} reviews</span>
+                    )}
+                  </>
+                }
+              />
+            </div>
+          </section>
+
+          {/* Contact */}
+          <section>
+            <SectionLabel>Contact</SectionLabel>
+            <div className="surface divide-y divide-dashed divide-ink-200 px-4">
+              <Fact icon={<Phone className="h-4 w-4" />} label="Phone" known={!!candidate.phone} value={candidate.phone} mono />
+              <Fact icon={<Mail className="h-4 w-4" />} label="Email" known={!!candidate.email} value={candidate.email} mono />
+            </div>
+            {(candidate.website || candidate.maps_url) && (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {candidate.website && (
+                  <a
+                    href={candidate.website}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn-secondary h-8 text-[12px]"
+                    title={isSearchLink(candidate.website) ? "A Google search for this name — not the vendor's own website" : undefined}
+                  >
+                    <Globe className="h-3.5 w-3.5" /> {isSearchLink(candidate.website) ? "Search link" : "Website"}{" "}
+                    <ExternalLink className="h-3 w-3 text-ink-400" />
+                  </a>
+                )}
+                {candidate.maps_url && (
+                  <a href={candidate.maps_url} target="_blank" rel="noreferrer" className="btn-secondary h-8 text-[12px]">
+                    <MapPin className="h-3.5 w-3.5" /> Google Maps <ExternalLink className="h-3 w-3 text-ink-400" />
+                  </a>
+                )}
+              </div>
+            )}
+            {!candidate.phone && !candidate.email && (
+              <p className="mt-2 flex items-center gap-1.5 text-[12px] text-standby-800">
+                <MessageSquareText className="h-3.5 w-3.5" />
+                No contact channel yet — outreach can&apos;t start until one is found.
+              </p>
+            )}
+          </section>
+
+          {extras.length > 0 && (
+            <section>
+              <SectionLabel>Listed amenities & capabilities</SectionLabel>
+              <div className="flex flex-wrap gap-1.5">
+                {extras.map((am, i) => (
+                  <span key={i} className="chip border-ink-200 bg-[#FDFCFA] font-medium text-ink-700">
+                    {am}
                   </span>
-                ) : candidate.qualification_status === "uncertain" ? (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
-                    Uncertain Match
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* Source */}
+          <section>
+            <SectionLabel>Source</SectionLabel>
+            <div className="surface-sunk space-y-1.5 px-4 py-3 text-[12px]">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-ink-500">Origin</span>
+                <ProvenanceBadge source={candidate.provenance} size="sm" />
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-ink-500">Record ID</span>
+                <span className="truncate font-mono text-[11.5px] text-ink-700">{candidate.id}</span>
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-ink-500">Coordinates</span>
+                {candidate.latitude != null && candidate.longitude != null ? (
+                  <span className="font-mono text-[11.5px] text-ink-700">
+                    {candidate.latitude.toFixed(5)}, {candidate.longitude.toFixed(5)}
                   </span>
                 ) : (
-                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    Qualified Fit
-                  </span>
+                  <span className="italic text-standby-700">Missing — not shown on map</span>
                 )}
               </div>
             </div>
-
-            {/* If Rejected, show dedicated Disqualification Reason box */}
-            {candidate.qualification_status === "rejected" && (
-              <div className="mt-2.5 p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-900">
-                <div className="font-bold flex items-center gap-1.5 text-xs text-rose-700 mb-1">
-                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-                  Engine Disqualification Reason
-                </div>
-                <p className="text-[11px] leading-relaxed">
-                  {candidate.qualification_reason ||
-                    candidate.matching_reasons?.[0] ||
-                    "Institution/PSU — excluded by default"}
-                </p>
-                <p className="text-[10px] text-rose-600/80 mt-1 italic">
-                  Candidate was filtered out during automated multi-gate qualification. Shortlisting requires explicit manual override.
-                </p>
-              </div>
-            )}
-
-            {/* Score Breakdown if provided */}
-            {candidate.score_breakdown && Object.keys(candidate.score_breakdown).length > 0 && (
-              <div className="mt-2.5 p-3 rounded-lg bg-white border border-slate-200 space-y-1.5">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  Component Scoring Breakdown
-                </span>
-                {Object.entries(candidate.score_breakdown).map(([k, v]) => (
-                  <div key={k} className="flex items-center justify-between text-[11px]">
-                    <span className="text-slate-600 capitalize">{k.replace(/_/g, " ")}</span>
-                    <span className="font-semibold text-slate-900">{String(v)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Section: Identity & Location */}
-          <div className="pt-4">
-            <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5">
-              Identity & Coordinates
-            </h4>
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="text-[10px] text-slate-400 uppercase">Provider ID</div>
-                <div className="font-mono font-medium text-slate-800 text-[11px] truncate">
-                  {candidate.id}
-                </div>
-              </div>
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="text-[10px] text-slate-400 uppercase">Distance</div>
-                <div className="font-medium text-slate-800 text-[11px]">{distanceDisplay}</div>
-              </div>
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 col-span-2">
-                <div className="text-[10px] text-slate-400 uppercase">Geographic Coordinates</div>
-                <div className="font-mono text-slate-700 text-[11px]">
-                  {candidate.latitude != null && candidate.longitude != null ? (
-                    `${candidate.latitude.toFixed(5)}, ${candidate.longitude.toFixed(5)}`
-                  ) : (
-                    <span className="text-amber-600 font-semibold">UNKNOWN (Coordinates missing)</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Section: Verified Contact Information */}
-          <div className="pt-4">
-            <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5">
-              Contact & Web Evidence
-            </h4>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
-                <span className="flex items-center gap-2 text-slate-600">
-                  <Phone className="w-3.5 h-3.5 text-slate-400" /> Phone
-                </span>
-                <span className={`font-mono text-xs ${candidate.phone ? "text-slate-900 font-medium" : "text-slate-400 italic"}`}>
-                  {phoneDisplay}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
-                <span className="flex items-center gap-2 text-slate-600">
-                  <Mail className="w-3.5 h-3.5 text-slate-400" /> Email
-                </span>
-                <span className={`font-mono text-xs ${candidate.email ? "text-slate-900 font-medium" : "text-slate-400 italic"}`}>
-                  {emailDisplay}
-                </span>
-              </div>
-
-              {websiteDisplay && (
-                <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
-                  <span className="flex items-center gap-2 text-slate-600">
-                    <Globe className="w-3.5 h-3.5 text-slate-400" /> Website
-                  </span>
-                  <a
-                    href={websiteDisplay}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:underline flex items-center gap-1 font-medium truncate max-w-[200px]"
-                  >
-                    <span>Visit site</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              )}
-
-              {candidate.maps_url && (
-                <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200">
-                  <span className="flex items-center gap-2 text-slate-600">
-                    <MapPin className="w-3.5 h-3.5 text-slate-400" /> Maps Link
-                  </span>
-                  <a
-                    href={candidate.maps_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-blue-600 hover:underline flex items-center gap-1 font-medium"
-                  >
-                    <span>View on Google Maps</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Section: Operational Specifications & Capacity */}
-          <div className="pt-4">
-            <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-2.5">
-              Operational Specs & Capacity
-            </h4>
-            <div className="grid grid-cols-2 gap-2.5">
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="text-[10px] text-slate-400 uppercase">Capacity</div>
-                <div className={`font-semibold text-xs mt-0.5 ${candidate.capacity ? "text-slate-900" : "text-slate-400 italic"}`}>
-                  {capacityDisplay}
-                </div>
-              </div>
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="text-[10px] text-slate-400 uppercase">Rate / Cost Tier</div>
-                <div className={`font-semibold text-xs mt-0.5 ${candidate.hourly_rate ? "text-slate-900" : "text-slate-400 italic"}`}>
-                  {priceDisplay}
-                </div>
-              </div>
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="text-[10px] text-slate-400 uppercase">Public Rating</div>
-                <div className="flex items-center gap-1 mt-0.5">
-                  <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                  <span className="font-semibold text-slate-900 text-xs">{ratingDisplay}</span>
-                </div>
-              </div>
-              <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200">
-                <div className="text-[10px] text-slate-400 uppercase">Review Volume</div>
-                <div className="font-semibold text-slate-900 text-xs mt-0.5">{reviewsDisplay}</div>
-              </div>
-            </div>
-
-            {/* Amenities / Capabilities */}
-            {((candidate.amenities && candidate.amenities.length > 0) ||
-              (candidate.capabilities && candidate.capabilities.length > 0)) && (
-              <div className="mt-3">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
-                  Verified Amenities & Capabilities
-                </span>
-                <div className="flex flex-wrap gap-1.5">
-                  {[...(candidate.amenities || []), ...(candidate.capabilities || [])].map((am, i) => (
-                    <span
-                      key={i}
-                      className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[11px] font-medium border border-slate-200"
-                    >
-                      ✓ {am}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
+          </section>
         </div>
 
-        {/* Footer Actions */}
-        <div className="p-4 border-t border-slate-200 bg-slate-50 flex items-center gap-3">
-          {onToggleShortlist && (
-            <button
-              onClick={() => onToggleShortlist(candidate)}
-              className={`flex-1 py-2 px-3 rounded-lg text-xs font-semibold border transition ${
-                candidate.qualification_status === "rejected"
-                  ? isShortlisted
-                    ? "bg-amber-700 text-white border-amber-800 hover:bg-amber-800"
-                    : "bg-rose-50 text-rose-800 border-rose-300 hover:bg-rose-100"
-                  : isShortlisted
-                  ? "bg-slate-900 text-white border-slate-900 hover:bg-slate-800"
-                  : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100"
-              }`}
-            >
-              {candidate.qualification_status === "rejected"
-                ? isShortlisted
-                  ? "⚠️ Overridden (Shortlisted)"
-                  : "Force Shortlist (Override)"
-                : isShortlisted
-                ? "✓ Shortlisted"
-                : "+ Add to Shortlist"}
-            </button>
-          )}
+        {/* Footer actions — the journey: Save → Request booking */}
+        <div className="border-t border-ink-200 bg-[#FDFCFA] px-6 py-4">
+          <div className="flex items-center gap-2.5">
+            {onToggleShortlist && (
+              <button
+                onClick={() => onToggleShortlist(candidate)}
+                aria-pressed={isShortlisted}
+                className={`flex-1 ${
+                  isRejected
+                    ? isShortlisted
+                      ? "btn bg-standby-600 text-white hover:bg-standby-700"
+                      : "btn border border-cue-300 bg-cue-50 text-cue-800 hover:bg-cue-100"
+                    : isShortlisted
+                    ? "btn-secondary"
+                    : "btn-primary"
+                }`}
+              >
+                {isShortlisted ? <BookmarkCheck className="h-4 w-4" /> : <Bookmark className="h-4 w-4" />}
+                {isRejected ? (isShortlisted ? "Saved (override)" : "Save anyway (override)") : isShortlisted ? "Saved" : "Save"}
+              </button>
+            )}
 
-          {onSelectPrimary && (
-            <button
-              onClick={() => onSelectPrimary(candidate)}
-              disabled={isSelecting || candidate.is_assigned}
-              className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-sm transition disabled:opacity-50"
-            >
-              {candidate.is_assigned
-                ? "Assigned to Event"
-                : isSelecting
-                ? "Locking Selection..."
-                : candidate.entity_type === "VENUE"
-                ? "Select as Venue"
-                : "Request Provider (Pending Approval)"}
-            </button>
+            {onSelectPrimary &&
+              (candidate.is_assigned || isRequested ? (
+                approvalsHref && candidate.entity_type !== "VENUE" ? (
+                  <Link href={approvalsHref} className="btn flex-1 border border-go-200 bg-go-50 text-go-800 hover:bg-go-100">
+                    <CalendarCheck2 className="h-4 w-4" /> Booking requested · view
+                  </Link>
+                ) : (
+                  <span className="btn flex-1 cursor-default border border-go-200 bg-go-50 text-go-800">
+                    <CalendarCheck2 className="h-4 w-4" />
+                    {candidate.entity_type === "VENUE" ? "Venue booked" : "Booking requested"}
+                  </span>
+                )
+              ) : (
+                <button
+                  onClick={() => onSelectPrimary(candidate)}
+                  disabled={isSelecting}
+                  className={`flex-1 ${isShortlisted && !isRejected ? "btn-primary" : "btn-secondary"}`}
+                  title={
+                    candidate.entity_type === "VENUE"
+                      ? "Locks this venue to the event right away."
+                      : "Sends a booking proposal to Approvals. Nothing is booked until it's approved."
+                  }
+                >
+                  <CalendarCheck2 className="h-4 w-4" />
+                  {isSelecting ? "Sending…" : candidate.entity_type === "VENUE" ? "Book this venue" : "Request booking"}
+                </button>
+              ))}
+          </div>
+          {onSelectPrimary && !candidate.is_assigned && !isRequested && (
+            <p className="mt-2 text-center text-[11.5px] text-ink-500">
+              {candidate.entity_type === "VENUE"
+                ? "Booking a venue locks it to this event."
+                : "Request booking sends a proposal to Approvals — nothing is booked until it's approved."}
+            </p>
           )}
         </div>
       </div>

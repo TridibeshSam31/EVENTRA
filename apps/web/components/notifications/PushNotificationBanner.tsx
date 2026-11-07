@@ -77,39 +77,32 @@ export function PushNotificationBanner() {
   }
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-indigo-500/30 bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 p-4 shadow-lg backdrop-blur-md transition-all">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="surface-ink relative overflow-hidden p-4 shadow-md">
+      <div className="pointer-events-none absolute inset-0 bg-dots-dark opacity-60" aria-hidden />
+      <div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-500/20 text-indigo-400">
-            <BellRing className="h-5 w-5 animate-pulse" />
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-standby-500/15 text-standby-400 ring-1 ring-standby-500/30">
+            <BellRing className="h-5 w-5" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h4 className="text-sm font-semibold text-slate-100">
-                Remote Approval Notifications
-              </h4>
-              <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-400 border border-amber-500/30">
-                Setup Recommended
-              </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-[14px] font-semibold text-ink-50">Get approvals on your phone</h4>
+              <span className="chip border-standby-500/30 bg-standby-500/10 text-standby-300">Recommended</span>
             </div>
-            <p className="mt-0.5 text-xs text-slate-300">
-              Get notified on your phone push and WhatsApp when operations require sign-off. Never sit at your laptop to unblock the agent.
+            <p className="mt-0.5 max-w-[70ch] text-[12.5px] text-ink-300">
+              Push and WhatsApp alerts when something needs your sign-off — so the agent is never stuck waiting for you at a laptop.
             </p>
-            <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-400">
-              <Smartphone className="h-3.5 w-3.5 text-slate-400" />
+            <p className="mt-1 flex items-center gap-1 text-[11.5px] text-ink-500">
+              <Smartphone className="h-3.5 w-3.5" />
               <span>
-                <strong>iPhone / iOS note:</strong> Web push requires installing EVENTRA to your home screen (Tap <em>Share</em> → <em>Add to Home Screen</em>).
+                <strong className="text-ink-400">iPhone:</strong> add EVENTRA to your home screen first (Share → Add to Home Screen).
               </span>
             </p>
           </div>
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-center">
-          <button
-            onClick={handleEnablePush}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-400/50 disabled:opacity-50 cursor-pointer"
-          >
+          <button onClick={handleEnablePush} disabled={loading} className="btn h-8 bg-ink-50 px-3 text-[12px] text-ink-900 hover:bg-white">
             {loading ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -124,7 +117,7 @@ export function PushNotificationBanner() {
           </button>
           <button
             onClick={handleDismiss}
-            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-800 hover:text-slate-200 text-xs cursor-pointer"
+            className="rounded-lg px-2 py-1.5 text-[12px] font-medium text-ink-400 hover:bg-white/5 hover:text-ink-100"
             title="Dismiss"
           >
             Dismiss
@@ -133,8 +126,8 @@ export function PushNotificationBanner() {
       </div>
 
       {errorMessage && (
-        <div className="mt-2.5 flex items-center gap-1.5 rounded-md bg-rose-950/50 px-3 py-1.5 text-xs text-rose-300 border border-rose-800/40">
-          <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+        <div role="alert" className="relative mt-2.5 flex items-center gap-1.5 rounded-md border border-cue-800/50 bg-cue-950/60 px-3 py-1.5 text-[12px] text-cue-200">
+          <AlertCircle className="h-4 w-4 shrink-0 text-cue-400" />
           <span>{errorMessage}</span>
         </div>
       )}

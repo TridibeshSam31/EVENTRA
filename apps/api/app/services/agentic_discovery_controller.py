@@ -233,9 +233,11 @@ class AgenticDiscoveryController:
                 phone=lv.contact_phone,
                 email=lv.contact_email,
                 website=lv.website,
-                rating=lv.rating or 4.5,
-                review_count=lv.review_count or 10,
-                base_cost=lv.base_cost or 1000.0,
+                # Never invent evidence: unknown rating/reviews/cost stay unknown (ranking uses
+                # neutral sub-scores for missing values). Previously defaulted to 4.5★ / 10 / 1000.
+                rating=lv.rating,
+                review_count=lv.review_count,
+                base_cost=lv.base_cost,
             )
             cid = norm_lv.source_id or norm_lv.name.lower()
             if cid not in seen_ids:
@@ -311,6 +313,9 @@ class AgenticDiscoveryController:
             # Step C: Global Persistent Deduplication
             new_candidates: List[NormalizedProvider] = []
             if iteration == 1 and initial_db_candidates:
+                # Cached directory candidates are real discoveries too. They used to enter the
+                # unique pool without being counted as discovered ("Discovered 0 / Unique 6").
+                total_scraped_count += len(initial_db_candidates)
                 new_candidates.extend(initial_db_candidates)
             for cand in iter_scraped_candidates:
                 cid = cand.source_id or cand.maps_url or cand.phone or cand.name.lower()
@@ -472,14 +477,25 @@ class AgenticDiscoveryController:
             {"confirmed": len(confirmed_pool), "qualified": len(qualified_pool)},
         )
 
+        # Funnel counts must be monotonic: discovered ≥ unique ≥ relevant ≥ matching ≥ shortlisted.
+        f_relevant = len([c for c in qualified_pool if c.qualification in ("qualified", "uncertain")])
+        f_matching = len([c for c in qualified_pool if c.qualification == "qualified"])
+        f_shortlisted = len(confirmed_pool) if confirmed_pool else min(len(qualified_pool), self.target_count)
+        f_unique = max(total_deduped_count, f_relevant)
+        f_discovered = max(total_scraped_count, f_unique)
+        f_relevant = min(f_relevant, f_unique)
+        f_matching = min(f_matching, f_relevant)
+        f_shortlisted = min(f_shortlisted, max(f_matching, f_relevant))
+        total_scraped_count, total_deduped_count = f_discovered, f_unique
+
         # Update DiscoveryRun in database (Part A.1)
         if run:
             try:
                 run.discovered = total_scraped_count
                 run.unique_count = total_deduped_count
-                run.relevant = len([c for c in qualified_pool if c.qualification in ("qualified", "uncertain")])
-                run.matching = len([c for c in qualified_pool if c.qualification == "qualified"])
-                run.shortlisted = len(confirmed_pool) if confirmed_pool else min(len(qualified_pool), self.target_count)
+                run.relevant = f_relevant
+                run.matching = f_matching
+                run.shortlisted = f_shortlisted
                 run.current_iteration = iteration
                 run.radius_km = current_radius
                 run.status = "TARGET_REACHED" if target_met else ("EXHAUSTED" if iteration >= self.max_iterations else "COMPLETED")
@@ -501,9 +517,9 @@ class AgenticDiscoveryController:
             iterations_run=iteration,
             discovered=total_scraped_count,
             unique=total_deduped_count,
-            relevant=len([c for c in qualified_pool if c.qualification in ("qualified", "uncertain")]),
-            matching=len([c for c in qualified_pool if c.qualification == "qualified"]),
-            shortlisted=len(confirmed_pool) if confirmed_pool else min(len(qualified_pool), self.target_count),
+            relevant=f_relevant,
+            matching=f_matching,
+            shortlisted=f_shortlisted,
         )
 
         return TieredShortlistResult(

@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Union
 import hmac
 import hashlib
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -116,6 +116,7 @@ def get_openwa_status():
 @router.post("/integrations/openwa/webhook")
 async def receive_openwa_webhook(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db_session),
     x_openwa_signature: Optional[str] = Header(None, alias="X-OpenWA-Signature"),
 ):
@@ -137,21 +138,28 @@ async def receive_openwa_webhook(
         )
 
     if settings.OPENWA_WEBHOOK_SECRET:
-        if not x_openwa_signature:
+        # open-wa cannot sign webhook bodies, so a shared token in the webhook URL
+        # (?token=<OPENWA_WEBHOOK_SECRET>) is accepted as an alternative to the HMAC header.
+        url_token = request.query_params.get("token")
+        if url_token is not None:
+            if not hmac.compare_digest(url_token, settings.OPENWA_WEBHOOK_SECRET):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid webhook token.")
+        elif not x_openwa_signature:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing X-OpenWA-Signature header.",
             )
-        expected_sig = hmac.new(
-            settings.OPENWA_WEBHOOK_SECRET.encode("utf-8"),
-            raw_body,
-            hashlib.sha256,
-        ).hexdigest()
-        if not hmac.compare_digest(expected_sig.lower(), x_openwa_signature.lower()):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid webhook HMAC signature.",
-            )
+        else:
+            expected_sig = hmac.new(
+                settings.OPENWA_WEBHOOK_SECRET.encode("utf-8"),
+                raw_body,
+                hashlib.sha256,
+            ).hexdigest()
+            if not hmac.compare_digest(expected_sig.lower(), x_openwa_signature.lower()):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Invalid webhook HMAC signature.",
+                )
 
     try:
         import json
@@ -161,6 +169,18 @@ async def receive_openwa_webhook(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Malformed JSON payload: {e}",
         )
+
+    # Delivery receipts for messages we sent (open-wa onAck events)
+    if isinstance(payload, dict) and payload.get("event") == "onAck":
+        from app.services.vendor_outreach_service import VendorOutreachService
+        ack_data = payload.get("data") or {}
+        message_id = ack_data.get("id") if isinstance(ack_data.get("id"), str) else (ack_data.get("id") or {}).get("_serialized")
+        try:
+            ack = int(ack_data.get("ack")) if ack_data.get("ack") is not None else None
+        except (TypeError, ValueError):
+            ack = None
+        attempt = VendorOutreachService(db).apply_whatsapp_ack(message_id, ack) if message_id else None
+        return {"status": "ACK", "matched": attempt is not None}
 
     # Inbound normalization via communication adapter
     comm = registry.get_communication_provider()
@@ -219,6 +239,13 @@ async def receive_openwa_webhook(
             "sender": sender,
         }
 
+    # Webhook retries must not re-process the same vendor message (no repeat incidents or replies).
+    from app.services.vendor_signal_service import VendorSignalService
+    signal_service = VendorSignalService(db)
+    provider_message_id = message_id if isinstance(message_id, str) else (message_id or {}).get("_serialized") if isinstance(message_id, dict) else None
+    if not signal_service.claim_message(provider_message_id, {"sender": sender, "text": text}):
+        return {"status": "DUPLICATE", "message": "This message was already processed.", "provider_message_id": provider_message_id}
+
     # 3. Find active assignment
     assignment = neg_service.find_active_assignment(vendor.id)
     event_id = assignment.event_id if assignment else "SYSTEM"
@@ -247,6 +274,7 @@ async def receive_openwa_webhook(
             target_id=vendor.id,
             after_state={"vendor_name": vendor.name, "text": text[:200]},
         )
+        signal_service.complete_message(provider_message_id, {"status": "NO_ACTIVE_ASSIGNMENT"})
         return {
             "status": "NO_ACTIVE_ASSIGNMENT",
             "vendor_id": vendor.id,
@@ -255,25 +283,32 @@ async def receive_openwa_webhook(
             "extracted_facts": msg_record.extracted_facts,
         }
 
-    # Auto-trigger Incident on Provider Cancellation (Part B.10)
-    if msg_record.extracted_facts.get("available") is False:
-        try:
-            from app.schemas.incident import IncidentCreate
-            from app.models.enums import IncidentType, IncidentSeverity
-            from app.services.incident_service import IncidentService
-            inc_service = IncidentService(db)
-            inc_data = IncidentCreate(
-                incident_type=IncidentType.VENDOR_CANCELLED,
-                severity=IncidentSeverity.CRITICAL,
-                title=f"Provider Cancellation: {vendor.name}",
-                description=f"Provider {vendor.name} sent WhatsApp message: '{text}' indicating unavailability.",
-                source="INBOUND_WHATSAPP",
-                related_vendor_id=vendor.id,
-                related_task_id=getattr(assignment, "task_id", None),
-            )
-            inc_service.create_incident(event_id=assignment.event_id, data=inc_data, current_user_id="inbound_agent")
-        except Exception as inc_exc:
-            logger.warning(f"Could not auto-create incident on cancellation: {inc_exc}")
+    # Interpret the message into a validated operational signal; raises or correlates incidents.
+    try:
+        signal_result = signal_service.process(
+            event_id=assignment.event_id,
+            vendor=vendor,
+            assignment=assignment,
+            text=text,
+            extracted_facts=msg_record.extracted_facts,
+            provider_message_id=provider_message_id,
+        )
+    except Exception as sig_exc:
+        db.rollback()
+        logger.exception("Vendor signal processing failed: %s", sig_exc)
+        signal_result = {"error": "Signal processing failed; the message is saved for manual review."}
+
+    # A newly detected incident gets the same agent follow-up as a manually reported one
+    # (impact review, recovery options, approval request). Correlated repeats do not re-trigger.
+    new_incident = (signal_result.get("incident") or {}) if isinstance(signal_result, dict) else {}
+    if new_incident.get("action") == "CREATED":
+        from app.agent.triggers import trigger_agent_run
+        background_tasks.add_task(
+            trigger_agent_run,
+            event_id=assignment.event_id,
+            message=f"Incident detected from vendor WhatsApp ({vendor.name}): {text[:200]}",
+            user_id="system",
+        )
 
     # 4. Process provider response through authoritative domain service
     proc_result = neg_service.process_provider_response(
@@ -282,6 +317,7 @@ async def receive_openwa_webhook(
         is_simulation=False,
     )
 
+    signal_service.complete_message(provider_message_id, {"status": "PROCESSED"})
     return {
         "status": "PROCESSED",
         "vendor_id": vendor.id,
@@ -289,6 +325,7 @@ async def receive_openwa_webhook(
         "assignment_id": assignment.id,
         "extracted_facts": msg_record.extracted_facts,
         "negotiation_result": proc_result,
+        "operational_signal": signal_result,
     }
 
 

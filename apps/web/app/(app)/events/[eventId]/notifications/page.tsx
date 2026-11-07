@@ -2,65 +2,58 @@
 
 import React from "react";
 import { useParams } from "next/navigation";
-import { Bell, Smartphone, ShieldCheck } from "lucide-react";
+import { MessageCircle, Smartphone } from "lucide-react";
 import { PushNotificationBanner } from "@/components/notifications";
 import { EventShell } from "@/components/v2/EventShell";
+import { PageHeader } from "@/components/ds";
 
 export default function NotificationsPage() {
   const params = useParams();
   const eventId = (params?.eventId as string) || "conference_demo";
 
+  const channels = [
+    {
+      icon: MessageCircle,
+      tone: "bg-go-50 text-go-700 ring-go-200",
+      title: "WhatsApp replies",
+      sub: "Reply YES <CODE> or NO <CODE>",
+      body: "When a decision needs your approval, EVENTRA sends a WhatsApp message with a 6-character reply code. Reply from anywhere to approve or reject.",
+    },
+    {
+      icon: Smartphone,
+      tone: "bg-agent-50 text-agent-700 ring-agent-200",
+      title: "Mobile web push",
+      sub: "Notifications on your phone",
+      body: "Turn on web push to get background alerts with a single tap straight into the approval waiting for you.",
+    },
+  ];
+
   return (
     <EventShell eventId={eventId} currentStage="LIVE">
-      <div className="space-y-6 max-w-4xl mx-auto">
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-              Notification Preferences
-            </span>
-          </div>
-          <h1 className="text-xl font-bold text-slate-900 tracking-tight mt-1 flex items-center gap-2">
-            <Bell className="w-5 h-5 text-indigo-600" />
-            Remote Approval & Alert Settings
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Configure how you receive urgent operational requests, remote sign-offs, and critical incident alerts.
-          </p>
-        </div>
+      <div className="mx-auto max-w-4xl space-y-6">
+        <PageHeader
+          eyebrow="Notifications"
+          title="How EVENTRA reaches you"
+          description="Urgent requests, remote sign-offs and critical incident alerts — choose how they find you when you're away from the dashboard."
+        />
 
-        {/* Remote Push Notification Banner */}
         <PushNotificationBanner />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-lg bg-emerald-50 text-emerald-600">
-                <ShieldCheck className="w-4 h-4" />
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {channels.map((c) => (
+            <div key={c.title} className="surface p-5">
+              <div className="flex items-center gap-3">
+                <span className={`grid h-9 w-9 place-items-center rounded-lg ring-1 ${c.tone}`}>
+                  <c.icon className="h-4 w-4" />
+                </span>
+                <div>
+                  <h3 className="text-[14px] font-semibold text-ink-900">{c.title}</h3>
+                  <p className="font-mono text-[11px] text-ink-500">{c.sub}</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900">WhatsApp Inbound Webhook</h3>
-                <p className="text-xs text-slate-500">Reply YES &lt;CODE&gt; or NO &lt;CODE&gt; via WhatsApp</p>
-              </div>
+              <p className="mt-3 text-[13px] leading-relaxed text-ink-600">{c.body}</p>
             </div>
-            <p className="text-xs text-slate-600 mt-3 leading-relaxed">
-              When critical decisions require approval, EVENTRA dispatches WhatsApp messages with a 6-character reply code.
-            </p>
-          </div>
-
-          <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600">
-                <Smartphone className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-slate-900">Mobile Web Push (PWA)</h3>
-                <p className="text-xs text-slate-500">Direct notifications on mobile devices</p>
-              </div>
-            </div>
-            <p className="text-xs text-slate-600 mt-3 leading-relaxed">
-              Enable Web Push to receive background notifications with single-tap deep links directly to approval decisions.
-            </p>
-          </div>
+          ))}
         </div>
       </div>
     </EventShell>

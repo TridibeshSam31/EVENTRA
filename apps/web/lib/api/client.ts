@@ -28,7 +28,11 @@ export class ApiError extends Error {
 }
 
 // Active operator ID (for x-user-id header role separation)
-let currentOperatorId = "anonymous_operator";
+let currentOperatorId = "default-operator";
+
+// Older builds stored the anonymous dev identity, which the API no longer
+// accepts for organizer-only actions; treat it as the Ops Director profile.
+const LEGACY_OPERATOR_IDS: Record<string, string> = { anonymous_operator: "default-operator" };
 
 export function setOperatorId(id: string) {
   currentOperatorId = id;
@@ -40,7 +44,7 @@ export function setOperatorId(id: string) {
 export function getOperatorId(): string {
   if (typeof window !== "undefined") {
     const stored = localStorage.getItem("eventra_operator_id");
-    if (stored) return stored;
+    if (stored) return LEGACY_OPERATOR_IDS[stored] ?? stored;
   }
   return currentOperatorId;
 }

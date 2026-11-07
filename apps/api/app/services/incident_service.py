@@ -3,6 +3,7 @@
 Coordinates incident lifecycle: ingestion, entity validation, event-scoped authorization,
 deterministic impact analysis, risk evaluation, and authoritative event state transitions.
 """
+from app.services.live_events import publish
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -93,6 +94,7 @@ class IncidentService:
 
         self.db.commit()
         self.db.refresh(incident)
+        publish(event_id, "incident.created", incident_id=incident.id)
         return incident
 
     def get_incident(
@@ -166,6 +168,7 @@ class IncidentService:
 
         self.db.commit()
         self.db.refresh(incident)
+        publish(event_id, "incident.updated", incident_id=incident.id)
         return incident
 
     def resolve_incident(
@@ -250,6 +253,7 @@ class IncidentService:
 
         self.db.commit()
         self.db.refresh(incident)
+        publish(event_id, "incident.resolved", incident_id=incident.id)
         return incident
 
     # --- Private Helpers ---

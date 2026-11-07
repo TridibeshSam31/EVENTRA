@@ -83,13 +83,38 @@ def sanitize_voice_context(session: VoiceSession) -> SanitizedVoiceContext:
 # 3. System Prompt Construction
 # ---------------------------------------------------------------------------
 
-def build_vendor_system_prompt(ctx: SanitizedVoiceContext) -> str:
+LANGUAGE_INSTRUCTIONS = """LANGUAGE:
+- Open the call in simple English.
+- Vendors may speak Hindi, Hinglish, English or any other Indian language. Understand whatever language the vendor uses and ALWAYS reply in the same language and style they last spoke (e.g. Hinglish to Hinglish, Hindi to Hindi, Tamil to Tamil). Switch whenever they switch.
+- Say prices and dates in a way that is natural in that language.
+- Tool arguments (prices, notes, outcome) must always be written in English."""
+
+PRICE_TOOL_INSTRUCTIONS = """NEGOTIATION INSTRUCTIONS:
+- Your goal is to get a price the organizer can afford. Ask for the vendor's price first; never suggest a number before they do.
+- Every time the vendor states or changes a price, call evaluate_vendor_price with that amount as a number (e.g. "25 hazaar" -> 25000) and follow its instruction exactly.
+- If the vendor refuses your offer WITHOUT giving a new price (e.g. "itne mein nahi hoga", "not possible"), call evaluate_vendor_price with vendor_refused=true and follow its instruction.
+- When the tool says ABOVE_BUDGET, close the call politely in the vendor's language and then call end_call.
+- When it returns a counter_offer, propose exactly that amount, with a short friendly reason (e.g. a smaller event or a tight budget). Ask about what is included; you may ask them to adjust inclusions to meet the price.
+- Never mention a budget, maximum, limit or ceiling, and never offer any amount the tool did not give you.
+- An agreed price is only a quote for the organizer to confirm: never say the booking is confirmed."""
+
+
+SILENCE_CHECK_INTERVAL = 0.5
+SILENCE_MAX_NUDGES = 2
+SILENCE_NUDGE_TEXT = (
+    "(The vendor has finished speaking and is waiting for your reply. Respond now, in the language the vendor "
+    "last used. If they refused your offer without a new price, call evaluate_vendor_price with vendor_refused=true. "
+    "If the conversation is complete, say goodbye and call end_call.)"
+)
+
+
+def build_vendor_system_prompt(ctx: SanitizedVoiceContext, price_tool: bool = False) -> str:
     """Builds a dedicated, constrained system prompt for the vendor voice assistant.
     
     Ensures natural conversational delivery while strictly prohibiting
     autonomous booking approval, price invention, or operational commitments.
     """
-    vendor_part = f"with {ctx.vendor_name}" if ctx.vendor_name else "with the service provider"
+    vendor_part = f"the vendor {ctx.vendor_name}" if ctx.vendor_name else "a service provider"
     city_part = f"in {ctx.vendor_city}" if ctx.vendor_city else ""
     event_part = f"for '{ctx.event_name}'" if ctx.event_name else "for an upcoming event"
     type_part = f"({ctx.event_type})" if ctx.event_type else ""
@@ -111,7 +136,9 @@ def build_vendor_system_prompt(ctx: SanitizedVoiceContext) -> str:
         constraints_part = "Required capabilities: " + ", ".join(ctx.required_capabilities)
 
     # Negotiation guidance
-    if ctx.negotiation and ctx.negotiation.authorized and ctx.negotiation.target_price is not None:
+    if price_tool:
+        neg_instructions = PRICE_TOOL_INSTRUCTIONS
+    elif ctx.negotiation and ctx.negotiation.authorized and ctx.negotiation.target_price is not None:
         neg_instructions = f"""NEGOTIATION INSTRUCTIONS:
 - You are authorized to inquire around a target rate of {ctx.negotiation.target_price} {ctx.negotiation.currency}.
 - Constraints: {', '.join(ctx.negotiation.constraints) if ctx.negotiation.constraints else 'Standard rates'}.
@@ -127,8 +154,17 @@ def build_vendor_system_prompt(ctx: SanitizedVoiceContext) -> str:
         obj_str = f": {ctx.call_objective}" if ctx.call_objective else ""
         recovery_note = f"\nOPERATIONAL NOTE: Urgent replacement requirement{obj_str}. Inquire about immediate availability and setup time."
 
-    return f"""You are the EVENTRA Voice Coordinator, an AI voice assistant calling on behalf of the event organizing team {vendor_part} {city_part}.
+    return f"""You are the EVENTRA Voice Coordinator, an AI voice assistant working for the event organizer. You are calling {vendor_part} {city_part} (the person you are speaking to). You act on behalf of the organizer, never on behalf of the vendor.
 Your goal: {ctx.inquiry_goal}
+
+CALL FLOW:
+1. You speak first. In your first sentence, greet the vendor by name if known and clearly say that you are an AI assistant calling on behalf of the organizer of the event. Never pretend to be a human; if asked, confirm you are an AI.
+2. Name the event and explain the requirement (service, location, date) in one or two short sentences.
+3. Ask whether they are available on that date.
+4. Ask for an estimated price and any relevant service details (what is included, taxes, setup).
+5. Repeat back the key facts you heard so the vendor can correct them.
+6. Thank them, say the organizer will review and get back to them, and say goodbye. Then call the end_call tool with exactly what the vendor said. Do not guess values the vendor did not state.
+If the vendor is not interested, asks not to be called, or it is a wrong number, apologise briefly, say goodbye and call end_call.
 
 CALL CONTEXT (AUTHORITATIVE EVENTRA DATA):
 - Event: {event_part} {type_part} {date_part} {time_part} {loc_part} {guest_part}
@@ -139,6 +175,12 @@ CALL CONTEXT (AUTHORITATIVE EVENTRA DATA):
 {recovery_note}
 
 {neg_instructions}
+
+{LANGUAGE_INSTRUCTIONS}
+
+TURN TAKING:
+- Never stay silent after the vendor speaks: always reply, even if only to acknowledge or ask a follow-up question.
+- After any tool result, speak to the vendor immediately.
 
 COMMUNICATION GUIDELINES:
 1. Tone & Style:
@@ -160,6 +202,48 @@ COMMUNICATION GUIDELINES:
    - If the vendor asks for final confirmation, politely explain that you are logging their quote and details for the event organizer to review and approve.
    - When all key details (availability, approximate quote, terms) are gathered, thank the vendor and conclude the call politely.
 """
+
+
+def _end_call_declaration(types: Any) -> Any:
+    """Tool the agent calls to finish the call and record what the vendor actually said."""
+    string = types.Schema(type="STRING")
+    return types.FunctionDeclaration(
+        name="end_call",
+        description="End the phone call after saying goodbye, recording only what the vendor explicitly stated.",
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "outcome": types.Schema(
+                    type="STRING",
+                    enum=["AVAILABLE", "NOT_AVAILABLE", "NEEDS_FOLLOW_UP", "NOT_INTERESTED", "WRONG_NUMBER", "NO_CLEAR_ANSWER"],
+                ),
+                "available": types.Schema(type="BOOLEAN", description="Whether the vendor said they are available on the event date."),
+                "estimated_price": string,
+                "price_details": string,
+                "service_details": string,
+                "vendor_notes": types.Schema(type="STRING", description="Anything else the vendor asked or said that the organizer should know."),
+                "final_price": types.Schema(type="STRING", description="The last price the vendor agreed to or insisted on."),
+                "language": types.Schema(type="STRING", description="Language the vendor spoke, e.g. Hindi, Hinglish, English."),
+            },
+            required=["outcome"],
+        ),
+    )
+
+
+def _price_tool_declaration(types: Any) -> Any:
+    """Server-side price check: the model never sees the organizer's ceiling."""
+    return types.FunctionDeclaration(
+        name="evaluate_vendor_price",
+        description="Check a price the vendor stated, or report that they refused your offer, and get the next negotiation step.",
+        parameters=types.Schema(
+            type="OBJECT",
+            properties={
+                "price": types.Schema(type="NUMBER", description="Total price the vendor stated, as a plain number."),
+                "includes": types.Schema(type="STRING", description="What the vendor said the price includes, in English."),
+                "vendor_refused": types.Schema(type="BOOLEAN", description="True when the vendor refused your last offer without stating a new price."),
+            },
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +300,15 @@ class GeminiLiveBridge(AudioStreamListener):
 
         # Metrics & Transcript buffer (consumed by Task 5)
         self.transcript: List[TranscriptEntry] = []
+        self.call_outcome: Optional[Dict[str, Any]] = None
+        self._tx_buffers: Dict[TranscriptSpeaker, str] = {}
+        self.negotiation_limits: Optional[Dict[str, Any]] = None
+        self.negotiation_log: List[Dict[str, Any]] = []
+        self._end_call_requested: bool = False
+        # Silence watchdog: when the vendor spoke last and the agent has not answered.
+        self._last_vendor_speech_at: Optional[float] = None
+        self._last_agent_activity_at: float = time.monotonic()
+        self._nudges_for_utterance: int = 0
         self.turn_count: int = 0
         self.started_at: Optional[float] = None
         self.stopped_at: Optional[float] = None
@@ -241,6 +334,10 @@ class GeminiLiveBridge(AudioStreamListener):
             self.error_message = f"Voice context error: {ctx_err}"
             self._is_running = False
             return
+
+        self.negotiation_limits = self._load_negotiation_limits()
+        if self.negotiation_limits:
+            self.system_prompt = build_vendor_system_prompt(self.sanitized_context, price_tool=True)
 
         # Update audio converter in case media format changed in start event
         self.converter = AudioConverter(
@@ -338,6 +435,9 @@ class GeminiLiveBridge(AudioStreamListener):
             ),
             input_audio_transcription=types.AudioTranscriptionConfig() if hasattr(types, "AudioTranscriptionConfig") else {},
             output_audio_transcription=types.AudioTranscriptionConfig() if hasattr(types, "AudioTranscriptionConfig") else {},
+            tools=[types.Tool(function_declarations=[_end_call_declaration(types)] + (
+                [_price_tool_declaration(types)] if self.negotiation_limits else []
+            ))],
         )
 
         try:
@@ -346,14 +446,29 @@ class GeminiLiveBridge(AudioStreamListener):
                 self._gemini_session = gemini_session
                 logger.info("Gemini Live session connected successfully [session_id=%s]", self.session.session_id)
 
+                # Outbound call: the agent opens the conversation with its AI disclosure.
+                await gemini_session.send_client_content(
+                    turns=types.Content(
+                        role="user",
+                        parts=[types.Part(text="(The vendor has just answered the phone. Start the call now with your introduction.)")],
+                    ),
+                    turn_complete=True,
+                )
+
                 # Run send and receive loops concurrently
                 send_task = asyncio.create_task(self._send_loop(gemini_session))
                 receive_task = asyncio.create_task(self._receive_loop(gemini_session))
+                watchdog_task = asyncio.create_task(self._silence_watchdog(gemini_session))
 
                 done, pending = await asyncio.wait(
-                    [send_task, receive_task],
+                    [send_task, receive_task, watchdog_task],
+                    timeout=settings.VOICE_MAX_CALL_SECONDS,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                if not done:
+                    logger.info("Voice call reached the %ss limit; ending it [session_id=%s]", settings.VOICE_MAX_CALL_SECONDS, self.session.session_id)
+                    self.error_message = "Call ended automatically at the maximum call duration."
+                    await self._hang_up_call()
 
                 # Cancel remaining task
                 for task in pending:
@@ -380,6 +495,7 @@ class GeminiLiveBridge(AudioStreamListener):
         finally:
             self._is_running = False
             self.stopped_at = time.time()
+            self._flush_transcript_buffers()
             logger.info(
                 "Gemini Live session closed [session_id=%s, turns=%d, transcript_entries=%d]",
                 self.session.session_id,
@@ -410,6 +526,106 @@ class GeminiLiveBridge(AudioStreamListener):
                             )
                 except Exception as tx_exc:
                     logger.warning("Failed to record voice call transcript into ConversationService: %s", tx_exc)
+            self._persist_outreach_outcome()
+
+    def _persist_outreach_outcome(self) -> None:
+        """Stores the transcript and end_call outcome on the vendor outreach record, if this call has one."""
+        attempt_id = (getattr(self.session, "custom_parameters", {}) or {}).get("attempt_id")
+        if not attempt_id:
+            return
+        try:
+            from app.db.session import SessionLocal
+            from app.services.vendor_outreach_service import VendorOutreachService
+            with SessionLocal() as db_session:
+                VendorOutreachService(db_session).record_call_conversation(
+                    attempt_id=attempt_id,
+                    transcript=[
+                        {"speaker": e.speaker.value, "text": e.text, "timestamp": e.timestamp}
+                        for e in self.transcript
+                        if e.is_final
+                    ],
+                    outcome=self.call_outcome,
+                    duration_seconds=(self.stopped_at or time.time()) - self.started_at if self.started_at else None,
+                    error=self.error_message,
+                    negotiation={
+                        "limits_source": (self.negotiation_limits or {}).get("source"),
+                        "rounds": self.negotiation_log,
+                        "final_decision": self.negotiation_log[-1]["decision"] if self.negotiation_log else None,
+                    } if self.negotiation_limits else None,
+                )
+        except Exception as exc:
+            logger.warning("Failed to persist voice outreach outcome [attempt_id=%s]: %s", attempt_id, exc)
+
+    async def _handle_tool_call(self, gemini_session: Any, tool_call: Any) -> None:
+        from google.genai import types
+
+        responses = []
+        for fc in getattr(tool_call, "function_calls", None) or []:
+            if fc.name == "evaluate_vendor_price" and self.negotiation_limits:
+                responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response=self._evaluate_price(dict(fc.args or {}))))
+            elif fc.name == "end_call":
+                self.call_outcome = {k: v for k, v in dict(fc.args or {}).items() if v not in (None, "")}
+                responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response={"result": "Call will end now."}))
+                self._end_call_requested = True
+            else:
+                responses.append(types.FunctionResponse(id=fc.id, name=fc.name, response={"error": "Unknown tool."}))
+        if responses:
+            await gemini_session.send_tool_response(function_responses=responses)
+        if self._end_call_requested:
+            # Let the goodbye audio finish playing before hanging up.
+            await asyncio.sleep(4)
+            await self._hang_up_call()
+            self._is_running = False
+
+    def _evaluate_price(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        from app.services.vendor_outreach_service import evaluate_vendor_price
+        last_price = next((e["vendor_price"] for e in reversed(self.negotiation_log) if e.get("vendor_price")), None)
+        try:
+            price = float(args.get("price"))
+        except (TypeError, ValueError):
+            price = None
+        if args.get("vendor_refused") and last_price is not None and (price is None or price >= last_price):
+            # The vendor turned the counter down and is holding at their last quote.
+            price = last_price
+        if not price:
+            return {"decision": "UNCLEAR", "instruction": "Ask the vendor what their total price would be, as a number."}
+        counters_made = sum(1 for e in self.negotiation_log if e["decision"] == "COUNTER")
+        result = evaluate_vendor_price(self.negotiation_limits, price, counters_made)
+        self.negotiation_log.append({
+            "vendor_price": price,
+            "includes": args.get("includes"),
+            "vendor_refused": bool(args.get("vendor_refused")),
+            "decision": result["decision"],
+            "counter_offer": result.get("counter_offer"),
+            "at": time.time(),
+        })
+        return result
+
+    def _load_negotiation_limits(self) -> Optional[Dict[str, Any]]:
+        """Reads the server-side price limits stored on the outreach attempt for this call."""
+        attempt_id = (getattr(self.session, "custom_parameters", {}) or {}).get("attempt_id")
+        if not attempt_id:
+            return None
+        try:
+            from app.db.session import SessionLocal
+            from app.models.communication_attempt import CommunicationAttempt
+            with SessionLocal() as db_session:
+                attempt = db_session.get(CommunicationAttempt, attempt_id)
+                limits = (attempt.details or {}).get("negotiation_limits") if attempt else None
+                return limits if limits and limits.get("max") else None
+        except Exception as exc:
+            logger.warning("Could not load negotiation limits [attempt_id=%s]: %s", attempt_id, exc)
+            return None
+
+    async def _hang_up_call(self) -> None:
+        call_sid = getattr(self.session, "call_sid", None)
+        if not call_sid or not str(call_sid).startswith("CA"):
+            return
+        try:
+            from app.integrations.communication.twilio import TwilioVoiceAdapter
+            await asyncio.to_thread(TwilioVoiceAdapter().hangup_call, call_sid, "AI_CALL_ENDED")
+        except Exception as exc:
+            logger.warning("Failed to hang up Twilio call after AI conversation: %s", exc)
 
     async def _send_loop(self, gemini_session: Any) -> None:
         """Reads Exotel audio from the bounded queue and streams it to Gemini Live."""
@@ -433,15 +649,11 @@ class GeminiLiveBridge(AudioStreamListener):
                 continue
 
             try:
-                realtime_input = types.LiveClientRealtimeInput(
-                    media_chunks=[
-                        types.Blob(
-                            data=resampled_16k,
-                            mime_type="audio/pcm;rate=16000",
-                        )
-                    ]
+                # send() only accepts keyword arguments in current google-genai; realtime
+                # audio has its own method.
+                await gemini_session.send_realtime_input(
+                    audio=types.Blob(data=resampled_16k, mime_type="audio/pcm;rate=16000")
                 )
-                await gemini_session.send(realtime_input)
             except Exception as send_err:
                 logger.warning("Error streaming audio to Gemini Live: %s", send_err)
                 break
@@ -449,76 +661,146 @@ class GeminiLiveBridge(AudioStreamListener):
     async def _receive_loop(self, gemini_session: Any) -> None:
         """Receives Gemini Live responses, handles audio output, transcription, and barge-in."""
         try:
-            async for response in gemini_session.receive():
-                if not self._is_running:
-                    break
+            # receive() yields the messages of ONE model turn and then returns, so keep
+            # listening turn after turn for as long as the call is live.
+            while self._is_running and not self._end_call_requested:
+                received_any = False
+                async for response in gemini_session.receive():
+                    received_any = True
+                    if not self._is_running:
+                        break
 
-                if not response:
-                    continue
+                    if not response:
+                        continue
 
-                server_content = getattr(response, "server_content", None)
-                if not server_content:
-                    continue
+                    tool_call = getattr(response, "tool_call", None)
+                    if tool_call:
+                        self._mark_agent_activity()
+                        await self._handle_tool_call(gemini_session, tool_call)
+                        if self._end_call_requested:
+                            break
+                        continue
 
-                # 1. Interruption / Barge-in handling
-                if getattr(server_content, "interrupted", False):
-                    logger.info(
-                        "Interruption signal received from Gemini Live [session_id=%s]",
-                        self.session.session_id,
-                    )
-                    self.converter.reset_states()
-                    await self.session.clear_audio()
+                    server_content = getattr(response, "server_content", None)
+                    if not server_content:
+                        continue
 
-                # 2. Vendor Input Transcription
-                input_tx = getattr(server_content, "input_transcription", None)
-                if input_tx and getattr(input_tx, "text", None):
-                    self._record_transcript(
-                        speaker=TranscriptSpeaker.VENDOR,
-                        text=input_tx.text,
-                        is_final=getattr(input_tx, "finished", True),
-                    )
+                    # 1. Interruption / Barge-in handling
+                    if getattr(server_content, "interrupted", False):
+                        logger.info(
+                            "Interruption signal received from Gemini Live [session_id=%s]",
+                            self.session.session_id,
+                        )
+                        self.converter.reset_states()
+                        await self.session.clear_audio()
 
-                # 3. Model Output (Audio & Text)
-                model_turn = getattr(server_content, "model_turn", None)
-                if model_turn and getattr(model_turn, "parts", None):
-                    for part in model_turn.parts:
-                        # Spoken text
-                        part_text = getattr(part, "text", None)
-                        if part_text:
-                            self._record_transcript(
-                                speaker=TranscriptSpeaker.AGENT,
-                                text=part_text,
-                                is_final=True,
-                            )
+                    # 2. Vendor Input Transcription
+                    input_tx = getattr(server_content, "input_transcription", None)
+                    if input_tx and getattr(input_tx, "text", None):
+                        self._last_vendor_speech_at = time.monotonic()
+                        self._nudges_for_utterance = 0
+                        self._buffer_transcript(TranscriptSpeaker.VENDOR, input_tx.text, getattr(input_tx, "finished", None))
 
-                        # Output audio PCM
-                        inline_data = getattr(part, "inline_data", None)
-                        if inline_data and getattr(inline_data, "data", None):
-                            raw_24k_pcm = inline_data.data
-                            # Resample Gemini 24 kHz -> Exotel sample rate (e.g. 8 kHz)
-                            out_pcm = self.converter.gemini_to_exotel(raw_24k_pcm)
-                            if out_pcm:
-                                await self.session.send_audio(out_pcm)
+                    # 3. Model Output (Audio & Text)
+                    model_turn = getattr(server_content, "model_turn", None)
+                    if model_turn and getattr(model_turn, "parts", None):
+                        self._mark_agent_activity()
+                        for part in model_turn.parts:
+                            # Spoken text
+                            part_text = getattr(part, "text", None)
+                            if part_text:
+                                self._record_transcript(
+                                    speaker=TranscriptSpeaker.AGENT,
+                                    text=part_text,
+                                    is_final=True,
+                                )
 
-                # 4. Agent Output Transcription (if provided separately)
-                output_tx = getattr(server_content, "output_transcription", None)
-                if output_tx and getattr(output_tx, "text", None):
-                    self._record_transcript(
-                        speaker=TranscriptSpeaker.AGENT,
-                        text=output_tx.text,
-                        is_final=getattr(output_tx, "finished", True),
-                    )
+                            # Output audio PCM
+                            inline_data = getattr(part, "inline_data", None)
+                            if inline_data and getattr(inline_data, "data", None):
+                                raw_24k_pcm = inline_data.data
+                                # Resample Gemini 24 kHz -> Exotel sample rate (e.g. 8 kHz)
+                                out_pcm = self.converter.gemini_to_exotel(raw_24k_pcm)
+                                if out_pcm:
+                                    await self.session.send_audio(out_pcm)
 
-                # 5. Turn completion tracking
-                if getattr(server_content, "turn_complete", False):
-                    self.turn_count += 1
+                    # 4. Agent Output Transcription (if provided separately)
+                    output_tx = getattr(server_content, "output_transcription", None)
+                    if output_tx and getattr(output_tx, "text", None):
+                        self._buffer_transcript(TranscriptSpeaker.AGENT, output_tx.text, getattr(output_tx, "finished", None))
 
+                    # 5. Turn completion tracking
+                    if getattr(server_content, "turn_complete", False):
+                        self.turn_count += 1
+                        self._flush_transcript_buffers()
+
+                if not received_any:
+                    break  # the Gemini session has closed
         except asyncio.CancelledError:
             pass
         except Exception as recv_err:
+            # A normal close (code 1000) when the call ends is not a failure.
+            if type(recv_err).__name__ == "ConnectionClosedOK" or not self._is_running:
+                return
             logger.error("Error receiving from Gemini Live: %s", recv_err)
             self.error_message = str(recv_err)
             self.error_classification = "VOICE_AGENT_FAILURE"
+
+    def _mark_agent_activity(self) -> None:
+        self._last_agent_activity_at = time.monotonic()
+
+    def _agent_owes_reply(self, now: float) -> bool:
+        return (
+            self._last_vendor_speech_at is not None
+            and self._last_vendor_speech_at > self._last_agent_activity_at
+            and now - self._last_vendor_speech_at >= settings.VOICE_SILENCE_NUDGE_SECONDS
+            and self._nudges_for_utterance < SILENCE_MAX_NUDGES
+        )
+
+    async def _silence_watchdog(self, gemini_session: Any) -> None:
+        """Prompts the model when the vendor has finished speaking and the agent stays silent.
+
+        Without it a call can hang in dead air until the vendor hangs up (seen when the
+        vendor refused an offer and the model had no obvious next step).
+        """
+        from google.genai import types
+
+        while self._is_running and not self._end_call_requested:
+            await asyncio.sleep(SILENCE_CHECK_INTERVAL)
+            if not self._agent_owes_reply(time.monotonic()):
+                continue
+            self._nudges_for_utterance += 1
+            logger.info(
+                "Agent silent after vendor spoke; nudging model [session_id=%s, nudge=%s]",
+                self.session.session_id, self._nudges_for_utterance,
+            )
+            # Wait for the next silence before nudging again (unless the vendor speaks).
+            self._last_vendor_speech_at = time.monotonic()
+            try:
+                await gemini_session.send_client_content(
+                    turns=types.Content(role="user", parts=[types.Part(text=SILENCE_NUDGE_TEXT)]),
+                    turn_complete=True,
+                )
+            except Exception as err:
+                logger.warning("Could not nudge silent agent: %s", err)
+                return
+
+    def _buffer_transcript(self, speaker: TranscriptSpeaker, text: str, finished: Optional[bool]) -> None:
+        """Live transcription arrives in fragments (finished is None until the utterance ends);
+        join them so the transcript holds one entry per utterance."""
+        other = TranscriptSpeaker.AGENT if speaker == TranscriptSpeaker.VENDOR else TranscriptSpeaker.VENDOR
+        if self._tx_buffers.get(other):
+            self._flush_transcript_buffers(only=other)
+        self._tx_buffers[speaker] = self._tx_buffers.get(speaker, "") + text
+        if finished:
+            self._flush_transcript_buffers(only=speaker)
+
+    def _flush_transcript_buffers(self, only: Optional[TranscriptSpeaker] = None) -> None:
+        for speaker in ([only] if only else list(self._tx_buffers)):
+            text = " ".join(self._tx_buffers.get(speaker, "").split())
+            self._tx_buffers[speaker] = ""
+            if text:
+                self._record_transcript(speaker=speaker, text=text, is_final=True)
 
     def _record_transcript(self, speaker: TranscriptSpeaker, text: str, is_final: bool = True) -> None:
         """Appends or merges a transcript entry in memory with bounded buffer protection."""

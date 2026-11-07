@@ -42,6 +42,7 @@ import {
   QuoteEvidenceItem,
 } from "@/components/v2/QuoteEvidenceDrawer";
 import { NegotiationCommand } from "@/components/v2/NegotiationCommand";
+import { PageHeader, Segmented, EmptyState, Meter } from "@/components/ds";
 
 type TabMode = "COMPARISON" | "NEGOTIATION";
 
@@ -183,123 +184,83 @@ export default function ProcurementPage() {
 
   const curr = eventData?.currency === "INR" || !eventData?.currency ? "₹" : `${eventData?.currency} `;
 
+  const totalBudget = eventData?.total_budget != null ? Number(eventData.total_budget) : null;
+  const committed = budgetSummary?.total_actual != null ? Number(budgetSummary.total_actual) : 0;
+  const remaining = budgetSummary?.remaining != null ? Number(budgetSummary.remaining) : null;
+  const quotedCount = quoteItems.filter((q) => q.quotedAmount != null).length;
+  const usedPct = totalBudget ? Math.min(100, (committed / totalBudget) * 100) : 0;
+
   return (
     <EventShell eventId={eventId} currentStage="PLAN">
-      <div className="space-y-4">
-        {/* Top Control Bar & Telemetry Summary */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                  Procurement & Negotiation Command
-                </span>
-                <span className="text-[10px] font-mono text-slate-400">
-                  {quoteItems.length} Sourced Quotes
-                </span>
-              </div>
-              <h1 className="text-lg font-bold text-slate-900 tracking-tight mt-1">
-                Commercial Matrix & Supplier Contracting
-              </h1>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Side-by-side commercial comparison, deterministic counter-offers, and governance-backed contract execution.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {/* Tab Switcher */}
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
-                <button
-                  onClick={() => {
+      <div className="space-y-5">
+        <PageHeader
+          eyebrow={
+            <span className="flex items-center gap-2">
+              Prepare <span className="text-ink-300">/</span> Procurement
+            </span>
+          }
+          title="Quotes & contracts"
+          description="Compare what vendors quoted, negotiate within your limits, then request approval to book."
+          actions={
+            <>
+              <Segmented<TabMode>
+                value={activeTab}
+                onChange={(v) => {
+                  if (v === "COMPARISON") {
                     setActiveTab("COMPARISON");
                     setActiveNegotiationId(null);
-                  }}
-                  className={`px-3 py-1.5 rounded-md transition ${
-                    activeTab === "COMPARISON"
-                      ? "bg-white text-slate-900 shadow-xs"
-                      : "text-slate-500 hover:text-slate-900"
-                  }`}
-                >
-                  Quote Matrix
-                </button>
-                <button
-                  onClick={() => {
+                  } else {
                     if (quoteItems.length > 0 && !activeNegotiationId) {
                       setActiveNegotiationId(quoteItems[0].assignmentId);
                     }
                     setActiveTab("NEGOTIATION");
-                  }}
-                  className={`px-3 py-1.5 rounded-md transition ${
-                    activeTab === "NEGOTIATION"
-                      ? "bg-white text-slate-900 shadow-xs"
-                      : "text-slate-500 hover:text-slate-900"
-                  }`}
-                >
-                  Active Negotiation
-                </button>
+                  }
+                }}
+                options={[
+                  { value: "COMPARISON", label: "Compare quotes", count: quoteItems.length },
+                  { value: "NEGOTIATION", label: "Negotiate" },
+                ]}
+              />
+              <button onClick={loadProcurementData} disabled={loading} className="btn-secondary !px-2.5" title="Refresh" aria-label="Refresh">
+                <RotateCcw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              </button>
+            </>
+          }
+        />
+
+        {statusMessage && (
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-info-200 bg-info-50 px-4 py-2.5 text-[13px] text-info-900">
+            <span>{statusMessage}</span>
+            <button onClick={() => setStatusMessage(null)} className="text-[12px] font-semibold text-info-700 hover:underline">
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        {/* Budget strip */}
+        <section className="surface overflow-hidden">
+          <div className="grid grid-cols-2 divide-ink-200 md:grid-cols-4 md:divide-x">
+            <Figure label="Event budget" value={totalBudget != null ? `${curr}${totalBudget.toLocaleString()}` : "Not set"} muted={totalBudget == null} />
+            <Figure label="Committed" value={`${curr}${committed.toLocaleString()}`} />
+            <Figure
+              label="Remaining"
+              value={remaining != null ? `${curr}${remaining.toLocaleString()}` : "Not set"}
+              tone={remaining != null ? (remaining < 0 ? "text-cue-700" : "text-go-700") : undefined}
+              muted={remaining == null}
+            />
+            <Figure label="Quotes in" value={`${quotedCount} / ${quoteItems.length}`} />
+          </div>
+          {totalBudget ? (
+            <div className="border-t border-ink-200 px-5 py-3">
+              <div className="flex items-center justify-between font-mono text-[10.5px] text-ink-500">
+                <span>budget used</span>
+                <span>{Math.round(usedPct)}%</span>
               </div>
-
-              <button
-                onClick={loadProcurementData}
-                disabled={loading}
-                className="p-2 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition"
-                title="Refresh"
-              >
-                <RotateCcw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              </button>
+              <Meter value={usedPct} tone={usedPct > 90 ? "cue" : usedPct > 70 ? "standby" : "ink"} className="mt-1.5" label="Budget used" />
             </div>
-          </div>
+          ) : null}
+        </section>
 
-          {/* Status Alert Banner */}
-          {statusMessage && (
-            <div className="mt-4 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-800 flex items-center justify-between">
-              <span>{statusMessage}</span>
-              <button
-                onClick={() => setStatusMessage(null)}
-                className="text-[10px] font-semibold text-blue-600 hover:underline"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
-
-          {/* Event Budget Constraint Summary Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 pt-3 border-t border-slate-100 text-xs">
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Total Event Budget</span>
-              <span className="font-mono font-bold text-slate-900 text-sm mt-0.5 block">
-                {eventData?.total_budget != null ? `${curr}${Number(eventData.total_budget).toLocaleString()}` : "UNSET"}
-              </span>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Committed Spend</span>
-              <span className="font-mono font-bold text-slate-900 text-sm mt-0.5 block">
-                {budgetSummary?.total_actual != null
-                  ? `${curr}${Number(budgetSummary.total_actual).toLocaleString()}`
-                  : `${curr}0`}
-              </span>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Remaining Budget</span>
-              <span className="font-mono font-bold text-emerald-700 text-sm mt-0.5 block">
-                {budgetSummary?.remaining != null
-                  ? `${curr}${Number(budgetSummary.remaining).toLocaleString()}`
-                  : "UNSET"}
-              </span>
-            </div>
-
-            <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/70">
-              <span className="text-[10px] uppercase font-bold text-slate-400 block">Quotes Received</span>
-              <span className="font-mono font-bold text-slate-900 text-sm mt-0.5 block">
-                {quoteItems.filter((q) => q.quotedAmount != null).length} of {quoteItems.length}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* View 1: Side-by-Side Comparison Table */}
         {activeTab === "COMPARISON" ? (
           <div>
             <QuoteComparisonTable
@@ -310,8 +271,6 @@ export default function ProcurementPage() {
               onRequestApproval={handleRequestApproval}
               onConfirmQuote={handleConfirmQuote}
             />
-
-            {/* Slide-Over Evidence Drawer */}
             <QuoteEvidenceDrawer
               quote={selectedQuote}
               eventId={eventId}
@@ -323,7 +282,6 @@ export default function ProcurementPage() {
             />
           </div>
         ) : (
-          /* View 2: Active Negotiation Command Workspace */
           <div>
             {activeNegotiationId ? (
               <NegotiationCommand
@@ -335,17 +293,29 @@ export default function ProcurementPage() {
                 }}
               />
             ) : (
-              <div className="p-16 text-center text-xs text-slate-400 bg-white rounded-xl border border-slate-200">
-                <FileText className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-                <p className="font-semibold text-slate-600">No Active Negotiation Selected</p>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Select a supplier quote from the Quote Matrix to open the negotiation console.
-                </p>
-              </div>
+              <EmptyState
+                icon={<FileText className="h-5 w-5" />}
+                title="No negotiation selected"
+                description="Pick a vendor's quote in Compare quotes to open its negotiation."
+              />
             )}
           </div>
         )}
       </div>
     </EventShell>
+  );
+}
+
+function Figure({ label, value, tone, muted }: { label: string; value: string; tone?: string; muted?: boolean }) {
+  return (
+    <div className="px-5 py-3.5 [&:nth-child(n+3)]:border-t [&:nth-child(n+3)]:border-ink-200 md:[&:nth-child(n+3)]:border-t-0">
+      <div className="font-mono text-[9.5px] uppercase tracking-label text-ink-400">{label}</div>
+      <div
+        className={`mt-1 font-display text-[22px] font-bold tabular-nums ${muted ? "text-ink-400" : tone || "text-ink-900"}`}
+        style={{ fontStretch: "90%" }}
+      >
+        {value}
+      </div>
+    </div>
   );
 }

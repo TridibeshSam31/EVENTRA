@@ -6,9 +6,22 @@ import type {
   EventSpecificationPreviewRequest,
 } from "../../types/api";
 
+/**
+ * List events, throwing on failure so callers can tell "couldn't load" apart
+ * from "you have no events yet". Use this for any screen that shows an empty state.
+ */
+export async function listEventsOrThrow(): Promise<EventResponse[]> {
+  const data = await apiClient.get<EventResponse[]>("/events");
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Lenient variant for non-critical UI (e.g. the event switcher), where a failure
+ * should simply leave the list as it was. Do NOT use it to decide "no events".
+ */
 export async function listEvents(): Promise<EventResponse[]> {
   try {
-    return await apiClient.get<EventResponse[]>("/events");
+    return await listEventsOrThrow();
   } catch {
     return [];
   }

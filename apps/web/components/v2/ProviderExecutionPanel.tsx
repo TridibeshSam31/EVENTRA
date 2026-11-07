@@ -29,7 +29,7 @@ export function ProviderExecutionPanel({
 }: ProviderExecutionPanelProps) {
   if (!providerSummary || providerSummary.assignments.length === 0) {
     return (
-      <div className={`p-8 bg-white border border-slate-200 rounded-xl text-center text-xs text-slate-500 shadow-xs ${className}`}>
+      <div className={`p-8 bg-[#FDFCFA] border border-slate-200 rounded-xl text-center text-xs text-slate-500 shadow-sm ${className}`}>
         <Building2 className="w-6 h-6 mx-auto mb-2 text-slate-300" />
         <p className="font-semibold text-slate-700">Provider Operational State</p>
         <p className="text-slate-400 mt-1">Provider execution state unavailable from backend.</p>
@@ -47,12 +47,12 @@ export function ProviderExecutionPanel({
   } = providerSummary;
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden ${className}`}>
+    <div className={`bg-[#FDFCFA] border border-slate-200 rounded-xl shadow-sm overflow-hidden ${className}`}>
       {/* Header */}
       <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
+            <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-500 bg-[#FDFCFA] px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
               <Building2 className="w-3 h-3 text-[#D6003C]" />
               Supplier & Provider State
             </span>
@@ -79,7 +79,7 @@ export function ProviderExecutionPanel({
       </div>
 
       {/* Telemetry Counters Strip */}
-      <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 border-b border-slate-100 bg-white text-xs">
+      <div className="p-4 grid grid-cols-2 sm:grid-cols-4 gap-3 border-b border-slate-100 bg-[#FDFCFA] text-xs">
         <div className="p-2.5 rounded-lg border border-slate-200 bg-slate-50">
           <span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">
             Confirmed Providers

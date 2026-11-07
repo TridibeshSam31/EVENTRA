@@ -1,6 +1,7 @@
 """Read-mostly orchestration for deterministic recovery-option snapshots."""
 import hashlib
 import json
+from app.services.live_events import publish
 from datetime import datetime, timezone, timedelta
 from typing import List
 
@@ -74,6 +75,7 @@ class RecoveryService:
         for index, record in enumerate(sorted((r for r in pending if r.is_feasible), key=lambda r: (-r.score, r.strategy_type, r.id)), start=1):
             record.rank = index
         self.db.commit()
+        publish(event_id, "recovery.options_updated", incident_id=incident_id)
         return self._ordered_options(event_id, incident_id)
 
     def recalculate_options(self, event_id: str, incident_id: str, current_user_id: str = "anonymous_operator") -> List[Recovery]:

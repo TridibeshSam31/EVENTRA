@@ -82,12 +82,12 @@ export function ActivityEvidenceDrawer({
       : "UNKNOWN";
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white border-l border-slate-200 shadow-2xl flex flex-col transform transition-transform duration-200 ease-in-out">
+    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-[#FDFCFA] border-l border-slate-200 shadow-2xl flex flex-col transform transition-transform duration-200 ease-in-out">
       {/* Header */}
       <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-slate-100 text-[#D6003C] border border-slate-200">
-            <Activity className="w-4 h-4 text-[#D6003C]" />
+          <div className="p-1.5 rounded-lg bg-slate-100 text-cue-600 border border-slate-200">
+            <Activity className="w-4 h-4 text-cue-600" />
           </div>
           <div>
             <h3 className="text-sm font-semibold text-slate-900">
@@ -111,10 +111,10 @@ export function ActivityEvidenceDrawer({
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
         {/* Category & Action */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Operation Summary
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA]">
             <div className="text-sm font-semibold text-slate-900 leading-snug">
               {item.summary || item.action || "UNKNOWN OPERATION"}
             </div>
@@ -132,10 +132,10 @@ export function ActivityEvidenceDrawer({
 
         {/* Actor Attribution */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Actor Attribution
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white grid grid-cols-2 gap-3 text-xs">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA] grid grid-cols-2 gap-3 text-xs">
             <div>
               <span className="text-slate-400 text-[11px] block">Actor Type:</span>
               <div className="flex items-center gap-1.5 font-semibold text-slate-900 mt-1">
@@ -154,10 +154,10 @@ export function ActivityEvidenceDrawer({
 
         {/* Authoritative Timestamp */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Authoritative Timestamp
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white space-y-1 text-xs">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA] space-y-1 text-xs">
             <div className="flex items-center gap-2 text-slate-800">
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               <span className="font-mono text-slate-900">
@@ -172,10 +172,10 @@ export function ActivityEvidenceDrawer({
 
         {/* Reference Object Navigation */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Related Entity Reference
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white flex items-center justify-between">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA] flex items-center justify-between">
             <div>
               <span className="text-[11px] text-slate-500 uppercase tracking-wider block">
                 Ref ID
@@ -187,7 +187,7 @@ export function ActivityEvidenceDrawer({
             {refLink ? (
               <Link
                 href={refLink}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#D6003C] hover:underline"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-cue-600 hover:underline"
               >
                 <span>Navigate</span>
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -202,7 +202,7 @@ export function ActivityEvidenceDrawer({
 
         {/* Metadata Details Payload */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Metadata Details
           </label>
           <div className="p-3 rounded-xl border border-slate-200 bg-slate-50 text-xs">

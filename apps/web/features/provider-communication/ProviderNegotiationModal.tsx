@@ -218,7 +218,7 @@ export function ProviderNegotiationModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 md:p-6 overflow-hidden animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 bg-ink-950/75 backdrop-blur-md flex items-center justify-center p-3 md:p-6 overflow-hidden animate-in fade-in duration-200">
       <div className="max-w-5xl w-full h-[90vh] bg-[#090d16] border border-slate-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-slate-100">
         {/* Modal Top Bar */}
         <div className="p-4 md:px-6 md:py-4 border-b border-slate-800/80 bg-[#0c1220] flex items-center justify-between">

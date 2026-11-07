@@ -24,7 +24,7 @@ export function ExecutionOverview({
 }: ExecutionOverviewProps) {
   if (!liveState) {
     return (
-      <div className={`p-5 bg-white border border-slate-200 rounded-xl text-center text-xs text-slate-500 shadow-xs ${className}`}>
+      <div className={`p-5 bg-[#FDFCFA] border border-ink-200 rounded-xl text-center text-xs text-slate-500 shadow-sm ${className}`}>
         <Layers className="w-5 h-5 mx-auto mb-1.5 text-slate-300" />
         <p className="font-semibold text-slate-700">Execution Overview</p>
         <p className="text-slate-400 mt-0.5">Execution telemetry unavailable.</p>
@@ -44,18 +44,18 @@ export function ExecutionOverview({
   const criticalCount = liveState.task_progress.filter((t) => t.is_critical_path).length;
 
   return (
-    <div className={`p-5 bg-white border border-slate-200 rounded-xl shadow-xs space-y-4 ${className}`}>
+    <div className={`p-5 bg-[#FDFCFA] border border-ink-200 rounded-xl shadow-sm space-y-4 ${className}`}>
       {/* Header & Progress Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+            <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400">
               Execution Progress
             </span>
             <ProvenanceBadge source="ENGINE" size="sm" />
           </div>
           <div className="flex items-center gap-2">
-            <h3 className="text-base font-bold text-slate-900 tracking-tight">
+            <h3 className="font-display text-[17px] font-bold text-ink-900 tracking-[-0.015em]">
               Operational Completion
             </h3>
             <span className="text-xs font-mono font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
@@ -75,7 +75,7 @@ export function ExecutionOverview({
       <div className="space-y-1">
         <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-200/60">
           <div
-            className="h-full bg-[#D6003C] transition-all duration-500 rounded-full"
+            className="h-full bg-cue-600 transition-all duration-500 rounded-full"
             style={{ width: `${Math.min(progress, 100)}%` }}
           />
         </div>

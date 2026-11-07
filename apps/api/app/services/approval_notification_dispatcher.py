@@ -547,7 +547,7 @@ class ApprovalNotificationDispatcher:
         # 1. In-app notification
         try:
             notif_provider = registry.get_notification_provider()
-            notif_provider.send_notification(
+            kwargs: Dict[str, Any] = dict(
                 event_id=event_id,
                 notification_type="OPERATIONAL_ALERT",
                 title=title,
@@ -555,6 +555,13 @@ class ApprovalNotificationDispatcher:
                 channel="IN_APP",
                 payload=payload,
             )
+            # The in-app provider only persists the notification when given a DB session;
+            # mock/webhook providers don't accept one.
+            import inspect
+
+            if "db" in inspect.signature(notif_provider.send_notification).parameters:
+                kwargs["db"] = self.db
+            notif_provider.send_notification(**kwargs)
         except Exception as e:
             logger.warning("Failed to dispatch in-app alert: %s", e)
 

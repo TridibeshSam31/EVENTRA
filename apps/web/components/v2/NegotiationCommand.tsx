@@ -189,7 +189,7 @@ export function NegotiationCommand({
 
   if (loading && !conversationData) {
     return (
-      <div className="py-24 text-center text-xs text-slate-400 bg-white rounded-xl border border-slate-200">
+      <div className="py-24 text-center text-xs text-slate-400 bg-[#FDFCFA] rounded-xl border border-slate-200">
         <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-[#D6003C]" />
         Loading negotiation records and budget validation...
       </div>
@@ -204,7 +204,7 @@ export function NegotiationCommand({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* 1. Header Toolbar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <div className="bg-[#FDFCFA] rounded-xl border border-slate-200 p-5 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
             {onBack && (
@@ -219,7 +219,7 @@ export function NegotiationCommand({
 
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                   {assignment?.category || "PROVIDER"} Negotiation
                 </span>
                 <ProvenanceBadge source={(vendor as any)?.source_tag || "LIVE_SCRAPE"} size="sm" />
@@ -296,10 +296,10 @@ export function NegotiationCommand({
       {/* 2. Main Workspace Split: Timeline (Left 7) vs Budget/Governance (Right 5) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left Column: Negotiation Stepper & Rounds (7 cols) */}
-        <div className="lg:col-span-7 bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+        <div className="lg:col-span-7 bg-[#FDFCFA] rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div>
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+              <h3 className="text-[13.5px] font-semibold text-slate-900 flex items-center gap-1.5">
                 <MessageSquare className="w-4 h-4 text-[#D6003C]" />
                 <span>Negotiation Timeline & Message Audit</span>
               </h3>
@@ -324,8 +324,8 @@ export function NegotiationCommand({
         {/* Right Column: Commercial Governance & Actions (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
           {/* Target Constraints Card */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          <div className="bg-[#FDFCFA] rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400 block">
               Negotiation Parameters
             </span>
 
@@ -353,8 +353,8 @@ export function NegotiationCommand({
           </div>
 
           {/* Budget Impact Card (Authoritative from Backend) */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          <div className="bg-[#FDFCFA] rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400 block">
               Budget Engine Impact
             </span>
 
@@ -414,8 +414,8 @@ export function NegotiationCommand({
           </div>
 
           {/* Governance & Human Approval Card */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          <div className="bg-[#FDFCFA] rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
+            <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400 block">
               Governance & Authority
             </span>
 
@@ -451,8 +451,8 @@ export function NegotiationCommand({
           </div>
 
           {/* Action Dispatcher Controls */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          <div className="bg-[#FDFCFA] rounded-xl border border-slate-200 p-4 shadow-sm space-y-2">
+            <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400 block">
               Negotiation Actions
             </span>
 
@@ -481,7 +481,7 @@ export function NegotiationCommand({
             <button
               onClick={handleConfirmEngagement}
               disabled={actionInProgress !== null || isConfirmed || !hasApprovalId}
-              className="w-full py-2.5 px-4 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+              className="w-full py-2.5 px-4 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-sm flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
               title={!hasApprovalId ? "Approval required before confirmation" : undefined}
             >
               <CheckCircle2 className="w-3.5 h-3.5" />

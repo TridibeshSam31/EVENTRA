@@ -89,7 +89,7 @@ export function EngineStatusCard({ className = "" }: EngineStatusCardProps) {
   ];
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
+    <div className={`bg-[#FDFCFA] border border-ink-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-2">
         <div className="flex items-center gap-2.5">
@@ -98,7 +98,7 @@ export function EngineStatusCard({ className = "" }: EngineStatusCardProps) {
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+              <h3 className="text-[13.5px] font-semibold text-ink-900">
                 Backend Deterministic Engines
               </h3>
               <ProvenanceBadge provenance="ENGINE" size="sm" />
@@ -130,7 +130,7 @@ export function EngineStatusCard({ className = "" }: EngineStatusCardProps) {
         {engines.map((eng) => (
           <div
             key={eng.id}
-            className="p-3.5 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors flex flex-col justify-between space-y-2"
+            className="p-3.5 rounded-xl border border-slate-200 bg-[#FDFCFA] hover:border-slate-300 transition-colors flex flex-col justify-between space-y-2"
           >
             <div>
               <div className="flex items-center justify-between gap-2 mb-1">

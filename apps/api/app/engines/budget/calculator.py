@@ -64,7 +64,9 @@ class BudgetCalculator:
         return BudgetSummary(
             total_estimated=total_estimated.quantize(Decimal("0.01")),
             total_actual=total_actual.quantize(Decimal("0.01")),
-            total_committed=total_estimated.quantize(Decimal("0.01")),
+            # Item-level spend only. Event-level "committed" (confirmed vendor agreed cost)
+            # lives in services/budget_commitments.py; this was previously mislabelled estimates.
+            total_committed=total_actual.quantize(Decimal("0.01")),
             remaining=(total_estimated - total_actual).quantize(Decimal("0.01")),
             item_count=len(budget_items),
             categories=categories,

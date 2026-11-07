@@ -23,6 +23,7 @@ import {
   FileText,
   Activity,
   Layers,
+  AlertTriangle,
 } from "lucide-react";
 
 import { getEvent } from "@/lib/api/events";
@@ -37,6 +38,9 @@ import type { Conversation, Message } from "@/types/communication";
 
 import type { VendorAssignmentResponse, EventResponse } from "@/types/api";
 import type { ActivityLogItem } from "@/types/activityLog";
+import { motion, useReducedMotion } from "framer-motion";
+import { SPRING } from "@/components/ds/motion";
+import { describeFacts, humanizeCode } from "@/lib/humanize";
 
 import { EventShell } from "@/components/v2/EventShell";
 import { WhatsAppDeliveryStatus } from "@/components/v2/WhatsAppDeliveryStatus";
@@ -48,6 +52,7 @@ import {
 } from "@/components/v2/ProviderContextPanel";
 import { ProvenanceBadge } from "@/components/v2/ProvenanceBadge";
 import { EngagementDashboard } from "@/components/v2/EngagementDashboard";
+import { PageHeader, Segmented, CueChip, type CueTone } from "@/components/ds";
 
 type ViewMode = "CONSOLE" | "DASHBOARD";
 type MobileTab = "THREADS" | "CHAT" | "CONTEXT";
@@ -81,6 +86,8 @@ export default function ConversationsPage() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [activeCall, setActiveCall] = useState<CallExecutionData | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+  const [convsLoadError, setConvsLoadError] = useState<string | null>(null);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
 
   // 1. Initial Load of Event, Conversations, and Assignments
   const loadConversationsAndEvent = useCallback(async () => {
@@ -96,6 +103,13 @@ export default function ConversationsPage() {
 
       if (evRes.status === "fulfilled" && evRes.value) {
         setEventData(evRes.value);
+      }
+
+      if (convsRes.status === "rejected") {
+        // Never let a failed request read as "no conversations yet".
+        setConvsLoadError((convsRes.reason as any)?.message || "The server didn't respond.");
+      } else {
+        setConvsLoadError(null);
       }
 
       if (convsRes.status === "fulfilled" && convsRes.value?.items) {
@@ -131,10 +145,20 @@ export default function ConversationsPage() {
       try {
         setLoadingMessages(true);
         const res: any = await getMessages(eventId, convId);
-        const list = Array.isArray(res) ? res : (res?.items || []);
-        setMessages(list);
-      } catch (err) {
+        const list: Message[] = Array.isArray(res) ? res : (res?.items || []);
+        // Keep messages that failed to send locally: the server never received them, so the
+        // poll would otherwise silently erase the "failed" state the organizer needs to see.
+        setMessages((prev) => {
+          const failedLocal = prev.filter(
+            (m) => m.conversation_id === convId && m.status === "failed" && String(m.id).startsWith("temp-")
+          );
+          return failedLocal.length ? [...list, ...failedLocal] : list;
+        });
+        setMessagesError(null);
+      } catch (err: any) {
         console.error("Failed to load messages:", err);
+        // Keep whatever is on screen and say it may be out of date.
+        setMessagesError(err?.message || "The server didn't respond.");
       } finally {
         setLoadingMessages(false);
       }
@@ -287,62 +311,43 @@ export default function ConversationsPage() {
     });
   }, [conversations, search, channelFilter, statusFilter]);
 
+  const threadCountLabel = `${conversations.length} ${conversations.length === 1 ? "thread" : "threads"}`;
+
   return (
     <EventShell eventId={eventId} currentStage="READY">
-      <div className="space-y-4">
-        {/* Top Workspace Bar */}
-        <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                Engagement Command
-              </span>
-              <span className="text-[10px] font-mono text-slate-400">
-                {conversations.length} Active Sessions
-              </span>
-            </div>
-            <h1 className="text-base font-bold text-slate-900 tracking-tight mt-0.5">
-              Provider Outreach & Communication Hub
-            </h1>
-          </div>
-
-          <div className="flex items-center gap-2 self-start sm:self-auto">
-            {/* View Mode Switcher */}
-            <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-semibold">
+      <div className="space-y-5">
+        <PageHeader
+          eyebrow={
+            <span className="flex items-center gap-2">
+              Engage <span className="text-ink-300">/</span> Messages &amp; calls
+              <span className="text-ink-400">· {threadCountLabel}</span>
+            </span>
+          }
+          title="Provider conversations"
+          description="Every message EVENTRA sends and every reply it receives, with the agent's reading of each reply kept separate from the original words."
+          actions={
+            <>
+              <Segmented<ViewMode>
+                value={viewMode}
+                onChange={setViewMode}
+                options={[
+                  { value: "CONSOLE", label: "Threads" },
+                  { value: "DASHBOARD", label: "Outreach overview" },
+                ]}
+              />
               <button
-                onClick={() => setViewMode("CONSOLE")}
-                className={`px-3 py-1 rounded-md transition ${
-                  viewMode === "CONSOLE"
-                    ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-500 hover:text-slate-900"
-                }`}
+                onClick={loadConversationsAndEvent}
+                disabled={loading}
+                className="btn-secondary !px-2.5"
+                title="Refresh"
+                aria-label="Refresh conversations"
               >
-                Thread Console
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
               </button>
-              <button
-                onClick={() => setViewMode("DASHBOARD")}
-                className={`px-3 py-1 rounded-md transition ${
-                  viewMode === "DASHBOARD"
-                    ? "bg-white text-slate-900 shadow-xs"
-                    : "text-slate-500 hover:text-slate-900"
-                }`}
-              >
-                Engagement Registry
-              </button>
-            </div>
+            </>
+          }
+        />
 
-            <button
-              onClick={loadConversationsAndEvent}
-              disabled={loading}
-              className="p-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition"
-              title="Refresh"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            </button>
-          </div>
-        </div>
-
-        {/* View Mode 1: Engagement Dashboard / Registry */}
         {viewMode === "DASHBOARD" ? (
           <EngagementDashboard
             eventId={eventId}
@@ -355,350 +360,307 @@ export default function ConversationsPage() {
             }}
           />
         ) : (
-          /* View Mode 2: Master-Detail Communication Workspace */
-          <div className="space-y-4">
-            {/* Mobile Tab Switcher */}
-            <div className="flex lg:hidden bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-semibold">
-              <button
-                onClick={() => setMobileTab("THREADS")}
-                className={`flex-1 py-1.5 rounded-md text-center transition ${
-                  mobileTab === "THREADS" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
-                }`}
-              >
-                Threads ({filteredConvs.length})
-              </button>
-              <button
-                onClick={() => setMobileTab("CHAT")}
-                className={`flex-1 py-1.5 rounded-md text-center transition ${
-                  mobileTab === "CHAT" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
-                }`}
-              >
-                Chat
-              </button>
-              <button
-                onClick={() => setMobileTab("CONTEXT")}
-                className={`flex-1 py-1.5 rounded-md text-center transition ${
-                  mobileTab === "CONTEXT" ? "bg-white text-slate-900 shadow-xs" : "text-slate-500"
-                }`}
-              >
-                Context & Facts
-              </button>
+          <div className="space-y-3">
+            {/* Mobile tabs */}
+            <div className="lg:hidden">
+              <Segmented<MobileTab>
+                value={mobileTab}
+                onChange={setMobileTab}
+                className="w-full [&>button]:flex-1 [&>button]:justify-center"
+                options={[
+                  { value: "THREADS", label: "Threads", count: filteredConvs.length },
+                  { value: "CHAT", label: "Chat" },
+                  { value: "CONTEXT", label: "Facts" },
+                ]}
+              />
             </div>
 
-            {/* 3-Column Enterprise Workspace */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 h-[680px]">
-              {/* LEFT COLUMN: Provider / Conversation List (4 cols) */}
-              <div
-                className={`lg:col-span-4 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden ${
+            <div className="grid h-[calc(100dvh-220px)] min-h-[560px] grid-cols-1 gap-3 lg:h-[700px] lg:grid-cols-12">
+              {/* ── Threads ───────────────────────────── */}
+              <aside
+                className={`surface flex-col overflow-hidden lg:col-span-4 xl:col-span-3 ${
                   mobileTab !== "THREADS" ? "hidden lg:flex" : "flex"
                 }`}
               >
-                {/* Search & Channel Filters */}
-                <div className="p-3 border-b border-slate-200 space-y-2">
+                <div className="space-y-2.5 border-b border-ink-200 p-3">
                   <div className="relative">
-                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
                     <input
                       type="text"
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
-                      placeholder="Search provider threads..."
-                      className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 transition"
+                      placeholder="Search providers or numbers"
+                      aria-label="Search conversations"
+                      className="h-9 w-full rounded-lg border border-ink-200 bg-ink-50 pl-8 pr-3 text-[13px] text-ink-800 placeholder:text-ink-400 transition focus:border-ink-400 focus:bg-white focus:outline-none"
                     />
                   </div>
-
-                  {/* Channel Pills */}
-                  <div className="flex items-center gap-1 text-[11px] overflow-x-auto no-scrollbar">
-                    {["ALL", "WHATSAPP", "CALL", "EMAIL"].map((ch) => (
-                      <button
-                        key={ch}
-                        onClick={() => setChannelFilter(ch)}
-                        className={`px-2 py-0.5 rounded-md font-semibold transition whitespace-nowrap ${
-                          channelFilter === ch
-                            ? "bg-slate-900 text-white"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                        }`}
-                      >
-                        {ch}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-1 overflow-x-auto">
+                    {["ALL", "WHATSAPP", "CALL", "EMAIL"].map((ch) => {
+                      const active = channelFilter === ch;
+                      return (
+                        <button
+                          key={ch}
+                          onClick={() => setChannelFilter(ch)}
+                          aria-pressed={active}
+                          className={`inline-flex items-center gap-1 whitespace-nowrap rounded-md px-2 py-1 text-[11.5px] font-semibold transition ${
+                            active ? "bg-ink-900 text-ink-50" : "text-ink-500 hover:bg-ink-100 hover:text-ink-800"
+                          }`}
+                        >
+                          {ch !== "ALL" && <ChannelGlyph channel={ch} className="h-3 w-3" />}
+                          {ch === "ALL" ? "All" : ch === "WHATSAPP" ? "WhatsApp" : ch === "CALL" ? "Calls" : "Email"}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
-                {/* Conversation List Feed */}
-                <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                <div className="flex-1 overflow-y-auto">
                   {loading && conversations.length === 0 ? (
-                    <div className="py-16 text-center text-xs text-slate-400">
-                      <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-[#D6003C]" />
-                      Loading communication threads...
+                    <div className="space-y-2 p-3">
+                      {[0, 1, 2, 3].map((i) => (
+                        <div key={i} className="workspace-shimmer h-[62px] rounded-lg" />
+                      ))}
+                    </div>
+                  ) : convsLoadError && conversations.length === 0 ? (
+                    <div role="alert" className="flex h-full flex-col items-center justify-center px-6 py-10 text-center">
+                      <AlertTriangle className="mb-3 h-6 w-6 text-cue-500" />
+                      <p className="text-[13px] font-semibold text-ink-800">Couldn&apos;t load conversations</p>
+                      <p className="mt-1 text-[12px] leading-relaxed text-ink-600">
+                        {convsLoadError} Messages with vendors may exist — we just couldn&apos;t fetch them.
+                      </p>
+                      <button onClick={loadConversationsAndEvent} className="btn-secondary mt-4">
+                        Try again
+                      </button>
                     </div>
                   ) : filteredConvs.length === 0 ? (
-                    <div className="py-16 text-center text-xs text-slate-400 px-4">
-                      No provider conversations found. Start discovery or engage shortlisted providers to initiate threads.
+                    <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+                      <MessageSquare className="mb-3 h-6 w-6 text-ink-300" />
+                      <p className="text-[13px] font-semibold text-ink-700">
+                        {conversations.length === 0 ? "No conversations yet" : "Nothing matches"}
+                      </p>
+                      <p className="mt-1 text-[12px] leading-relaxed text-ink-500">
+                        {conversations.length === 0
+                          ? "Threads appear here once EVENTRA contacts shortlisted providers."
+                          : "Try a different search or channel."}
+                      </p>
+                      {conversations.length === 0 && (
+                        <Link href={`/events/${eventId}/vendors`} className="btn-secondary mt-4">
+                          Go to vendors
+                        </Link>
+                      )}
                     </div>
                   ) : (
-                    filteredConvs.map((conv) => {
-                      const isSelected = selectedConv?.id === conv.id;
-                      const isCall = conv.channel === "call";
-
-                      return (
-                        <button
-                          key={conv.id}
-                          onClick={() => {
-                            setSelectedConv(conv);
-                            setMobileTab("CHAT");
-                          }}
-                          className={`w-full text-left p-3 transition flex items-start gap-2.5 ${
-                            isSelected
-                              ? "bg-slate-50 border-l-4 border-[#D6003C]"
-                              : "hover:bg-slate-50/60"
-                          }`}
-                        >
-                          <div
-                            className={`p-2 rounded-lg mt-0.5 shrink-0 ${
-                              isCall
-                                ? "bg-purple-50 text-purple-600 border border-purple-200"
-                                : "bg-emerald-50 text-emerald-600 border border-emerald-200"
-                            }`}
-                          >
-                            {isCall ? (
-                              <PhoneCall className="w-3.5 h-3.5" />
-                            ) : (
-                              <MessageSquare className="w-3.5 h-3.5" />
-                            )}
-                          </div>
-
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-1 mb-0.5">
-                              <h4 className="text-xs font-bold text-slate-900 truncate">
-                                {conv.vendor_name || "Provider Contact"}
-                              </h4>
-                              <span className="text-[10px] font-mono text-slate-400 whitespace-nowrap">
-                                {new Date(conv.last_message_at).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </span>
-                            </div>
-
-                            <p className="text-[11px] text-slate-500 truncate">
-                              {conv.latest_message?.raw_text || "Outreach initiated"}
-                            </p>
-
-                            <div className="flex items-center gap-1.5 mt-1.5">
-                              <span className="text-[9px] uppercase font-mono px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                                {conv.channel}
-                              </span>
-                              <span
-                                className={`text-[10px] font-semibold ${
-                                  conv.status === "CONFIRMED"
-                                    ? "text-emerald-600"
-                                    : "text-slate-600"
-                                }`}
-                              >
-                                {conv.status}
-                              </span>
-                            </div>
-                          </div>
-                        </button>
-                      );
-                    })
+                    <ul>
+                      {filteredConvs.map((conv, convIdx) => {
+                        const isSelected = selectedConv?.id === conv.id;
+                        const tone = statusTone(conv.status);
+                        return (
+                          <MotionLi key={conv.id} index={convIdx}>
+                            <button
+                              onClick={() => {
+                                setSelectedConv(conv);
+                                setMobileTab("CHAT");
+                              }}
+                              aria-current={isSelected ? "true" : undefined}
+                              className={`relative flex w-full items-start gap-3 border-b border-ink-100 px-3 py-3 text-left transition ${
+                                isSelected ? "bg-ink-100/80" : "hover:bg-ink-50"
+                              }`}
+                            >
+                              {isSelected && (
+                                <motion.span
+                                  layoutId="conv-selected-bar"
+                                  transition={SPRING}
+                                  className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-cue-600"
+                                />
+                              )}
+                              <Avatar name={conv.vendor_name || "Provider"} channel={conv.channel} />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-baseline justify-between gap-2">
+                                  <span className="truncate text-[13px] font-semibold text-ink-900">
+                                    {conv.vendor_name || "Provider contact"}
+                                  </span>
+                                  <span className="shrink-0 font-mono text-[10.5px] text-ink-400">
+                                    {formatClock(conv.last_message_at)}
+                                  </span>
+                                </div>
+                                <p className="mt-0.5 truncate text-[12px] text-ink-500">
+                                  {conv.latest_message?.raw_text || "Outreach started"}
+                                </p>
+                                <div className="mt-1.5">
+                                  <CueChip tone={tone} className="!py-0 !text-[10.5px]">
+                                    {humanStatus(conv.status)}
+                                  </CueChip>
+                                </div>
+                              </div>
+                            </button>
+                          </MotionLi>
+                        );
+                      })}
+                    </ul>
                   )}
                 </div>
-              </div>
+              </aside>
 
-              {/* CENTER COLUMN: Threaded Message History (5 cols) */}
-              <div
-                className={`lg:col-span-5 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden ${
+              {/* ── Thread ────────────────────────────── */}
+              <section
+                className={`surface flex-col overflow-hidden lg:col-span-8 xl:col-span-6 ${
                   mobileTab !== "CHAT" ? "hidden lg:flex" : "flex"
                 }`}
               >
                 {selectedConv ? (
                   <>
-                    {/* Thread Header */}
-                    <div className="p-3 border-b border-slate-200 flex items-center justify-between bg-slate-50/50">
-                      <div className="flex items-center gap-2">
+                    <header className="flex items-center justify-between gap-3 border-b border-ink-200 px-4 py-3">
+                      <div className="flex min-w-0 items-center gap-2.5">
                         <button
                           onClick={() => setMobileTab("THREADS")}
-                          className="lg:hidden p-1 text-slate-500 hover:text-slate-800"
+                          className="rounded-md p-1 text-ink-500 hover:bg-ink-100 hover:text-ink-900 lg:hidden"
+                          aria-label="Back to threads"
                         >
-                          <ArrowLeft className="w-4 h-4" />
+                          <ArrowLeft className="h-4 w-4" />
                         </button>
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <h3 className="text-xs font-bold text-slate-900">
-                              {selectedConv.vendor_name || "Provider Session"}
-                            </h3>
-                            <span className="text-[10px] uppercase font-mono px-1.5 py-0.2 rounded bg-slate-200 text-slate-700">
-                              {selectedConv.channel}
-                            </span>
-                          </div>
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            Target: {selectedConv.recipient_contact || "UNKNOWN"}
-                          </span>
+                        <Avatar name={selectedConv.vendor_name || "Provider"} channel={selectedConv.channel} />
+                        <div className="min-w-0">
+                          <h3 className="truncate text-[14px] font-semibold text-ink-900">
+                            {selectedConv.vendor_name || "Provider"}
+                          </h3>
+                          <p className="truncate font-mono text-[11px] text-ink-500">
+                            {channelName(selectedConv.channel)} · {selectedConv.recipient_contact || "contact unknown"}
+                          </p>
                         </div>
                       </div>
-
-                      <div className="flex items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-2">
                         <button
                           onClick={() => setMobileTab("CONTEXT")}
-                          className="lg:hidden text-[11px] font-semibold text-[#D6003C]"
+                          className="text-[12px] font-semibold text-ink-600 underline-offset-2 hover:underline lg:hidden"
                         >
-                          View Context
+                          Facts
                         </button>
-                        <span className="text-[10px] font-semibold text-slate-500 uppercase px-2 py-0.5 rounded bg-white border border-slate-200">
-                          {selectedConv.status}
-                        </span>
+                        <CueChip tone={statusTone(selectedConv.status)}>{humanStatus(selectedConv.status)}</CueChip>
                       </div>
-                    </div>
+                    </header>
 
-                    {/* Messages Scroll Area */}
-                    <div className="flex-1 p-4 overflow-y-auto space-y-3 bg-slate-50/30">
+                    <div className="flex-1 space-y-4 overflow-y-auto bg-ink-50/70 bg-dots px-4 py-5">
                       {loadingMessages && messages.length === 0 ? (
-                        <div className="py-20 text-center text-xs text-slate-400">
-                          <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-[#D6003C]" />
-                          Retrieving message log...
+                        <div className="space-y-3">
+                          <div className="workspace-shimmer h-14 w-2/3 rounded-xl" />
+                          <div className="workspace-shimmer ml-auto h-14 w-1/2 rounded-xl" />
+                          <div className="workspace-shimmer h-20 w-3/5 rounded-xl" />
+                        </div>
+                      ) : messagesError && messages.length === 0 ? (
+                        <div role="alert" className="flex h-full flex-col items-center justify-center text-center">
+                          <AlertTriangle className="mb-2 h-5 w-5 text-cue-500" />
+                          <p className="text-[13px] font-semibold text-ink-800">Couldn&apos;t load this thread</p>
+                          <p className="mt-1 text-[12px] text-ink-600">{messagesError}</p>
+                          <button onClick={() => selectedConv && loadMessages(selectedConv.id)} className="btn-secondary mt-3">
+                            Try again
+                          </button>
                         </div>
                       ) : messages.length === 0 ? (
-                        <div className="py-20 text-center text-xs text-slate-400">
-                          No messages recorded in this conversation thread yet.
+                        <div className="flex h-full flex-col items-center justify-center text-center">
+                          <p className="text-[13px] font-semibold text-ink-700">No messages in this thread yet</p>
+                          <p className="mt-1 text-[12px] text-ink-600">Messages appear here as soon as they are sent or received.</p>
                         </div>
                       ) : (
                         messages.map((msg) => {
                           const isInbound = msg.direction === "inbound";
-
+                          const facts = msg.extracted_facts || {};
+                          const hasFacts = isInbound && Object.keys(facts).length > 0;
                           return (
-                            <div
-                              key={msg.id}
-                              className={`flex flex-col ${isInbound ? "items-start" : "items-end"}`}
-                            >
-                              <div
-                                className={`max-w-[85%] rounded-xl p-3 text-xs shadow-xs space-y-1 ${
-                                  isInbound
-                                    ? "bg-white border border-slate-200 text-slate-900"
-                                    : "bg-slate-900 text-white border border-slate-800"
-                                }`}
-                              >
-                                {/* Header / Sender Info */}
-                                <div className="flex items-center justify-between gap-3 text-[10px] opacity-75">
-                                  <span className="font-semibold flex items-center gap-1">
-                                    {isInbound ? (
-                                      <>
-                                        <User className="w-2.5 h-2.5 text-slate-400" />
-                                        <span>{msg.sender || selectedConv.vendor_name || "Provider"}</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Bot className="w-2.5 h-2.5 text-rose-300" />
-                                        <span>{msg.sender || "EVENTRA Operator"}</span>
-                                      </>
-                                    )}
-                                  </span>
-                                  <span className="font-mono">
-                                    {new Date(msg.timestamp || msg.created_at).toLocaleTimeString([], {
-                                      hour: "2-digit",
-                                      minute: "2-digit",
-                                    })}
-                                  </span>
-                                </div>
-
-                                {/* Raw Text */}
-                                <p className="leading-relaxed whitespace-pre-wrap font-sans text-xs">
-                                  {msg.raw_text}
-                                </p>
-
-                                {/* Delivery Status / Footer */}
-                                <div className="pt-1 flex items-center justify-between gap-2 border-t border-slate-200/20 text-[10px]">
-                                  <span className="uppercase text-[9px] font-mono tracking-wider opacity-70">
-                                    {msg.channel}
-                                  </span>
-
-                                  {!isInbound && (
-                                    <WhatsAppDeliveryStatus
-                                      status={msg.status}
-                                      timestamp={msg.timestamp}
-                                      showLabel={true}
-                                    />
-                                  )}
-                                </div>
+                            <MessagePop key={msg.id} inbound={isInbound}>
+                              <div className={`flex items-center gap-2 px-1 text-[10.5px] ${isInbound ? "" : "flex-row-reverse"}`}>
+                                <span className={`font-mono font-medium uppercase tracking-label ${isInbound ? "text-ink-600" : "text-cue-700"}`}>
+                                  {isInbound ? cleanSender(msg.sender, selectedConv.vendor_name) : "EVENTRA"}
+                                </span>
+                                <span className="font-mono text-ink-400">{formatClock(msg.timestamp || msg.created_at)}</span>
                               </div>
-                            </div>
+                              <div
+                                className={`max-w-[86%] rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-relaxed shadow-sm sm:max-w-[75%] ${
+                                  isInbound
+                                    ? "rounded-tl-md border border-ink-200 bg-[#FDFCFA] text-ink-900"
+                                    : "rounded-tr-md bg-ink-900 text-ink-50"
+                                } ${msg.status === "failed" ? "ring-2 ring-cue-500/60" : ""}`}
+                              >
+                                <p className="whitespace-pre-wrap">{msg.raw_text}</p>
+                              </div>
+                              <div className={`flex items-center gap-2 px-1 ${isInbound ? "" : "flex-row-reverse"}`}>
+                                <span className="inline-flex items-center gap-1 font-mono text-[10px] uppercase text-ink-400">
+                                  <ChannelGlyph channel={msg.channel} className="h-2.5 w-2.5" />
+                                  {channelName(msg.channel)}
+                                </span>
+                                {!isInbound && (
+                                  <WhatsAppDeliveryStatus status={msg.status} timestamp={msg.timestamp} showLabel={true} />
+                                )}
+                              </div>
+
+                              {/* ✦ Agent interpretation — a separate layer, never overwriting the message */}
+                              {hasFacts && <InterpretationLayer facts={facts} />}
+                            </MessagePop>
                           );
                         })
                       )}
                     </div>
 
-                    {/* Send Message Footer */}
                     <form
                       onSubmit={handleSendMessage}
-                      className="p-3 border-t border-slate-200 bg-white space-y-2"
+                      className="space-y-2 border-t border-ink-200 bg-[#FDFCFA] p-3"
+                      data-guide-step="awaiting_replies"
                     >
+                      {messagesError && messages.length > 0 && (
+                        <div className="flex items-center gap-1.5 rounded-lg border border-standby-200 bg-standby-50 px-2.5 py-1.5 text-[12px] text-standby-800">
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          <span>Couldn&apos;t refresh this thread — newer messages may be missing.</span>
+                        </div>
+                      )}
                       {sendError && (
-                        <div className="p-2 rounded bg-rose-50 border border-rose-200 text-[11px] text-rose-700 flex items-center gap-1.5">
-                          <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                        <div className="flex items-center gap-1.5 rounded-lg border border-cue-200 bg-cue-50 px-2.5 py-2 text-[12px] text-cue-700">
+                          <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                           <span>{sendError}</span>
                         </div>
                       )}
-
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
                           value={replyText}
                           onChange={(e) => setReplyText(e.target.value)}
-                          placeholder={`Reply via ${selectedConv.channel || "WhatsApp"}...`}
-                          className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 transition"
+                          placeholder={`Write a ${channelName(selectedConv.channel || "whatsapp")} reply…`}
+                          aria-label="Reply message"
+                          className="h-10 flex-1 rounded-lg border border-ink-200 bg-ink-50 px-3 text-[13.5px] text-ink-900 placeholder:text-ink-400 transition focus:border-ink-400 focus:bg-white focus:outline-none"
                         />
-                        <button
-                          type="submit"
-                          disabled={sending || !replyText.trim()}
-                          className="px-3.5 py-2 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs transition disabled:opacity-50 flex items-center gap-1.5"
-                        >
-                          {sending ? (
-                            <>
-                              <Loader2 className="w-3 h-3 animate-spin" />
-                              <span>Sending...</span>
-                            </>
-                          ) : (
-                            <>
-                              <Send className="w-3 h-3" />
-                              <span>Send</span>
-                            </>
-                          )}
+                        <button type="submit" disabled={sending || !replyText.trim()} className="btn-primary h-10">
+                          {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                          <span>{sending ? "Sending" : "Send"}</span>
                         </button>
                       </div>
+                      <p className="px-0.5 text-[11px] text-ink-400">
+                        Sent from EVENTRA to {selectedConv.recipient_contact || "this provider"}. Delivery state updates as the provider receives and reads it.
+                      </p>
                     </form>
                   </>
                 ) : (
-                  <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-xs text-slate-400">
-                    <MessageSquare className="w-8 h-8 text-slate-300 mb-2" />
-                    <p className="font-semibold text-slate-600">Select a Provider Thread</p>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      Choose an active conversation from the left to inspect logs or send messages.
+                  <div className="flex flex-1 flex-col items-center justify-center p-6 text-center">
+                    <div className="mb-3 grid h-11 w-11 place-items-center rounded-xl border border-ink-200 bg-ink-50 text-ink-400">
+                      <MessageSquare className="h-5 w-5" />
+                    </div>
+                    <p className="text-[14px] font-semibold text-ink-800">Pick a provider to open the chat</p>
+                    <p className="mt-1 max-w-[36ch] text-[12.5px] text-ink-500">
+                      Choose a conversation on the left to read the full thread or send a reply.
                     </p>
                   </div>
                 )}
-              </div>
+              </section>
 
-              {/* RIGHT COLUMN: Provider Context & Structured Facts (3 cols) */}
-              <div
-                className={`lg:col-span-3 space-y-4 overflow-y-auto ${
+              {/* ── Context & facts ───────────────────── */}
+              <aside
+                className={`space-y-3 overflow-y-auto lg:col-span-12 xl:col-span-3 ${
                   mobileTab !== "CONTEXT" ? "hidden lg:block" : "block"
                 }`}
               >
-                {/* Active Call Live Card if Triggered */}
-                {activeCall && (
-                  <CallExecutionCard
-                    call={activeCall}
-                  />
-                )}
-
-                {/* Structured Extracted Response Facts */}
+                {activeCall && <CallExecutionCard call={activeCall} />}
                 <ResponseFactsCard
                   facts={latestFactMessage?.extracted_facts}
                   vendorName={selectedConv?.vendor_name}
                   timestamp={latestFactMessage?.timestamp}
                 />
-
-                {/* Provider Context & Outreach Actions */}
                 <ProviderContextPanel
                   provider={providerContext}
                   eventId={eventId}
@@ -707,12 +669,146 @@ export default function ConversationsPage() {
                   }}
                   isActionInProgress={actionInProgress === providerContext?.id}
                 />
-
-              </div>
+              </aside>
             </div>
           </div>
         )}
       </div>
     </EventShell>
   );
+}
+
+/* ── helpers ─────────────────────────────────────────────── */
+
+function formatClock(ts?: string | null) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function channelName(channel?: string | null) {
+  const c = (channel || "").toLowerCase();
+  if (c === "whatsapp") return "WhatsApp";
+  if (c === "call") return "Call";
+  if (c === "email") return "Email";
+  return channel || "Message";
+}
+
+function ChannelGlyph({ channel, className = "h-3 w-3" }: { channel?: string | null; className?: string }) {
+  const c = (channel || "").toLowerCase();
+  if (c === "call") return <PhoneCall className={className} />;
+  if (c === "email") return <Mail className={className} />;
+  return <MessageSquare className={className} />;
+}
+
+function statusTone(status?: string | null): CueTone {
+  const s = (status || "").toUpperCase();
+  if (["CONFIRMED", "RESPONDED", "CLOSED", "COMPLETED", "ACCEPTED"].includes(s)) return "go";
+  if (["AWAITING_RESPONSE", "SENT", "OPEN", "PENDING", "QUEUED", "DELIVERED", "READ"].includes(s)) return "standby";
+  if (["FAILED", "REJECTED", "DECLINED", "BLOCKED", "NO_ANSWER"].includes(s)) return "cue";
+  return "idle";
+}
+
+function humanStatus(status?: string | null) {
+  if (!status) return "Unknown";
+  const s = status.toUpperCase();
+  if (s === "AWAITING_RESPONSE") return "Awaiting reply";
+  return status.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase());
+}
+
+function Avatar({ name, channel }: { name: string; channel?: string | null }) {
+  const letters = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+  return (
+    <span className="relative grid h-9 w-9 shrink-0 place-items-center rounded-full bg-ink-200 font-display text-[12px] font-bold text-ink-700">
+      {letters || "?"}
+      <span className="absolute -bottom-0.5 -right-0.5 grid h-4 w-4 place-items-center rounded-full border-2 border-[#FDFCFA] bg-ink-900 text-ink-50">
+        <ChannelGlyph channel={channel} className="h-2 w-2" />
+      </span>
+    </span>
+  );
+}
+
+function InterpretationLayer({ facts }: { facts: Record<string, any> }) {
+  const rows: Array<{ k: string; v: string }> = [];
+  if (facts.available !== undefined && facts.available !== null) rows.push({ k: "Available", v: facts.available ? "Yes" : "No" });
+  if (facts.quoted_amount !== undefined && facts.quoted_amount !== null) {
+    const sym = (facts.currency || "INR") === "INR" ? "₹" : `${facts.currency} `;
+    rows.push({ k: "Quoted", v: `${sym}${Number(facts.quoted_amount).toLocaleString()}` });
+  }
+  if (facts.capacity !== undefined && facts.capacity !== null && facts.capacity !== "") rows.push({ k: "Capacity", v: String(facts.capacity) });
+  if (facts.eta_minutes !== undefined && facts.eta_minutes !== null) rows.push({ k: "Arrives in", v: `${facts.eta_minutes} min` });
+  if (facts.intent) rows.push({ k: "Intent", v: humanizeCode(String(facts.intent)) });
+  if (facts.notes) rows.push({ k: "Notes", v: String(facts.notes) });
+  if (rows.length === 0) return null;
+  // describeFacts reads quoted_price; the conversation API calls it quoted_amount.
+  const summary = describeFacts({ ...facts, quoted_price: facts.quoted_amount ?? facts.quoted_price, notes: undefined }, facts.currency || "INR");
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      transition={{ ...SPRING, delay: 0.15 }}
+      className="ml-3 max-w-[80%] rounded-xl border border-agent-200 bg-agent-50/80 px-3 py-2 sm:max-w-[65%]"
+    >
+      <div className="mb-1 flex items-center justify-between gap-3">
+        <span className="font-mono text-[10px] font-semibold uppercase tracking-label text-agent-700">✦ Agent reading</span>
+        {typeof facts.confidence === "number" && (
+          <span className="font-mono text-[10px] text-agent-600">{Math.round(facts.confidence * 100)}% confident</span>
+        )}
+      </div>
+      {summary && <p className="mb-1 text-[12.5px] font-semibold text-agent-950">{summary}</p>}
+      <dl className="space-y-0.5">
+        {rows.map((r) => (
+          <div key={r.k} className="flex gap-3 text-[12px]">
+            <dt className="w-16 shrink-0 text-agent-600">{r.k}</dt>
+            <dd className="min-w-0 font-semibold text-agent-950">{r.v}</dd>
+          </div>
+        ))}
+      </dl>
+    </motion.div>
+  );
+}
+
+/* ── motion helpers ───────────────────────────────────────── */
+
+function MotionLi({ index, children }: { index: number; children: React.ReactNode }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.li
+      initial={reduce ? false : { opacity: 0, x: -10 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ ...SPRING, delay: reduce ? 0 : Math.min(index, 12) * 0.03 }}
+    >
+      {children}
+    </motion.li>
+  );
+}
+
+/** A message bubble group that springs in from its own side of the thread. */
+function MessagePop({ inbound, children }: { inbound: boolean; children: React.ReactNode }) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div
+      layout={!reduce}
+      initial={reduce ? false : { opacity: 0, y: 10, x: inbound ? -12 : 12, scale: 0.97 }}
+      animate={{ opacity: 1, y: 0, x: 0, scale: 1 }}
+      transition={SPRING}
+      className={`flex flex-col gap-1.5 ${inbound ? "items-start" : "items-end"}`}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/** Sender labels sometimes carry call/message IDs ("Vendor Voice Call (CA0435…)"); show a person-readable label. */
+function cleanSender(sender?: string | null, vendorName?: string | null): string {
+  const base = (sender || "").replace(/\s*\(\s*[A-Za-z0-9_-]{16,}\s*\)/g, "").trim();
+  if (!base) return vendorName || "Provider";
+  if (/voice call/i.test(base)) return `${vendorName || "Provider"} · phone call`;
+  return base;
 }

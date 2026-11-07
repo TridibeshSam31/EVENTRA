@@ -90,6 +90,8 @@ export function RecoveryCommand({
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [incidentsError, setIncidentsError] = useState<string | null>(null);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
 
   // 1. Fetch Incidents for Event
   const loadIncidents = useCallback(async () => {
@@ -104,13 +106,19 @@ export function RecoveryCommand({
 
       if (incRes.status === "fulfilled" && incRes.value?.items) {
         setIncidents(incRes.value.items);
+        setIncidentsError(null);
         if (incRes.value.items.length > 0 && !selectedIncidentId) {
           setSelectedIncidentId(incRes.value.items[0].id);
         }
+      } else if (incRes.status === "rejected") {
+        // A failed load must not look like "no incidents".
+        setIncidentsError((incRes.reason as any)?.message || "The server didn't respond.");
       }
 
       if (appRes.status === "fulfilled" && appRes.value?.items) {
         setApprovals(appRes.value.items);
+      } else if (appRes.status === "rejected") {
+        setErrorMessage("Couldn't load approvals — approval status shown here may be incomplete.");
       }
 
       if (actRes.status === "fulfilled" && actRes.value?.items) {
@@ -128,27 +136,24 @@ export function RecoveryCommand({
     loadIncidents();
   }, [loadIncidents]);
 
-  // 2. Fetch or Generate Recovery Options for Selected Incident
+  // 2. Load existing recovery options for the selected incident. Viewing must never create
+  // options on the backend (that pollutes the audit trail); generation is an explicit action
+  // via handleGenerateOptions ("Find ways to fix this").
   const loadOptionsForIncident = useCallback(
     async (incId: string) => {
       try {
         setLoadingOptions(true);
         setExecutionResult(null);
-        let res = await listRecoveryOptions(eventId, incId);
-        if (!res || !res.items || res.items.length === 0) {
-          // Deterministically generate initial recovery options via engine
-          res = await generateRecoveryOptions(eventId, incId);
-        }
-
-        if (res?.items) {
-          setOptions(res.items);
-          if (res.items.length > 0) {
-            setSelectedOption(res.items[0]);
-          }
-        }
+        setOptionsError(null);
+        const res = await listRecoveryOptions(eventId, incId);
+        const items = res?.items || [];
+        setOptions(items);
+        setSelectedOption(items.length > 0 ? items[0] : null);
       } catch (err: any) {
         console.error("Failed to load recovery options:", err);
-        setErrorMessage("Recovery options unavailable from backend.");
+        setOptions([]);
+        setSelectedOption(null);
+        setOptionsError(err?.message || "The server didn't respond.");
       } finally {
         setLoadingOptions(false);
       }
@@ -249,6 +254,27 @@ export function RecoveryCommand({
   };
 
   // Recalculate Options
+  // Explicit, user-initiated generation of recovery options (never on view).
+  const handleGenerateOptions = async () => {
+    if (!selectedIncidentId) return;
+    try {
+      setActionInProgress("generate");
+      setLoadingOptions(true);
+      setErrorMessage(null);
+      setOptionsError(null);
+      const res = await generateRecoveryOptions(eventId, selectedIncidentId);
+      const items = res?.items || [];
+      setOptions(items);
+      setSelectedOption(items.length > 0 ? items[0] : null);
+      setStatusMessage(items.length > 0 ? "Fix options worked out." : "No workable fix options were found.");
+    } catch (err: any) {
+      setErrorMessage(err.message || "Couldn't work out fix options.");
+    } finally {
+      setActionInProgress(null);
+      setLoadingOptions(false);
+    }
+  };
+
   const handleRecalculate = async () => {
     if (!selectedIncidentId) return;
     try {
@@ -361,11 +387,11 @@ export function RecoveryCommand({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* 1. Header Toolbar */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
+      <div className="surface p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+              <span className="eyebrow bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                 Recovery Command
               </span>
               {currentIncident && (
@@ -449,11 +475,11 @@ export function RecoveryCommand({
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* LEFT COLUMN: Recovery Options & Execution (7 cols) */}
         <div className="lg:col-span-7 space-y-4">
-          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+          <div className="surface p-5 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
-                  <Zap className="w-4 h-4 text-[#D6003C]" />
+                  <Zap className="w-4 h-4 text-cue-600" />
                   <span>Deterministic Recovery Options</span>
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
@@ -467,13 +493,45 @@ export function RecoveryCommand({
             </div>
 
             {loadingOptions && options.length === 0 ? (
-              <div className="py-16 text-center text-xs text-slate-400">
-                <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-[#D6003C]" />
-                Generating recovery strategies...
+              <div className="py-16 text-center text-xs text-slate-600">
+                <Loader2 className="w-5 h-5 animate-spin mx-auto mb-2 text-cue-600" />
+                {actionInProgress === "generate" ? "Working out ways to fix this…" : "Loading fix options…"}
+              </div>
+            ) : incidentsError ? (
+              <div role="alert" className="py-12 text-center text-[13px] text-slate-700">
+                <AlertTriangle className="mx-auto mb-2 h-5 w-5 text-cue-600" />
+                <p className="font-semibold text-slate-900">Couldn&apos;t load problems</p>
+                <p className="mt-1 text-[12.5px] text-slate-600">{incidentsError}</p>
+                <button onClick={() => loadIncidents()} className="btn-secondary mt-4">
+                  Try again
+                </button>
+              </div>
+            ) : !selectedIncidentId ? (
+              <div className="py-16 text-center text-[13px] text-slate-600">
+                {incidents.length === 0 ? "No problems have been reported for this event." : "Pick a problem above."}
+              </div>
+            ) : optionsError ? (
+              <div role="alert" className="py-12 text-center text-[13px] text-slate-700">
+                <AlertTriangle className="mx-auto mb-2 h-5 w-5 text-cue-600" />
+                <p className="font-semibold text-slate-900">Couldn&apos;t load fix options</p>
+                <p className="mt-1 text-[12.5px] text-slate-600">
+                  {optionsError} There may already be options — try again before generating new ones.
+                </p>
+                <button onClick={() => loadOptionsForIncident(selectedIncidentId)} className="btn-secondary mt-4">
+                  Try again
+                </button>
               </div>
             ) : options.length === 0 ? (
-              <div className="py-16 text-center text-xs text-slate-400">
-                No recovery options generated for this incident.
+              <div className="py-14 text-center text-[13px] text-slate-600">
+                <p>No fix options have been worked out for this problem yet.</p>
+                <button
+                  onClick={handleGenerateOptions}
+                  disabled={actionInProgress !== null}
+                  className="btn-cue mt-4"
+                  data-guide-step="resolve_problem"
+                >
+                  <Zap className="h-3.5 w-3.5" /> Find ways to fix this
+                </button>
               </div>
             ) : (
               <div className="space-y-3">
@@ -487,8 +545,8 @@ export function RecoveryCommand({
                       onClick={() => setSelectedOption(opt)}
                       className={`p-4 rounded-xl border transition cursor-pointer space-y-2 ${
                         isSelected
-                          ? "bg-slate-50/50 border-[#D6003C] ring-1 ring-[#D6003C]/30"
-                          : "bg-white border-slate-200 hover:border-slate-300"
+                          ? "bg-slate-50/50 border-cue-600 ring-1 ring-cue-600/30"
+                          : "bg-[#FDFCFA] border-slate-200 hover:border-slate-300"
                       }`}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -579,7 +637,7 @@ export function RecoveryCommand({
                     </p>
                     <Link
                       href={`/events/${eventId}/approvals`}
-                      className="inline-block text-[11px] font-semibold text-[#D6003C] hover:underline mt-1"
+                      className="inline-block text-[11px] font-semibold text-cue-600 hover:underline mt-1"
                     >
                       Authorize in Approvals Console &rarr;
                     </Link>
@@ -613,7 +671,7 @@ export function RecoveryCommand({
                 <button
                   onClick={handleExecuteRecovery}
                   disabled={actionInProgress !== null || isApprovalRequired}
-                  className="w-full py-2.5 px-4 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-full py-2.5 px-4 rounded-lg bg-cue-600 hover:bg-cue-700 text-white text-xs font-semibold shadow-sm flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
                   title={isApprovalRequired ? "Human approval is required before execution" : undefined}
                 >
                   <Zap className="w-3.5 h-3.5" />
@@ -657,8 +715,8 @@ export function RecoveryCommand({
           />
 
           {/* Backup Candidates List */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm space-y-3">
-            <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+          <div className="surface p-4 space-y-3">
+            <span className="eyebrow block">
               Sourced Replacement Candidates ({backupCandidates.length})
             </span>
 
@@ -702,7 +760,7 @@ export function RecoveryCommand({
                           raw: c,
                         })
                       }
-                      className="px-2 py-1 rounded text-[10px] font-semibold text-[#D6003C] hover:bg-rose-50 transition"
+                      className="px-2 py-1 rounded text-[10px] font-semibold text-cue-600 hover:bg-rose-50 transition"
                     >
                       Evidence
                     </button>

@@ -83,7 +83,7 @@ export function AgentActionResult({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div className="flex items-center gap-2">
           <StatusIcon className="w-4 h-4 shrink-0" />
-          <span className="text-xs font-bold uppercase tracking-wider">
+          <span className="text-[13.5px] font-semibold">
             {config.label}
           </span>
           <ProvenanceBadge provenance="AGENT" size="sm" />
@@ -109,7 +109,7 @@ export function AgentActionResult({
 
       {details && Object.keys(details).length > 0 && (
         <div className="space-y-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+          <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-500 block">
             Factual Output Metadata
           </span>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">

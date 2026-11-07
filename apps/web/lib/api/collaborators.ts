@@ -18,159 +18,58 @@ export interface EventMemberItem {
   };
 }
 
-const DEFAULT_MEMBERS: EventMemberItem[] = [
-  {
-    id: "mem-1",
-    event_id: "conference_demo",
-    user_id: "user-organizer",
-    name: "Alex Thorne (You)",
-    email: "commander@eventra.ops",
-    role: "main_organizer",
-    status: "active",
-    lastActive: "Just now",
-    permissions: {
-      canApproveCritical: true,
-      canEditTasks: true,
-      canManageBudget: true,
-      canTriggerAgentCalls: true,
-    },
-  },
-  {
-    id: "mem-2",
-    event_id: "conference_demo",
-    user_id: "user-ops-lead",
-    name: "Sarah Chen",
-    email: "sarah.ops@eventra.ops",
-    role: "event_manager",
-    status: "active",
-    lastActive: "4 mins ago",
-    permissions: {
-      canApproveCritical: false,
-      canEditTasks: true,
-      canManageBudget: false,
-      canTriggerAgentCalls: true,
-    },
-  },
-  {
-    id: "mem-3",
-    event_id: "conference_demo",
-    user_id: "user-collab-1",
-    name: "Marcus Vance",
-    email: "marcus.floor@apexevents.com",
-    role: "collaborator",
-    status: "active",
-    lastActive: "18 mins ago",
-    permissions: {
-      canApproveCritical: false,
-      canEditTasks: true,
-      canManageBudget: false,
-      canTriggerAgentCalls: false,
-    },
-  },
-  {
-    id: "mem-4",
-    event_id: "conference_demo",
-    user_id: "user-vendor-av",
-    name: "Apex Sound & Visual (Lead)",
-    email: "dispatch@apexav.io",
-    role: "vendor",
-    status: "active",
-    lastActive: "1 hour ago",
-    permissions: {
-      canApproveCritical: false,
-      canEditTasks: false,
-      canManageBudget: false,
-      canTriggerAgentCalls: false,
-    },
-  },
-];
+// The members API (EventMemberResponse) returns only id, event_id, user_id, role and
+// timestamps — no names, emails or presence. We show exactly that and never invent
+// people, contact details or "active recently" status. Errors propagate to the caller.
 
-export async function listCollaborators(eventId: string): Promise<EventMemberItem[]> {
-  try {
-    const raw = await apiClient.get<any[]>(`/events/${eventId}/members`);
-    if (raw && raw.length > 0) {
-      return raw.map((m: any, idx: number) => ({
-        id: m.id || `mem-${idx}`,
-        event_id: eventId,
-        user_id: m.user_id || `user-${idx}`,
-        name: m.name || m.user_name || (m.role === "main_organizer" ? "Alex Thorne (Lead)" : `Operator ${idx + 1}`),
-        email: m.email || m.user_email || `${m.role || "operator"}@eventra.ops`,
-        role: (m.role || "collaborator").toLowerCase(),
-        status: "active",
-        lastActive: "Active recently",
-        permissions: {
-          canApproveCritical: m.role?.toLowerCase() === "main_organizer",
-          canEditTasks: ["main_organizer", "event_manager", "collaborator"].includes(m.role?.toLowerCase()),
-          canManageBudget: m.role?.toLowerCase() === "main_organizer",
-          canTriggerAgentCalls: ["main_organizer", "event_manager"].includes(m.role?.toLowerCase()),
-        },
-      }));
-    }
-    return DEFAULT_MEMBERS;
-  } catch {
-    return DEFAULT_MEMBERS;
-  }
+const ROLE_PERMISSIONS = (role: string) => ({
+  canApproveCritical: role === "main_organizer",
+  canEditTasks: ["main_organizer", "event_manager", "collaborator"].includes(role),
+  canManageBudget: role === "main_organizer",
+  canTriggerAgentCalls: ["main_organizer", "event_manager"].includes(role),
+});
+
+function toMember(eventId: string, m: any): EventMemberItem {
+  const role = String(m?.role || "collaborator").toLowerCase();
+  const userId = String(m?.user_id || "");
+  return {
+    id: String(m?.id || ""),
+    event_id: m?.event_id || eventId,
+    user_id: userId,
+    // Prefer a real name if the backend ever sends one; otherwise the user id itself.
+    name: m?.name || m?.user_name || userId || "Unknown member",
+    email: m?.email || m?.user_email || "",
+    role,
+    status: "active",
+    lastActive: m?.updated_at || m?.created_at || undefined,
+    permissions: ROLE_PERMISSIONS(role),
+  };
 }
 
+/** Throws on failure so the page can show "Couldn't load your team" instead of fake people. */
+export async function listCollaborators(eventId: string): Promise<EventMemberItem[]> {
+  const raw = await apiClient.get<any[]>(`/events/${eventId}/members`);
+  return Array.isArray(raw) ? raw.map((m) => toMember(eventId, m)) : [];
+}
+
+/** Throws on failure — never reports success for a member that wasn't saved. */
 export async function addCollaborator(
   eventId: string,
   payload: { user_id: string; role: string; email?: string; name?: string }
 ): Promise<EventMemberItem> {
-  try {
-    const res = await apiClient.post<any>(`/events/${eventId}/members`, payload);
-    return {
-      id: res.id || `mem-${Date.now()}`,
-      event_id: eventId,
-      user_id: payload.user_id,
-      name: payload.name || payload.email?.split("@")[0] || "New Operative",
-      email: payload.email || "collaborator@eventra.ops",
-      role: payload.role,
-      status: "active",
-      lastActive: "Just added",
-      permissions: {
-        canApproveCritical: payload.role === "main_organizer",
-        canEditTasks: ["main_organizer", "event_manager", "collaborator"].includes(payload.role),
-        canManageBudget: payload.role === "main_organizer",
-        canTriggerAgentCalls: ["main_organizer", "event_manager"].includes(payload.role),
-      },
-    };
-  } catch {
-    // Return optimistic response if running locally without backend persistence
-    return {
-      id: `mem-${Date.now()}`,
-      event_id: eventId,
-      user_id: payload.user_id,
-      name: payload.name || payload.email?.split("@")[0] || "New Operative",
-      email: payload.email || "collaborator@eventra.ops",
-      role: payload.role,
-      status: "active",
-      lastActive: "Just added",
-      permissions: {
-        canApproveCritical: payload.role === "main_organizer",
-        canEditTasks: ["main_organizer", "event_manager", "collaborator"].includes(payload.role),
-        canManageBudget: payload.role === "main_organizer",
-        canTriggerAgentCalls: ["main_organizer", "event_manager"].includes(payload.role),
-      },
-    };
-  }
+  const res = await apiClient.post<any>(`/events/${eventId}/members`, {
+    user_id: payload.user_id,
+    role: payload.role,
+  });
+  return toMember(eventId, res);
 }
 
-export async function updateCollaboratorRole(
-  eventId: string,
-  memberId: string,
-  role: string
-): Promise<any> {
-  try {
-    return await apiClient.patch(`/events/${eventId}/members/${memberId}`, { role });
-  } catch {
-    return { id: memberId, role };
-  }
+/** Throws on failure. */
+export async function updateCollaboratorRole(eventId: string, memberId: string, role: string): Promise<any> {
+  return apiClient.patch(`/events/${eventId}/members/${memberId}`, { role });
 }
 
+/** Throws on failure. */
 export async function removeCollaborator(eventId: string, memberId: string): Promise<void> {
-  try {
-    await apiClient.delete(`/events/${eventId}/members/${memberId}`);
-  } catch {
-    // Optimistic fallback
-  }
+  await apiClient.delete(`/events/${eventId}/members/${memberId}`);
 }

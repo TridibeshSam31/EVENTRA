@@ -1,20 +1,23 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname, useParams } from "next/navigation";
-import { useEventStore, getActiveEventId } from "@/stores/eventStore";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { useEventStore, isRealEventId } from "@/stores/eventStore";
+import { useGuideStore } from "@/stores/guideStore";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
+import type { GuidePageId } from "@/lib/api/guidance";
 import {
-  LayoutDashboard,
-  PlusCircle,
+  LayoutGrid,
+  Plus,
   Compass,
-  Settings,
   Building2,
   Users,
   CalendarCheck,
   CheckSquare,
   Clock,
-  DollarSign,
+  Wallet,
   MessageSquare,
   Radio,
   AlertTriangle,
@@ -24,151 +27,285 @@ import {
   FileText,
   Globe,
   X,
+  UsersRound,
+  Eye,
+  ChevronDown,
+  ClipboardList,
+  BarChart3,
 } from "lucide-react";
+import { EventSwitcher } from "./EventSwitcher";
+import { BrandMark } from "./BrandMark";
 
 interface GlassSidebarProps {
   onClose?: () => void;
   className?: string;
 }
 
+type NavItem = {
+  label: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  /** guide page id — controls progressive disclosure */
+  page?: GuidePageId;
+  /** always visible regardless of progress */
+  always?: boolean;
+};
+
+type NavSection = { title: string; items: NavItem[] };
+
+// Stable empty array: zustand selectors must not return a new reference each render.
+const EMPTY: any[] = [];
 
 export function GlassSidebar({ onClose, className = "" }: GlassSidebarProps) {
   const pathname = usePathname();
   const params = useParams();
+  const reduce = useReducedMotion();
   const activeEventId = useEventStore((state) => state.activeEventId);
-  const eventId = (params?.eventId as string) || activeEventId || getActiveEventId() || "conference_demo";
-  const hasEventContext = Boolean(params?.eventId) || Boolean(activeEventId);
+  const routeEventId = typeof params?.eventId === "string" ? params.eventId : null;
+  const eventId = isRealEventId(routeEventId) ? routeEventId : isRealEventId(activeEventId) ? activeEventId : null;
+  const hasEventContext = !!eventId;
 
-  const navigationSections = [
-    {
-      title: "Workspace",
-      items: [
-        { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-        { label: "Event Overview", href: `/events/${eventId}`, icon: Compass },
-        { label: "Team & Permissions", href: `/events/${eventId}/collaborators`, icon: Users },
-      ],
-    },
-    {
-      title: "Live Operations",
-      items: [
-        { label: "Live Command Cockpit", href: `/events/${eventId}/live`, icon: Radio, isLive: true },
-        { label: "Live Browser Agent", href: eventId ? `/browser-runtime?eventId=${eventId}` : "/browser-runtime", icon: Globe, isLive: true },
-        { label: "Comms & Vendor Calls", href: `/events/${eventId}/conversations`, icon: MessageSquare },
-        { label: "Incidents & Blast Radius", href: `/events/${eventId}/incidents`, icon: AlertTriangle },
-        { label: "Recovery Simulator", href: `/events/${eventId}/recovery`, icon: RotateCcw },
-        { label: "Approvals & Sign-Offs", href: `/events/${eventId}/approvals`, icon: ShieldCheck },
-      ],
-    },
-    {
-      title: "Planning & Resources",
-      items: [
-        { label: "Schedule & Critical Path", href: `/events/${eventId}/schedule`, icon: Clock },
-        { label: "Tasks & Execution", href: `/events/${eventId}/tasks`, icon: CheckSquare },
-        { label: "Budget & Variance", href: `/events/${eventId}/budget`, icon: DollarSign },
-        { label: "Venues & Spaces", href: `/events/${eventId}/venue`, icon: Building2 },
-        { label: "Vendors & Outreach", href: `/events/${eventId}/vendors`, icon: Users },
-      ],
-    },
-    {
-      title: "Telemetry & Audit",
-      items: [
-        { label: "Activity Stream", href: `/events/${eventId}/activity`, icon: History },
-        { label: "Audit Ledger", href: `/events/${eventId}/audit`, icon: FileText },
-      ],
-    },
-  ];
+  const nextStep = useGuideStore((s) => (s.eventId === eventId ? s.nextStep : null));
+  const showAll = useGuideStore((s) => s.showAll);
+  const setShowAll = useGuideStore((s) => s.setShowAll);
+  const wsIncidents = useWorkspaceStore((s) => (s.eventId === eventId ? s.incidents : EMPTY));
+  const [moreOpen, setMoreOpen] = useState(false);
+
+  const base = `/events/${eventId}`;
+
+  const isActive = (href: string) => {
+    if (!pathname) return false;
+    const clean = href.split("?")[0];
+    if (pathname === clean) return true;
+    return clean !== base && clean.startsWith("/events/") && pathname.startsWith(clean + "/");
+  };
+
+  // ── What's unlocked ─────────────────────────────────────
+  const unlocked: Set<string> | null =
+    showAll || !nextStep || !Array.isArray(nextStep.unlocked_pages) ? null : new Set(nextStep.unlocked_pages);
+  const hasOpenProblem =
+    nextStep?.step_id === "resolve_problem" ||
+    (wsIncidents || []).some((i: any) => !["RESOLVED", "CLOSED", "CANCELLED"].includes(String(i?.status || "").toUpperCase()));
+  const isVisible = (item: NavItem) => {
+    if (!item.page || item.always || unlocked === null) return true;
+    if (item.page === "problems" && hasOpenProblem) return true;
+    if (isActive(item.href)) return true; // never hide the page you're on
+    return unlocked.has(item.page);
+  };
+  const isNext = (item: NavItem) => !!nextStep && !!item.page && item.page === nextStep.page && nextStep.step_id !== "event_done";
+
+  // Grouped along the event lifecycle so the sidebar itself explains the product.
+  const eventSections: NavSection[] = hasEventContext
+    ? [
+        { title: "This event", items: [{ label: "Overview", href: base, icon: Compass, page: "overview", always: true }] },
+        {
+          title: "Prepare",
+          items: [
+            { label: "Vendors", href: `${base}/vendors`, icon: Users, page: "vendors" },
+            { label: "Venue", href: `${base}/venue`, icon: Building2, page: "venue" },
+            { label: "Plan & Tasks", href: `${base}/plan`, icon: CalendarCheck, page: "plan" },
+            { label: "Budget", href: `${base}/budget`, icon: Wallet, page: "budget" },
+          ],
+        },
+        {
+          title: "Engage",
+          items: [
+            { label: "Decisions", href: `${base}/approvals`, icon: ShieldCheck, page: "decisions" },
+            { label: "Messages & Calls", href: `${base}/conversations`, icon: MessageSquare, page: "conversations" },
+          ],
+        },
+        {
+          title: "Run",
+          items: [
+            { label: "Day-of", href: `${base}/live`, icon: Radio, page: "live" },
+            { label: "Problems", href: `${base}/incidents`, icon: AlertTriangle, page: "problems" },
+            { label: "Team", href: `${base}/collaborators`, icon: UsersRound, page: "team", always: true },
+          ],
+        },
+      ]
+    : [];
+
+  // Secondary pages always live under "More" (operator-level detail).
+  const extraItems: NavItem[] = hasEventContext
+    ? [
+        { label: "Event details", href: `${base}/setup`, icon: ClipboardList, page: "setup" },
+        { label: "Report", href: `${base}/report`, icon: BarChart3, page: "report" },
+        { label: "Activity", href: `${base}/activity`, icon: History, page: "activity" },
+        { label: "History Log", href: `${base}/audit`, icon: FileText, page: "audit" },
+        { label: "Recovery Options", href: `${base}/recovery`, icon: RotateCcw },
+        { label: "Schedule", href: `${base}/schedule`, icon: Clock },
+        { label: "Tasks", href: `${base}/tasks`, icon: CheckSquare },
+        { label: "Browser Assistant", href: `/browser-runtime?eventId=${eventId}`, icon: Globe },
+      ]
+    : [];
+
+  const visibleSections = eventSections
+    .map((s) => ({ ...s, items: s.items.filter(isVisible) }))
+    .filter((s) => s.items.length > 0);
+  const hiddenMain = eventSections.flatMap((s) => s.items).filter((i) => !isVisible(i));
+  const moreItems = [...hiddenMain, ...extraItems];
+  const moreHasActive = moreItems.some((i) => isActive(i.href));
+  const moreExpanded = moreOpen || moreHasActive;
+
+  const workspaceSection: NavSection = {
+    title: "",
+    items: [
+      { label: "My Events", href: "/dashboard", icon: LayoutGrid },
+      { label: "Plan a New Event", href: "/events/new", icon: Plus },
+    ],
+  };
+
+  const renderItem = (item: NavItem, opts?: { dim?: boolean }) => {
+    const active = isActive(item.href);
+    const next = isNext(item);
+    const Icon = item.icon;
+    return (
+      <motion.li
+        key={item.href}
+        layout={!reduce}
+        initial={reduce ? false : { opacity: 0, x: -8 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={reduce ? undefined : { opacity: 0, x: -8 }}
+        transition={{ type: "spring", stiffness: 420, damping: 34 }}
+      >
+        <Link
+          href={item.href}
+          onClick={onClose}
+          aria-current={active ? "page" : undefined}
+          className={`group relative flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors ${
+            active
+              ? "bg-white/[0.08] font-semibold text-ink-50"
+              : next
+              ? "bg-cue-600/10 font-semibold text-ink-50 ring-1 ring-cue-500/30 hover:bg-cue-600/15"
+              : opts?.dim
+              ? "font-medium text-ink-400 hover:bg-white/[0.04] hover:text-ink-100"
+              : "font-medium text-ink-300 hover:bg-white/[0.04] hover:text-ink-100"
+          }`}
+        >
+          <span
+            className={`absolute -left-3 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full transition-all ${
+              active ? "bg-cue-500 shadow-[0_0_10px_rgba(232,23,79,0.8)]" : "bg-transparent"
+            }`}
+            aria-hidden
+          />
+          <Icon className={`h-4 w-4 shrink-0 transition-colors ${active || next ? "text-cue-400" : "text-ink-500 group-hover:text-ink-300"}`} />
+          <span className="truncate">{item.label}</span>
+          {next && !active && (
+            <span className="ml-auto flex items-center gap-1.5 rounded-full bg-cue-600 px-1.5 py-px text-[10px] font-bold uppercase tracking-[0.08em] text-white">
+              <span className="h-1.5 w-1.5 rounded-full bg-white animate-cue-blink" aria-hidden />
+              Next
+            </span>
+          )}
+        </Link>
+      </motion.li>
+    );
+  };
 
   return (
-    <aside
-      className={`w-64 h-full flex flex-col bg-white border-r border-slate-200 text-slate-700 select-none ${className}`}
-    >
-      {/* Brand Header */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
-        <Link href="/" className="flex items-center space-x-2.5">
-          <div className="w-8 h-8 rounded-lg bg-[#D6003C] flex items-center justify-center text-white shadow-sm">
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polygon points="12 2 2 7 2 17 12 22 22 17 22 7"></polygon>
-              <circle cx="12" cy="12" r="2.5" fill="white"></circle>
-            </svg>
-          </div>
-          <div className="flex flex-col">
-            <span className="text-base font-bold tracking-tight text-slate-900 leading-none">
-              EVENTRA
-            </span>
-            <span className="text-[9px] text-slate-500 font-medium tracking-wider uppercase mt-1">
-              OPERATIONS PLATFORM
-            </span>
-          </div>
-        </Link>
+    <aside className={`relative flex h-full w-[248px] select-none flex-col overflow-hidden bg-ink-950 text-ink-300 ${className}`}>
+      <div className="pointer-events-none absolute inset-0 bg-dots-dark opacity-60" aria-hidden />
+      <div
+        className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full opacity-40 blur-3xl"
+        style={{ background: "radial-gradient(circle, rgba(214,0,60,0.35), transparent 70%)" }}
+        aria-hidden
+      />
 
+      {/* Brand */}
+      <div className="relative flex items-center justify-between px-4 pb-3 pt-4">
+        <Link href="/" className="group flex items-center gap-2.5" aria-label="EVENTRA home">
+          <BrandMark className="h-7 w-7" />
+          <span className="font-display text-[15px] font-extrabold tracking-[0.08em] text-ink-50" style={{ fontStretch: "88%" }}>
+            EVENTRA
+          </span>
+        </Link>
         {onClose && (
           <button
             onClick={onClose}
-            className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition"
+            className="rounded-md p-1.5 text-ink-500 transition hover:bg-white/5 hover:text-ink-200 lg:hidden"
             aria-label="Close navigation"
           >
-            <X className="w-5 h-5" />
+            <X className="h-5 w-5" />
           </button>
         )}
       </div>
 
-      {/* Navigation Links */}
-      <div className="flex-1 overflow-y-auto px-3 py-4 space-y-5">
-        {navigationSections.map((section) => (
-          <div key={section.title} className="space-y-1">
-            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2.5 mb-1.5">
-              {section.title}
-            </div>
-            {section.items.map((item) => {
-              const active = pathname === item.href;
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={onClose}
-                  className={`flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    active
-                      ? "bg-slate-100 text-slate-900 font-semibold"
-                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-50"
-                  }`}
-                >
-                  <div className="flex items-center space-x-2.5 truncate">
-                    <Icon
-                      className={`w-4 h-4 flex-shrink-0 ${
-                        active ? "text-[#D6003C]" : "text-slate-400 group-hover:text-slate-600"
-                      }`}
-                    />
-                    <span className="truncate">{item.label}</span>
-                  </div>
-                  {item.isLive && (
-                    <span className="flex h-2 w-2 relative">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-[#D6003C]" />
-                    </span>
-                  )}
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+      {/* Event context */}
+      <div className="relative px-3 pb-2">
+        <EventSwitcher tone="dark" />
       </div>
 
-      {/* Footer Info */}
-      <div className="p-3 border-t border-slate-100 bg-slate-50/50">
-        <div className="text-[11px] text-slate-500 font-mono truncate">
-          {hasEventContext ? `Event: ${eventId.slice(0, 14)}` : "Fleet Management"}
+      {/* Navigation */}
+      <nav className="relative flex-1 space-y-4 overflow-y-auto px-3 py-3" aria-label="Primary">
+        <ul className="space-y-px">
+          <AnimatePresence initial={false}>{workspaceSection.items.map((i) => renderItem(i))}</AnimatePresence>
+        </ul>
+
+        {visibleSections.map((section) => (
+          <div key={section.title}>
+            <div className="mb-1 flex items-center gap-2 px-2.5">
+              <span className="text-[11px] font-semibold text-ink-500">{section.title}</span>
+              <span className="h-px flex-1 bg-white/[0.06]" />
+            </div>
+            <ul className="space-y-px">
+              <AnimatePresence initial={false}>{section.items.map((i) => renderItem(i))}</AnimatePresence>
+            </ul>
+          </div>
+        ))}
+
+        {hasEventContext && unlocked !== null && hiddenMain.length > 0 && (
+          <p className="px-2.5 text-[11.5px] leading-snug text-ink-500">
+            More pages appear as your event moves forward.
+          </p>
+        )}
+
+        {moreItems.length > 0 && (
+          <div>
+            <button
+              type="button"
+              onClick={() => setMoreOpen((o) => !o)}
+              aria-expanded={moreExpanded}
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[12px] font-semibold text-ink-500 transition hover:bg-white/[0.04] hover:text-ink-200"
+            >
+              More pages
+              <span className="font-mono text-[11px] text-ink-600">{moreItems.length}</span>
+              <ChevronDown className={`ml-auto h-3.5 w-3.5 transition-transform ${moreExpanded ? "rotate-180" : ""}`} />
+            </button>
+            <AnimatePresence initial={false}>
+              {moreExpanded && (
+                <motion.ul
+                  className="mt-1 space-y-px overflow-hidden"
+                  initial={reduce ? false : { height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={reduce ? undefined : { height: 0, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {moreItems.map((i) => renderItem(i, { dim: true }))}
+                </motion.ul>
+              )}
+            </AnimatePresence>
+          </div>
+        )}
+      </nav>
+
+      {/* Footer */}
+      {hasEventContext && (
+        <div className="relative border-t border-white/[0.06] p-3">
+          <button
+            type="button"
+            onClick={() => setShowAll(!showAll)}
+            className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-[12px] font-medium text-ink-400 transition-colors hover:bg-white/[0.04] hover:text-ink-100"
+            aria-pressed={showAll}
+          >
+            <span className="flex items-center gap-2">
+              <Eye className="h-3.5 w-3.5" />
+              Show all pages
+            </span>
+            <span className={`relative h-[18px] w-8 rounded-full transition-colors ${showAll ? "bg-cue-600" : "bg-white/10"}`}>
+              <span className={`absolute top-[3px] h-3 w-3 rounded-full bg-white shadow transition-all ${showAll ? "left-[17px]" : "left-[3px]"}`} />
+            </span>
+          </button>
         </div>
-      </div>
+      )}
     </aside>
   );
 }

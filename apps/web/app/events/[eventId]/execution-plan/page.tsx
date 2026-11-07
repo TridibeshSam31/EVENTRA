@@ -122,13 +122,13 @@ export default function ExecutionPlanPage() {
   });
 
   return (
-    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-6 text-slate-100">
+    <div className="mx-auto min-h-screen max-w-7xl space-y-6 bg-ink-950 p-4 text-ink-100 shadow-[0_0_0_100vmax_#100E0C] [clip-path:inset(0_-100vmax)] md:p-8">
       {/* Top Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-5">
         <div>
           <div className="flex items-center space-x-2">
             <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800 font-bold">
-              TASK 9 AUTHORITATIVE BLUEPRINT
+              Execution blueprint
             </span>
             {plan && (
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-950 text-purple-300 border border-purple-800 font-bold">
@@ -141,8 +141,8 @@ export default function ExecutionPlanPage() {
               </span>
             )}
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-white mt-1.5 flex items-center gap-2">
-            <Compass className="w-7 h-7 text-blue-400" />
+          <h1 className="mt-2 flex items-center gap-2 font-display text-[30px] font-extrabold tracking-[-0.025em] text-ink-50 md:text-[36px]" style={{ fontStretch: "86%" }}>
+            <Compass className="h-7 w-7 text-cue-500" />
             Final Execution Plan
           </h1>
           <p className="text-xs text-slate-400 mt-1 flex items-center gap-2">
@@ -154,14 +154,14 @@ export default function ExecutionPlanPage() {
           <button
             onClick={handleRecompile}
             disabled={refreshing}
-            className="flex items-center space-x-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow-lg shadow-blue-900/40 transition disabled:opacity-50"
+            className="btn-cue"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? "animate-spin" : ""}`} />
             <span>{refreshing ? "Recompiling..." : "Recompile Plan"}</span>
           </button>
           <Link
             href={`/events/${eventId}/live`}
-            className="flex items-center space-x-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-900/40 transition"
+            className="btn border border-white/10 bg-white/[0.06] text-ink-50 hover:bg-white/10"
           >
             <span>Live Command Center →</span>
           </Link>
@@ -339,7 +339,7 @@ export default function ExecutionPlanPage() {
           )}
 
           {/* Critical Path Timeline Sequence */}
-          <div className="p-5 rounded-2xl bg-[#0b101c] border border-slate-800 space-y-4">
+          <div className="p-5 rounded-2xl bg-ink-900/60 border border-slate-800 space-y-4">
             <div className="flex items-center justify-between">
               <div>
                 <span className="text-[10px] font-mono uppercase text-blue-400 font-bold tracking-wider">
@@ -384,7 +384,7 @@ export default function ExecutionPlanPage() {
           {/* Execution Checkpoints & Budget Metrics Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Checkpoints Timeline (2 cols) */}
-            <div className="lg:col-span-2 p-5 rounded-2xl bg-[#0b101c] border border-slate-800 space-y-4">
+            <div className="lg:col-span-2 p-5 rounded-2xl bg-ink-900/60 border border-slate-800 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-[10px] font-mono uppercase text-emerald-400 font-bold tracking-wider">
@@ -422,7 +422,7 @@ export default function ExecutionPlanPage() {
             </div>
 
             {/* Budget & Resource Summary (1 col) */}
-            <div className="p-5 rounded-2xl bg-[#0b101c] border border-slate-800 space-y-4">
+            <div className="p-5 rounded-2xl bg-ink-900/60 border border-slate-800 space-y-4">
               <div>
                 <span className="text-[10px] font-mono uppercase text-amber-400 font-bold tracking-wider">
                   FINANCIAL INTEGRITY
@@ -491,7 +491,7 @@ export default function ExecutionPlanPage() {
           </div>
 
           {/* Deterministic Execution Task Table */}
-          <div className="p-5 rounded-2xl bg-[#0b101c] border border-slate-800 space-y-4">
+          <div className="p-5 rounded-2xl bg-ink-900/60 border border-slate-800 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <span className="text-[10px] font-mono uppercase text-blue-400 font-bold tracking-wider">

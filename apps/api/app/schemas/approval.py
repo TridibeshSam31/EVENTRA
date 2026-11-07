@@ -24,6 +24,16 @@ class ApprovalRejectionRequest(BaseModel):
     reason: str = Field(..., min_length=1, description="Mandatory rejection reason")
 
 
+class ApprovalBudgetImpact(BaseModel):
+    """Committed spend in the affected category before vs after approving (UX v3 §1)."""
+    category: str
+    category_budget: Optional[float] = None
+    committed_before: float
+    committed_after: float
+    total_budget: Optional[float] = None
+    over_category_budget: Optional[bool] = None
+
+
 class ApprovalRequestResponse(BaseModel):
     """Authoritative representation of an approval request."""
     id: str
@@ -44,6 +54,20 @@ class ApprovalRequestResponse(BaseModel):
     expires_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+    # ── UX v3 computed, human-facing fields (docs/contracts/ux-v3-api.md §1) ──
+    # Derived by app.services.approval_presenter; None/absent when not computed or unknown.
+    summary: Optional[str] = None
+    vendor_name: Optional[str] = None
+    category: Optional[str] = None
+    channel: Optional[str] = None
+    involves_money: Optional[bool] = None
+    amount: Optional[float] = None
+    currency: Optional[str] = None
+    budget_impact: Optional[ApprovalBudgetImpact] = None
+    on_approve: Optional[str] = None
+    on_reject: Optional[str] = None
+    reversible: Optional[bool] = None
 
     model_config = ConfigDict(from_attributes=True)
 

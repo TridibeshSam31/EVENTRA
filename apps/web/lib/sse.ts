@@ -51,6 +51,21 @@ function parseBlock(block: string): SseFrame | null {
   return { event, data: data.join("\n"), id };
 }
 
+/**
+ * Runs `onHidden` when the tab goes to the background and `onVisible` when it comes back.
+ *
+ * Browsers allow only ~6 HTTP/1.1 connections per host across ALL tabs. Every EVENTRA
+ * tab keeps long-lived streams open, so a few background tabs can use up every slot and
+ * leave the visible tab stuck on "Loading...". Streams therefore pause while hidden.
+ * Returns an unsubscribe function.
+ */
+export function onTabVisibilityChange(onHidden: () => void, onVisible: () => void): () => void {
+  if (typeof document === "undefined") return () => {};
+  const handler = () => (document.visibilityState === "hidden" ? onHidden() : onVisible());
+  document.addEventListener("visibilitychange", handler);
+  return () => document.removeEventListener("visibilitychange", handler);
+}
+
 export interface OpenSseOptions {
   url: string;
   headers?: Record<string, string>;

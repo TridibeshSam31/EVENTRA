@@ -11,7 +11,7 @@ export default function BudgetPage() {
 
   return (
     <EventShell eventId={eventId} currentStage="PLAN">
-      <PlanningCommand eventId={eventId} initialTab="BUDGET" />
+      <PlanningCommand eventId={eventId} initialTab="BUDGET" mode="budget" />
     </EventShell>
   );
 }

@@ -35,7 +35,21 @@ def get_budget_summary(
     calculator = BudgetCalculator()
     summary = calculator.calculate_totals(budget_items)
 
+    from app.services.budget_commitments import (
+        committed_by_category_from_assignments,
+        committed_from_assignments,
+        load_assignments,
+        utilization_percent,
+    )
+    assignments = load_assignments(db, event_id)
+    committed = committed_from_assignments(assignments)
+    total_budget = Decimal(str(event.total_budget or 0))
+
     return BudgetSummaryResponse(
+        total_committed=float(committed),
+        committed_by_category={k: float(v) for k, v in committed_by_category_from_assignments(assignments).items()},
+        remaining_after_committed=float(total_budget - committed),
+        utilization_percent=float(utilization_percent(committed, total_budget)),
         event_id=event_id,
         total_estimated=float(summary.total_estimated),
         total_actual=float(summary.total_actual),

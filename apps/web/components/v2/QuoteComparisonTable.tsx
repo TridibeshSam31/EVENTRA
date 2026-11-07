@@ -112,7 +112,7 @@ export function QuoteComparisonTable({
   return (
     <div className={`space-y-3 ${className}`}>
       {/* Search and Category Filter Toolbar */}
-      <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-[#FDFCFA] p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="relative w-full sm:w-64">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
@@ -120,12 +120,12 @@ export function QuoteComparisonTable({
             placeholder="Search quotes by provider or category..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 transition"
+            className="w-full bg-slate-50 border border-slate-200 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:bg-[#FDFCFA] focus:outline-none focus:ring-1 focus:ring-slate-400 transition"
           />
         </div>
 
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
-          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+          <span className="text-[10px] uppercase font-medium text-slate-400 tracking-label font-mono">
             Category:
           </span>
           <button
@@ -155,12 +155,12 @@ export function QuoteComparisonTable({
       </div>
 
       {/* Desktop / Tablet Comparison Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden hidden md:block">
+      <div className="bg-[#FDFCFA] rounded-xl border border-slate-200 shadow-sm overflow-hidden hidden md:block">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs border-collapse">
-            <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-200 tracking-wider">
+            <thead className="bg-slate-50 text-[10px] uppercase font-medium text-slate-400 border-b border-slate-200 tracking-label font-mono">
               <tr>
-                <th className="px-4 py-3 sticky left-0 bg-slate-50 z-10 shadow-xs">
+                <th className="px-4 py-3 sticky left-0 bg-slate-50 z-10 shadow-sm">
                   Provider
                 </th>
                 <th className="px-4 py-3">Category</th>
@@ -197,7 +197,7 @@ export function QuoteComparisonTable({
                       onClick={() => onSelectQuote(quote)}
                     >
                       {/* Sticky Provider Name Column */}
-                      <td className="px-4 py-3 sticky left-0 bg-white group-hover:bg-slate-50 z-10">
+                      <td className="px-4 py-3 sticky left-0 bg-[#FDFCFA] group-hover:bg-slate-50 z-10">
                         <div className="font-bold text-slate-900 text-xs">
                           {quote.vendorName}
                         </div>
@@ -316,7 +316,7 @@ export function QuoteComparisonTable({
                           {onConfirmQuote && isApproved && (
                             <button
                               onClick={() => onConfirmQuote(quote)}
-                              className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white transition shadow-xs"
+                              className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white transition shadow-sm"
                             >
                               Confirm
                             </button>
@@ -335,7 +335,7 @@ export function QuoteComparisonTable({
       {/* Mobile Stacked Quote Cards */}
       <div className="grid grid-cols-1 gap-3 md:hidden">
         {processedQuotes.length === 0 ? (
-          <div className="py-12 text-center text-slate-400 text-xs bg-white rounded-xl border border-slate-200">
+          <div className="py-12 text-center text-slate-400 text-xs bg-[#FDFCFA] rounded-xl border border-slate-200">
             No provider quotes available matching filter criteria.
           </div>
         ) : (
@@ -343,7 +343,7 @@ export function QuoteComparisonTable({
             <div
               key={quote.assignmentId}
               onClick={() => onSelectQuote(quote)}
-              className="p-4 rounded-xl border border-slate-200 bg-white shadow-xs space-y-2.5 active:bg-slate-50 cursor-pointer"
+              className="p-4 rounded-xl border border-slate-200 bg-[#FDFCFA] shadow-sm space-y-2.5 active:bg-slate-50 cursor-pointer"
             >
               <div className="flex items-start justify-between gap-2">
                 <div>

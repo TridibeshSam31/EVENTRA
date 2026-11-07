@@ -124,13 +124,16 @@ class RecoverySimulator:
     def _budget_delta(candidate: RecoveryCandidate, context: RecoveryContext) -> Dict[str, Any]:
         proposed_cost = candidate.proposed_changes.get("provider_cost")
         if proposed_cost is None:
-            return {"additional_cost": 0.0, "removed_cost": 0.0, "net_delta": 0.0}
+            changes = candidate.proposed_changes
+            new_provider = any(k in changes for k in ("vendor_id", "provider_id", "replacement_vendor_id", "vendor_reassignment"))
+            # A replacement vendor without a quote has an unknown cost, never an implied zero.
+            return {"additional_cost": 0.0, "removed_cost": 0.0, "net_delta": 0.0, "cost_known": not new_provider}
         prior = next((a.agreed_cost for a in context.provider_assignments
                       if a.vendor_id == getattr(context.incident, "related_vendor_id", None) and a.agreed_cost is not None), 0)
         prior = float(prior or 0)
         proposed = float(proposed_cost)
         return {"additional_cost": max(proposed - prior, 0.0), "removed_cost": prior,
-                "net_delta": proposed - prior}
+                "net_delta": proposed - prior, "cost_known": True}
 
     @staticmethod
     def _resource_delta(candidate: RecoveryCandidate) -> Dict[str, Any]:

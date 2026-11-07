@@ -75,12 +75,12 @@ export function QuoteEvidenceDrawer({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/30 backdrop-blur-xs transition-opacity animate-in fade-in duration-200">
-      <div className="w-full max-w-xl bg-white h-full shadow-2xl border-l border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
+      <div className="w-full max-w-xl bg-[#FDFCFA] h-full shadow-2xl border-l border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-right duration-300">
         {/* Drawer Header */}
         <div className="p-4 sm:p-5 border-b border-slate-200 flex items-start justify-between bg-slate-50/50">
           <div>
             <div className="flex items-center gap-2 flex-wrap mb-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+              <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                 {quote.category} Quote
               </span>
               <ProvenanceBadge source={quote.provenance} size="sm" />
@@ -110,7 +110,7 @@ export function QuoteEvidenceDrawer({
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 text-xs text-slate-700 divide-y divide-slate-100">
           {/* SECTION 1: QUOTE & COMMERCIAL TERMS */}
           <div className="space-y-3">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+            <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400 block">
               Commercial Terms
             </span>
 
@@ -151,7 +151,7 @@ export function QuoteEvidenceDrawer({
 
           {/* SECTION 2: OPERATIONAL CAPACITY & AVAILABILITY */}
           <div className="space-y-3 pt-4">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+            <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400 block">
               Operational Scope & Availability
             </span>
 
@@ -196,7 +196,7 @@ export function QuoteEvidenceDrawer({
           {/* SECTION 3: SOURCE EVIDENCE & EXTRACTION AUDIT */}
           <div className="space-y-3 pt-4">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400">
                 Evidence & Verification Audit
               </span>
               <span className="text-[9px] font-bold uppercase px-1.5 py-0.2 rounded border bg-slate-100 border-slate-200 text-slate-600">
@@ -237,7 +237,7 @@ export function QuoteEvidenceDrawer({
 
           {/* SECTION 4: APPROVAL AUDIT & COMPLIANCE */}
           <div className="space-y-3 pt-4">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+            <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400 block">
               Governance & Approval Status
             </span>
 
@@ -274,7 +274,7 @@ export function QuoteEvidenceDrawer({
         </div>
 
         {/* Footer Actions */}
-        <div className="p-4 sm:p-5 border-t border-slate-200 bg-white space-y-2">
+        <div className="p-4 sm:p-5 border-t border-slate-200 bg-[#FDFCFA] space-y-2">
           <div className="grid grid-cols-2 gap-2">
             {/* Counter-Offer / Negotiate */}
             <button
@@ -300,7 +300,7 @@ export function QuoteEvidenceDrawer({
           <button
             onClick={() => onConfirm && onConfirm(quote)}
             disabled={isActionInProgress || !isApproved}
-            className="w-full py-2.5 px-4 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            className="w-full py-2.5 px-4 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-sm flex items-center justify-center gap-1.5 transition disabled:opacity-40 disabled:cursor-not-allowed"
             title={!isApproved ? "Human approval is required before confirmation" : undefined}
           >
             <CheckCircle2 className="w-3.5 h-3.5" />

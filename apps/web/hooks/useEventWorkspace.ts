@@ -20,6 +20,8 @@ export function useEventWorkspace(eventId?: string) {
     approvals: store.approvals,
     incidents: store.incidents,
     isLoading: store.isLoading,
+    // True once this event's first fetch has finished.
+    isReady: !!eventId && store.loadedEventId === eventId,
     sseConnected: store.sseConnected,
     isAgentRunning: store.isAgentRunning,
     isWaitingForSelection: store.isWaitingForSelection,
@@ -33,6 +35,7 @@ export function useEventWorkspace(eventId?: string) {
     selectCandidate: store.selectCandidate,
     approveCommunication: store.approveCommunication,
     dismissCommunication: store.dismissCommunication,
+    retryCommunication: store.retryCommunication,
     isShortlisted: store.isShortlisted,
     isCandidateSelected: store.isCandidateSelected,
   };

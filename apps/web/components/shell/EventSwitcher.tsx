@@ -1,30 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
-import { ChevronDown, Calendar, Plus } from "lucide-react";
+import { ChevronsUpDown, Plus, Check } from "lucide-react";
 import { listEvents } from "../../lib/api/events";
 import type { EventResponse } from "../../types/api";
 
-import { useEventStore, getActiveEventId } from "@/stores/eventStore";
+import { useEventStore, getActiveEventId, isRealEventId } from "@/stores/eventStore";
 
-const DEMO_EVENTS_FALLBACK: Array<{ id: string; name: string; event_type: string }> = [
-  { id: "conference_demo", name: "Tech Launch Keynote 2026", event_type: "CONFERENCE" },
-  { id: "wedding_demo", name: "Grand Horizon Wedding", event_type: "WEDDING" },
-  { id: "college_fest_demo", name: "North Quad Spring Fest", event_type: "COLLEGE_FEST" },
-];
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+}
 
-export function EventSwitcher() {
+function prettyType(t?: string) {
+  return (t || "Event").replace(/_/g, " ").toLowerCase();
+}
+
+export function EventSwitcher({ tone = "dark" }: { tone?: "dark" | "light" }) {
   const router = useRouter();
   const params = useParams();
   const { activeEventId, setActiveEventId } = useEventStore();
-  const [currentEventId, setCurrentEventId] = useState<string>(activeEventId || "conference_demo");
+  const [currentEventId, setCurrentEventId] = useState<string>(activeEventId || "");
 
-  const [events, setEvents] = useState<Array<{ id: string; name: string; event_type?: string }>>(DEMO_EVENTS_FALLBACK);
+  // Only real events from the backend — never built-in demo events.
+  const [events, setEvents] = useState<Array<{ id: string; name: string; event_type?: string }>>([]);
+  const [loaded, setLoaded] = useState(false);
   const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (params?.eventId && typeof params.eventId === "string") {
+    if (params?.eventId && typeof params.eventId === "string" && isRealEventId(params.eventId)) {
       setActiveEventId(params.eventId);
       setCurrentEventId(params.eventId);
     } else {
@@ -37,90 +47,115 @@ export function EventSwitcher() {
 
   useEffect(() => {
     async function loadEvents() {
-      const realEvents = await listEvents();
-      if (realEvents && realEvents.length > 0) {
-        // Merge with demo fallbacks if not already present
-        const combined = [...realEvents];
-        for (const demo of DEMO_EVENTS_FALLBACK) {
-          if (!combined.some((e) => e.id === demo.id)) {
-            combined.push(demo as EventResponse);
-          }
-        }
-        setEvents(combined);
-      }
+      const realEvents: EventResponse[] = await listEvents();
+      setEvents((realEvents || []).filter((e) => isRealEventId(e.id)));
+      setLoaded(true);
     }
     loadEvents();
   }, []);
 
-  const activeEvent = events.find((e) => e.id === currentEventId) || events[0] || {
-    id: currentEventId,
-    name: "Active Event",
-    event_type: "CONFERENCE",
-  };
+  // Close on outside click / Escape
+  useEffect(() => {
+    if (!isOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setIsOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setIsOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [isOpen]);
+
+  const activeEvent = events.find((e) => e.id === currentEventId) || null;
 
   const handleSelect = (eventId: string) => {
     setIsOpen(false);
     setActiveEventId(eventId);
     setCurrentEventId(eventId);
-    router.push(`/events/${eventId}/live`);
+    router.push(`/events/${eventId}`);
   };
 
+  const dark = tone === "dark";
 
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full flex items-center justify-between p-2 rounded-lg bg-white border border-slate-200 hover:border-slate-300 shadow-sm transition text-left"
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        className={`group w-full flex items-center gap-2.5 rounded-lg p-1.5 pr-2 text-left transition ${
+          dark
+            ? "bg-white/[0.04] hover:bg-white/[0.07] ring-1 ring-white/[0.06]"
+            : "bg-[#FDFCFA] ring-1 ring-ink-200 hover:ring-ink-300 shadow-sm"
+        }`}
       >
-        <div className="flex items-center space-x-2.5 min-w-0">
-          <div className="p-1.5 rounded-md bg-slate-100 border border-slate-200 text-[#D6003C]">
-            <Calendar className="w-4 h-4" />
-          </div>
-          <div className="truncate">
-            <div className="text-xs font-semibold text-slate-800 truncate leading-tight">
-              {activeEvent.name}
-            </div>
-            <div className="text-[10px] text-slate-500 uppercase font-mono mt-0.5">
-              {activeEvent.event_type || "EVENT"} • ID: {activeEvent.id.slice(0, 8)}
-            </div>
-          </div>
-        </div>
-        <ChevronDown className="w-4 h-4 text-slate-500 ml-2 flex-shrink-0" />
+        <span
+          className={`grid h-8 w-8 shrink-0 place-items-center rounded-md font-display text-[12px] font-bold shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] ${
+            activeEvent ? "bg-cue-600 text-white" : dark ? "bg-white/10 text-ink-300" : "bg-ink-100 text-ink-600"
+          }`}
+        >
+          {activeEvent ? initials(activeEvent.name) : "—"}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className={`block truncate text-[13px] font-semibold leading-tight ${dark ? "text-ink-50" : "text-ink-900"}`}>
+            {activeEvent ? activeEvent.name : events.length > 0 ? "Choose an event" : loaded ? "No events yet" : "Loading events…"}
+          </span>
+          <span className={`block truncate text-[11px] ${activeEvent ? "capitalize" : ""} ${dark ? "text-ink-400" : "text-ink-600"}`}>
+            {activeEvent ? prettyType(activeEvent.event_type) : events.length > 0 ? `${events.length} events` : "Plan one to get started"}
+          </span>
+        </span>
+        <ChevronsUpDown className={`h-3.5 w-3.5 shrink-0 ${dark ? "text-ink-500 group-hover:text-ink-300" : "text-ink-400"}`} />
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-1.5 z-50 rounded-lg bg-white border border-slate-200 shadow-xl p-1.5">
-          <div className="text-[10px] font-bold text-slate-500 uppercase px-2 py-1 tracking-wider">
-            Switch Operational Event
+        <div
+          role="listbox"
+          className="absolute left-0 right-0 top-full z-50 mt-1.5 animate-rise-in rounded-xl border border-ink-200 bg-[#FDFCFA] p-1.5 text-ink-800 shadow-xl"
+        >
+          <div className="eyebrow px-2 pb-1.5 pt-1">Switch event</div>
+          <div className="max-h-64 space-y-0.5 overflow-y-auto">
+            {events.length === 0 && (
+              <p className="px-2 py-2 text-[12.5px] text-ink-600">
+                {loaded ? "You haven't planned any events yet." : "Loading your events…"}
+              </p>
+            )}
+            {events.map((ev) => {
+              const selected = ev.id === currentEventId;
+              return (
+                <button
+                  key={ev.id}
+                  role="option"
+                  aria-selected={selected}
+                  onClick={() => handleSelect(ev.id)}
+                  className={`flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left transition ${
+                    selected ? "bg-ink-100" : "hover:bg-ink-50"
+                  }`}
+                >
+                  <span className="grid h-6 w-6 shrink-0 place-items-center rounded bg-ink-900 font-display text-[10px] font-bold text-ink-50">
+                    {initials(ev.name)}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12.5px] font-semibold text-ink-900">{ev.name}</span>
+                    <span className="block text-[10.5px] capitalize text-ink-500">{prettyType(ev.event_type)}</span>
+                  </span>
+                  {selected && <Check className="h-3.5 w-3.5 text-cue-600" />}
+                </button>
+              );
+            })}
           </div>
-          <div className="max-h-56 overflow-y-auto space-y-0.5">
-            {events.map((ev) => (
-              <button
-                key={ev.id}
-                onClick={() => handleSelect(ev.id)}
-                className={`w-full flex items-center justify-between p-2 rounded-md text-left text-xs transition ${
-                  ev.id === currentEventId
-                    ? "bg-slate-100 text-[#D6003C] font-semibold border border-slate-200"
-                    : "hover:bg-slate-50 text-slate-700"
-                }`}
-              >
-                <span className="truncate">{ev.name}</span>
-                <span className="text-[10px] font-mono text-slate-500 ml-2 uppercase">
-                  {ev.event_type}
-                </span>
-              </button>
-            ))}
-          </div>
-          <div className="border-t border-slate-100 mt-1 pt-1">
+          <div className="mt-1 border-t border-ink-200 pt-1">
             <button
               onClick={() => {
                 setIsOpen(false);
                 router.push("/events/new");
               }}
-              className="w-full flex items-center justify-center space-x-1.5 p-1.5 rounded-md bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-medium border border-slate-200 transition"
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-[12.5px] font-semibold text-ink-700 transition hover:bg-ink-50 hover:text-ink-900"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Create New Event</span>
+              <Plus className="h-3.5 w-3.5" />
+              Plan a new event
             </button>
           </div>
         </div>

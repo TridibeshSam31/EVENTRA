@@ -4,28 +4,245 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUpRight,
-  Clock,
+  ArrowRight,
   CheckCircle2,
-  Users,
-  DollarSign,
-  Activity,
+  Circle,
   AlertTriangle,
-  Radar,
   Radio,
-  PlusCircle,
-  Building2,
-  Loader2,
+  Plus,
   ShieldCheck,
-  Calendar,
-  Sparkles,
+  Wallet,
+  RotateCcw,
+  FileText,
+  MapPin,
+  Users,
+  Mic,
+  Search,
+  CalendarCheck,
 } from "lucide-react";
-import { listEvents } from "@/lib/api/events";
+import { listEventsOrThrow } from "@/lib/api/events";
 import { getLiveState } from "@/lib/api/live";
 import { getPlan } from "@/lib/api/planning";
 import { getActivityFeed } from "@/lib/api/observability";
 import { listIncidents } from "@/lib/api/incidents";
 import { formatRelativeTime } from "@/lib/utils/time";
 import { useEventStore, getActiveEventId, setActiveEventId } from "@/stores/eventStore";
+import { PageHeader, Panel, CueChip, EmptyState, Meter } from "@/components/ds";
+import { PopCard, AnimatedNumber, StaggerList } from "@/components/ds/motion";
+import { humanizeAction, humanizeActor, humanizeCode, stripIds } from "@/lib/humanize";
+
+/** Rewrite SCREAMING_CODES embedded in a sentence ("…for 'COMMUNICATION_OUTREACH'…") as words. */
+function humanizeInline(text?: string | null): string {
+  if (!text) return "";
+  return text
+    .replace(/'?([A-Z]{2,}(?:_[A-Z0-9]+)+)'?/g, (_m, code: string) => humanizeAction(code).toLowerCase())
+    .replace(/\(Impact: ([A-Z]+)\)/g, (_m, lvl: string) => `(${lvl.charAt(0)}${lvl.slice(1).toLowerCase()} impact)`);
+}
+
+const LIFECYCLE_LABELS: Record<string, string> = {
+  DRAFT: "Draft",
+  PLANNED: "Planning",
+  PLANNING: "Planning",
+  READY: "Ready",
+  LIVE: "Happening now",
+  COMPLETED: "Finished",
+  CONCLUDED: "Finished",
+  CANCELLED: "Cancelled",
+};
+
+function stateTone(state?: string) {
+  if (state === "DISRUPTED") return { tone: "cue" as const, label: "Urgent problem", pulse: true };
+  if (state === "DEGRADED") return { tone: "standby" as const, label: "Needs attention", pulse: true };
+  return { tone: "go" as const, label: "No problems", pulse: false };
+}
+
+function initials(name?: string) {
+  return (name || "Event")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]?.toUpperCase())
+    .join("");
+}
+
+function dateParts(iso?: string | null) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return {
+    day: d.toLocaleDateString(undefined, { day: "2-digit" }),
+    month: d.toLocaleDateString(undefined, { month: "short" }).toUpperCase(),
+    year: d.getFullYear(),
+    full: d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" }),
+  };
+}
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+/* ── Event card on the board ─────────────────────────────── */
+function EventCard({ ev, focused, index }: { ev: any; focused: boolean; index: number }) {
+  const dp = dateParts(ev.start_datetime);
+  const st = stateTone(ev.state);
+  const lifecycle = LIFECYCLE_LABELS[(ev.lifecycle_state || "").toUpperCase()] || "Planning";
+  const type = (ev.event_type || "Event").replace(/_/g, " ").toLowerCase();
+
+  return (
+    <PopCard index={index} className="h-full rounded-xl">
+    <Link
+      href={`/events/${ev.id}`}
+      onClick={() => setActiveEventId(ev.id)}
+      className={`group relative flex h-full flex-col overflow-hidden rounded-xl border bg-[#FDFCFA] shadow-sm transition-colors ${
+        focused ? "border-ink-900 ring-1 ring-ink-900" : "border-ink-200 hover:border-ink-300"
+      }`}
+    >
+      <div className="flex items-stretch">
+        {/* Date block — like a ticket stub */}
+        <div
+          className={`flex w-[74px] shrink-0 flex-col items-center justify-center border-r border-dashed py-4 ${
+            focused ? "border-ink-700 bg-ink-900 text-ink-50" : "border-ink-200 bg-ink-100/60 text-ink-800"
+          }`}
+        >
+          {dp ? (
+            <>
+              <span className={`font-mono text-[10px] tracking-label ${focused ? "text-cue-300" : "text-cue-600"}`}>{dp.month}</span>
+              <span className="font-display text-[30px] font-extrabold leading-none" style={{ fontStretch: "85%" }}>
+                {dp.day}
+              </span>
+              <span className={`font-mono text-[10px] ${focused ? "text-ink-400" : "text-ink-500"}`}>{dp.year}</span>
+            </>
+          ) : (
+            <>
+              <span className="font-display text-[18px] font-extrabold leading-none" style={{ fontStretch: "85%" }}>
+                {initials(ev.name)}
+              </span>
+              <span className={`mt-1 font-mono text-[9.5px] uppercase tracking-label ${focused ? "text-ink-400" : "text-ink-400"}`}>
+                No date
+              </span>
+            </>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1 p-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="eyebrow capitalize">{type}</span>
+            {focused && <span className="font-mono text-[9.5px] uppercase tracking-label text-cue-600">In focus</span>}
+          </div>
+          <h3
+            className="mt-1 line-clamp-2 font-display text-[19px] font-bold leading-[1.1] tracking-[-0.015em] text-ink-900"
+            style={{ fontStretch: "90%" }}
+          >
+            {ev.name}
+          </h3>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-ink-500">
+            <span className="flex items-center gap-1">
+              <MapPin className="h-3 w-3" />
+              {ev.location || <span className="text-ink-400">Location unset</span>}
+            </span>
+            {ev.guest_count ? (
+              <span className="flex items-center gap-1">
+                <Users className="h-3 w-3" />
+                {Number(ev.guest_count).toLocaleString()} guests
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t border-ink-200/80 px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <CueChip tone={st.tone} pulse={st.pulse}>
+            {st.label}
+          </CueChip>
+          <span className="chip border-ink-200 bg-[#FDFCFA] text-ink-600">{lifecycle}</span>
+        </div>
+        <ArrowUpRight className="h-4 w-4 text-ink-400 transition group-hover:-translate-y-0.5 group-hover:translate-x-0.5 group-hover:text-ink-900" />
+      </div>
+    </Link>
+    </PopCard>
+  );
+}
+
+/* ── Loading skeleton ────────────────────────────────────── */
+function DashboardSkeleton() {
+  return (
+    <div className="mx-auto max-w-7xl space-y-8 px-4 py-8 sm:px-6 lg:px-8" aria-busy="true" aria-label="Loading your events">
+      <div className="space-y-3">
+        <div className="workspace-shimmer h-3 w-32 rounded" />
+        <div className="workspace-shimmer h-8 w-72 rounded-lg" />
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="workspace-shimmer h-[150px] rounded-xl" />
+        ))}
+      </div>
+      <div className="grid gap-6 lg:grid-cols-12">
+        <div className="workspace-shimmer h-72 rounded-xl lg:col-span-8" />
+        <div className="workspace-shimmer h-72 rounded-xl lg:col-span-4" />
+      </div>
+    </div>
+  );
+}
+
+/* ── First-run empty state ───────────────────────────────── */
+function FirstRun() {
+  const steps = [
+    { n: "01", icon: Mic, title: "Describe it", body: "Type or say what you're planning — guests, city, date, budget." },
+    { n: "02", icon: Search, title: "EVENTRA finds vendors", body: "Real venues and providers, checked against your requirements." },
+    { n: "03", icon: CalendarCheck, title: "Run the day", body: "Live status, incidents and recovery — with you approving what matters." },
+  ];
+  return (
+    <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:py-16">
+      <div className="surface-ink relative overflow-hidden rounded-2xl p-8 sm:p-12">
+        <div className="pointer-events-none absolute inset-0 bg-dots-dark opacity-70" aria-hidden />
+        <div
+          className="pointer-events-none absolute -right-20 -top-24 h-80 w-80 rounded-full opacity-50 blur-3xl"
+          style={{ background: "radial-gradient(circle, rgba(214,0,60,0.45), transparent 70%)" }}
+          aria-hidden
+        />
+        <div className="relative">
+          <div className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-label text-ink-400">
+            <span className="cue-light bg-standby-500 animate-cue-blink" />
+            Standing by
+          </div>
+          <h1
+            className="mt-4 max-w-[16ch] font-display text-[40px] font-extrabold leading-[0.98] tracking-[-0.02em] text-ink-50 sm:text-[56px]"
+            style={{ fontStretch: "86%" }}
+          >
+            No events on the run sheet yet.
+          </h1>
+          <p className="mt-4 max-w-[52ch] text-[15px] leading-relaxed text-ink-300">
+            Tell EVENTRA what you&apos;re planning. It will build the plan, find real vendors, contact them and keep the event on
+            track on the day.
+          </p>
+          <div className="mt-7 flex flex-wrap gap-3">
+            <Link href="/events/new" className="btn-cue h-11 px-5 text-[14px]">
+              <Plus className="h-4 w-4" />
+              Plan your first event
+            </Link>
+          </div>
+        </div>
+
+        <ol className="relative mt-10 grid gap-3 sm:grid-cols-3">
+          {steps.map((s) => (
+            <li key={s.n} className="rounded-xl border border-white/[0.08] bg-white/[0.03] p-4">
+              <div className="flex items-center justify-between">
+                <span className="font-mono text-[10.5px] tracking-label text-ink-500">{s.n}</span>
+                <s.icon className="h-4 w-4 text-cue-400" />
+              </div>
+              <div className="mt-3 text-[14px] font-semibold text-ink-50">{s.title}</div>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-ink-400">{s.body}</p>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  );
+}
 
 export default function DashboardHome() {
   const [events, setEvents] = useState<any[]>([]);
@@ -35,13 +252,27 @@ export default function DashboardHome() {
   const [incidents, setIncidents] = useState<any[]>([]);
   const [liveState, setLiveState] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [incidentsError, setIncidentsError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const activeEventId = useEventStore((state) => state.activeEventId);
 
   useEffect(() => {
     async function load() {
       setIsLoading(true);
+      setLoadError(null);
+      setIncidentsError(false);
+      let evList: any[] = [];
       try {
-        const evList = await listEvents();
+        evList = await listEventsOrThrow();
+      } catch (err: any) {
+        // A failed request is NOT "no events" — show a distinct, retryable error.
+        console.error("Failed to load events:", err);
+        setLoadError(err?.message || "The server didn't respond.");
+        setIsLoading(false);
+        return;
+      }
+      try {
         setEvents(evList || []);
 
         if (evList && evList.length > 0) {
@@ -106,7 +337,10 @@ export default function DashboardHome() {
             if (incRes && incRes.items) {
               setIncidents(incRes.items.filter((i: any) => i.status !== "RESOLVED"));
             }
-          } catch {}
+          } catch {
+            // Don't claim "no problems" when we couldn't check.
+            setIncidentsError(true);
+          }
         }
       } catch (err) {
         console.error("Failed to load dashboard data:", err);
@@ -115,356 +349,284 @@ export default function DashboardHome() {
       }
     }
     load();
-  }, []);
+  }, [reloadKey]);
 
-  if (isLoading) {
+  if (isLoading) return <DashboardSkeleton />;
+  if (loadError) {
     return (
-      <div className="flex h-[60vh] flex-col items-center justify-center text-center">
-        <Loader2 className="w-8 h-8 text-[#D6003C] animate-spin mb-3" />
-        <h2 className="text-lg font-bold tracking-tight text-slate-800">Connecting to Operations Fleet…</h2>
-        <p className="text-xs text-slate-500 mt-1">Retrieving authoritative events and live telemetry.</p>
+      <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6">
+        <EmptyState
+          icon={<AlertTriangle className="h-5 w-5 text-cue-600" />}
+          title="Couldn't load your events"
+          description={`${loadError} Your events haven't been lost — this is a connection problem. Check that the EVENTRA server is running, then try again.`}
+          action={
+            <button type="button" className="btn-primary" onClick={() => setReloadKey((k) => k + 1)}>
+              Try again
+            </button>
+          }
+        />
       </div>
     );
   }
+  if (!activeEvent) return <FirstRun />;
 
-  if (!activeEvent) {
-    return (
-      <div className="max-w-xl mx-auto my-16 p-10 bg-white rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
-        <div className="w-12 h-12 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center mx-auto">
-          <Building2 className="w-6 h-6" />
-        </div>
-        <h2 className="text-xl font-bold tracking-tight text-slate-900">No Events Found</h2>
-        <p className="text-xs text-slate-500">
-          There are no operational events currently configured in this environment. Deploy your first event to begin autonomous operations.
-        </p>
-        <Link
-          href="/events/new"
-          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs transition"
-        >
-          <PlusCircle className="w-4 h-4" />
-          Initialize First Event
-        </Link>
-      </div>
-    );
-  }
-
-  const sortedTasks = [...tasks].sort((a, b) =>
-    a.completed === b.completed ? 0 : a.completed ? 1 : -1
-  );
+  const sortedTasks = [...tasks].sort((a, b) => (a.completed === b.completed ? 0 : a.completed ? 1 : -1));
+  const doneCount = sortedTasks.filter((t) => t.completed).length;
 
   const curr = activeEvent.currency === "INR" || !activeEvent.currency ? "₹" : `${activeEvent.currency} `;
   const totalBudget = Number(activeEvent.total_budget) || 0;
   const spentBudget = liveState?.budget_deviation?.total_spent ?? 0;
+  const spentPct = totalBudget > 0 ? Math.round((spentBudget / totalBudget) * 100) : 0;
+  const overBudget = totalBudget > 0 && spentBudget > totalBudget;
+
+  const id = activeEvent.id;
+  const shortcuts = [
+    { href: `/events/${id}/live`, label: "Live event monitor", icon: Radio, tone: "text-cue-600" },
+    { href: `/events/${id}/approvals`, label: "Approvals", icon: ShieldCheck, tone: "text-go-600" },
+    { href: `/events/${id}/recovery`, label: "Backup plans", icon: RotateCcw, tone: "text-standby-600" },
+    { href: `/events/${id}/procurement`, label: "Vendor quotes", icon: FileText, tone: "text-ink-600" },
+  ];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-in fade-in duration-300">
-      {/* Top Header & Fleet Status Bar */}
-      <div className="flex flex-col lg:flex-row justify-between lg:items-end gap-6 bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-              Fleet Operations
-            </span>
-            <span className="text-[10px] font-mono text-slate-400">
-              Active: {activeEvent.name}
-            </span>
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight text-slate-900 mt-1">
-            Executive Command Center
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Real-time status, financial variance, and risk radar across active deployments.
-          </p>
-        </div>
+    <div className="mx-auto max-w-7xl space-y-10 px-4 py-8 sm:px-6 lg:px-8">
+      <PageHeader
+        eyebrow={`My events · ${events.length}`}
+        title={greeting() + "."}
+        description={
+          incidents.length > 0
+            ? `${incidents.length} open problem${incidents.length === 1 ? "" : "s"} on ${activeEvent.name}. Start there.`
+            : "Here's where every event stands, and what needs you next."
+        }
+        actions={
+          <Link href="/events/new" className="btn-primary">
+            <Plus className="h-4 w-4" />
+            Plan a new event
+          </Link>
+        }
+      />
 
-        {/* Big Metrics Grid */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 pt-4 lg:pt-0 border-t lg:border-t-0 border-slate-100">
+      {/* Event board */}
+      <section aria-label="Your events" className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {events.map((ev, i) => (
+          <EventCard key={ev.id} ev={ev} focused={ev.id === activeEvent.id} index={i} />
+        ))}
+        <PopCard index={events.length} className="rounded-xl">
+        <Link
+          href="/events/new"
+          className="group flex h-full min-h-[150px] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-ink-300 text-ink-500 transition hover:border-ink-500 hover:bg-[#FDFCFA] hover:text-ink-900"
+        >
+          <span className="grid h-10 w-10 place-items-center rounded-full border border-ink-300 transition group-hover:border-ink-900 group-hover:bg-ink-900 group-hover:text-ink-50">
+            <Plus className="h-4 w-4" />
+          </span>
+          <span className="text-[13px] font-semibold">New event</span>
+        </Link>
+        </PopCard>
+      </section>
+
+      {/* Focused event run sheet */}
+      <section aria-labelledby="focus-heading" className="space-y-4">
+        <div className="flex flex-wrap items-end justify-between gap-3 border-b border-ink-200 pb-3">
           <div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
-              <Users className="w-3.5 h-3.5 text-slate-400" />
-              <span>Headcount</span>
-            </div>
-            <div className="text-2xl font-bold font-mono text-slate-900">
-              {(activeEvent.guest_count || 0).toLocaleString()}
-            </div>
+            <div className="eyebrow">In focus</div>
+            <h2
+              id="focus-heading"
+              className="mt-1 font-display text-[22px] font-extrabold tracking-[-0.02em] text-ink-900"
+              style={{ fontStretch: "88%" }}
+            >
+              {activeEvent.name}
+            </h2>
           </div>
-
-          <div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
-              <DollarSign className="w-3.5 h-3.5 text-slate-400" />
-              <span>Committed / Budget</span>
-            </div>
-            <div className="text-2xl font-bold font-mono text-slate-900 truncate">
-              {curr}{spentBudget > 0 ? (spentBudget / 1000).toFixed(0) : 0}k
-              <span className="text-xs text-slate-400 font-normal ml-1">
-                / {totalBudget > 0 ? `${(totalBudget / 1000).toFixed(0)}k` : "Unset"}
-              </span>
-            </div>
-          </div>
-
-          <div className="col-span-2 sm:col-span-1">
-            <div className="flex items-center gap-1.5 text-xs text-slate-500 mb-1">
-              <Activity className="w-3.5 h-3.5 text-slate-400" />
-              <span>Operational Health</span>
-            </div>
-            <div className="text-2xl font-bold font-mono text-emerald-700 flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-              {activeEvent.state || "NORMAL"}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* 4 Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        {/* Card 1: Event Workspace Quick Link */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between space-y-4 hover:border-slate-300 transition">
-          <div>
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                Active Event
-              </span>
-              <span className="text-[10px] font-mono text-slate-400">
-                {activeEvent.lifecycle_state || "PLANNED"}
-              </span>
-            </div>
-            <h3 className="text-base font-bold text-slate-900 leading-snug">{activeEvent.name}</h3>
-            <p className="text-xs text-slate-500 mt-1">
-              {activeEvent.location || "Venue unset"} •{" "}
-              {activeEvent.start_datetime ? new Date(activeEvent.start_datetime).toLocaleDateString() : "Unscheduled"}
-            </p>
-          </div>
-
-          <Link
-            href={`/events/${activeEvent.id}`}
-            className="w-full py-2.5 rounded-lg bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs transition flex items-center justify-center gap-2"
-          >
-            <Radio className="w-3.5 h-3.5" />
-            <span>Open Event Workspace</span>
-            <ArrowUpRight className="w-3.5 h-3.5 opacity-80" />
+          <Link href={`/events/${id}`} className="btn-secondary">
+            Open event
+            <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>
 
-        {/* Card 2: Risk Radar / Incidents */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between space-y-4 hover:border-slate-300 transition">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Radar className="w-4 h-4 text-rose-600" />
-                <h3 className="text-sm font-bold text-slate-900">Risk Radar</h3>
-              </div>
-              <Link
-                href={`/events/${activeEvent.id}/incidents`}
-                className="text-[11px] text-slate-500 hover:text-slate-900 font-semibold flex items-center gap-1"
-              >
-                Inspect <ArrowUpRight className="w-3 h-3" />
+        <div className="grid gap-5 lg:grid-cols-12">
+          {/* Needs you */}
+          <Panel
+            className="lg:col-span-5"
+            eyebrow="Needs you"
+            title={
+              incidentsError
+                ? "Couldn't check for problems"
+                : incidents.length > 0
+                ? `${incidents.length} open problem${incidents.length === 1 ? "" : "s"}`
+                : "No open problems"
+            }
+            actions={
+              <Link href={`/events/${id}`} className="btn-ghost h-7 px-2 text-[12px]">
+                All decisions <ArrowUpRight className="h-3 w-3" />
               </Link>
-            </div>
-
-            <div className="space-y-2">
-              {incidents.slice(0, 2).map((inc) => (
-                <div
-                  key={inc.id}
-                  className="p-2.5 rounded-lg bg-rose-50 border border-rose-200/80 text-xs space-y-0.5"
-                >
-                  <div className="flex items-center justify-between text-[10px] font-bold uppercase text-rose-700">
-                    <span>{inc.severity}</span>
-                    <span>{inc.status}</span>
+            }
+          >
+            {incidents.length > 0 ? (
+              <StaggerList className="space-y-2">
+                {incidents.slice(0, 3).map((inc) => (
+                  <div key={inc.id} className="flex items-center gap-3 rounded-lg border border-cue-200 bg-cue-50/70 p-3">
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-cue-600" />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] font-semibold text-ink-900">{inc.title}</div>
+                      <div className="mt-0.5 text-[11.5px] text-cue-700">
+                        {[humanizeCode(inc.severity), humanizeCode(inc.status)].filter(Boolean).join(" · ")}
+                      </div>
+                    </div>
+                    <Link href={`/events/${id}/incidents`} className="btn-cue h-7 shrink-0 px-2.5 text-[12px]">
+                      Respond
+                    </Link>
                   </div>
-                  <div className="font-semibold text-rose-950 truncate">{inc.title}</div>
-                </div>
-              ))}
-              {incidents.length === 0 && (
-                <p className="text-xs text-slate-400 py-3 text-center">No active operational disruptions.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-100 flex items-center justify-between">
-            <span>Critical Alerts</span>
-            <span className="font-bold text-slate-700">{incidents.length} Active</span>
-          </div>
-        </div>
-
-        {/* Card 3: Budget Burn Rate */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between space-y-4 hover:border-slate-300 transition">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-emerald-600" />
-                <h3 className="text-sm font-bold text-slate-900">Budget Tracking</h3>
+                ))}
+              </StaggerList>
+            ) : incidentsError ? (
+              <div className="flex items-center gap-3 rounded-lg border border-standby-200 bg-standby-50/70 p-3 text-[13px] text-standby-800">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-standby-600" />
+                <span className="flex-1">We couldn&apos;t load problems for this event, so we can&apos;t say it&apos;s all clear.</span>
+                <button type="button" className="btn-secondary h-7 px-2.5 text-[12px]" onClick={() => setReloadKey((k) => k + 1)}>
+                  Retry
+                </button>
               </div>
-              <Link
-                href={`/events/${activeEvent.id}/budget`}
-                className="text-[11px] text-slate-500 hover:text-slate-900 font-semibold flex items-center gap-1"
-              >
-                Plan <ArrowUpRight className="w-3 h-3" />
-              </Link>
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-xl font-bold font-mono text-slate-900">
-                {curr}{spentBudget.toLocaleString()}
+            ) : (
+              <div className="flex items-center gap-3 rounded-lg border border-go-200 bg-go-50/60 p-3 text-[13px] text-go-800">
+                <CheckCircle2 className="h-4 w-4 text-go-600" />
+                No problems right now. Picks and approvals are listed on the event overview.
               </div>
-              <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-[#D6003C] h-full rounded-full transition-all"
-                  style={{
-                    width: `${totalBudget > 0 ? Math.min(100, Math.round((spentBudget / totalBudget) * 100)) : 0}%`,
-                  }}
-                />
-              </div>
-              <div className="text-[11px] text-slate-500 flex items-center justify-between">
-                <span>Cap: {totalBudget > 0 ? `${curr}${totalBudget.toLocaleString()}` : "Unset"}</span>
-                <span>
-                  {totalBudget > 0 ? `${Math.round((spentBudget / totalBudget) * 100)}% committed` : "0%"}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="text-[11px] text-slate-400 pt-2 border-t border-slate-100 flex items-center justify-between">
-            <span>Variance Status</span>
-            <span className="font-bold text-emerald-700">On Track</span>
-          </div>
-        </div>
-
-        {/* Card 4: Action Items */}
-        <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col justify-between space-y-4 hover:border-slate-300 transition">
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-slate-600" />
-                <h3 className="text-sm font-bold text-slate-900">Execution Plan</h3>
-              </div>
-              <span className="text-xs font-mono font-bold text-slate-500">
-                {sortedTasks.filter((t) => t.completed).length}/{sortedTasks.length} Done
-              </span>
-            </div>
-
-            <div className="space-y-2 max-h-[140px] overflow-y-auto no-scrollbar">
-              {sortedTasks.slice(0, 3).map((task) => (
-                <div key={task.id} className="flex items-center gap-2 text-xs">
-                  <CheckCircle2
-                    className={`w-3.5 h-3.5 shrink-0 ${
-                      task.completed ? "text-emerald-600" : "text-slate-300"
-                    }`}
-                  />
-                  <span
-                    className={`truncate ${
-                      task.completed ? "text-slate-400 line-through" : "text-slate-800 font-medium"
-                    }`}
-                  >
-                    {task.title}
-                  </span>
-                </div>
-              ))}
-              {sortedTasks.length === 0 && (
-                <p className="text-xs text-slate-400 py-3 text-center">No execution tasks scheduled.</p>
-              )}
-            </div>
-          </div>
-
-          <Link
-            href={`/events/${activeEvent.id}/plan`}
-            className="text-[11px] text-[#D6003C] hover:underline font-semibold flex items-center justify-between pt-2 border-t border-slate-100"
-          >
-            <span>Review Full Timeline</span>
-            <ArrowUpRight className="w-3.5 h-3.5" />
-          </Link>
-        </div>
-      </div>
-
-      {/* Bottom Row: Recent Activity & Quick Nav */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Recent Activity Feed (8 cols) */}
-        <div className="lg:col-span-8 bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-              <Activity className="w-4 h-4 text-slate-500" />
-              Fleet Activity Stream
-            </h3>
-            <Link
-              href={`/events/${activeEvent.id}/activity`}
-              className="text-xs font-semibold text-[#D6003C] hover:underline flex items-center gap-1"
-            >
-              Open Unified Activity <ArrowUpRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-
-          <div className="space-y-3">
-            {activity.slice(0, 5).map((act, idx) => (
-              <div key={act.id || idx} className="flex items-start gap-3 text-xs border-b border-slate-50 pb-2.5 last:border-0 last:pb-0">
-                <div className="w-2 h-2 rounded-full bg-slate-300 mt-1.5 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-slate-800 leading-snug">
-                    <strong className="text-slate-900">{act.actor}</strong> {act.message || act.action}
-                  </p>
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {formatRelativeTime(act.timestamp)}
-                  </span>
-                </div>
-              </div>
-            ))}
-            {activity.length === 0 && (
-              <p className="text-xs text-slate-400 text-center py-4">No recent activity events recorded.</p>
             )}
-          </div>
+          </Panel>
+
+          {/* Budget */}
+          <Panel
+            className="lg:col-span-4"
+            eyebrow="Budget"
+            title={
+              <span className="font-display text-[26px] font-bold tabular-nums tracking-[-0.02em]" style={{ fontStretch: "90%" }}>
+                {curr}
+                <AnimatedNumber value={spentBudget} />
+              </span>
+            }
+            actions={
+              <Link href={`/events/${id}/budget`} className="btn-ghost h-7 px-2 text-[12px]">
+                <Wallet className="h-3.5 w-3.5" /> Budget
+              </Link>
+            }
+          >
+            <Meter value={spentBudget} max={totalBudget || 1} tone={overBudget ? "cue" : spentPct > 85 ? "standby" : "go"} label="Budget committed" />
+            <div className="mt-2.5 flex items-center justify-between text-[12px]">
+              <span className="text-ink-500">
+                of {totalBudget > 0 ? `${curr}${totalBudget.toLocaleString()}` : "no cap set"}
+              </span>
+              {totalBudget <= 0 ? (
+                <span className="font-semibold text-ink-500">No budget set</span>
+              ) : overBudget ? (
+                <span className="font-semibold text-cue-700">Over budget · {spentPct}%</span>
+              ) : (
+                <span className="font-semibold text-go-700">{spentPct}% committed</span>
+              )}
+            </div>
+          </Panel>
+
+          {/* Shortcuts */}
+          <Panel className="lg:col-span-3" eyebrow="Jump to" bodyClassName="px-2 pb-2 pt-2">
+            <ul>
+              {shortcuts.map((s) => (
+                <li key={s.href}>
+                  <Link
+                    href={s.href}
+                    className="group flex items-center justify-between rounded-lg px-3 py-2.5 text-[13px] font-semibold text-ink-800 transition hover:bg-ink-100"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <s.icon className={`h-4 w-4 ${s.tone}`} />
+                      {s.label}
+                    </span>
+                    <ArrowUpRight className="h-3.5 w-3.5 text-ink-300 transition group-hover:text-ink-700" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+
+          {/* Tasks */}
+          <Panel
+            className="lg:col-span-5"
+            eyebrow="Run sheet"
+            title="Upcoming tasks"
+            actions={
+              <span className="font-mono text-[11px] text-ink-500">
+                {doneCount}/{sortedTasks.length} done
+              </span>
+            }
+          >
+            {sortedTasks.length > 0 ? (
+              <>
+                <Meter value={doneCount} max={sortedTasks.length} tone="ink" className="mb-3" label="Tasks complete" />
+                <ul className="ruled">
+                  {sortedTasks.slice(0, 6).map((task) => (
+                    <li key={task.id} className="flex items-center gap-3 py-2 text-[13px]">
+                      {task.completed ? (
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-go-600" />
+                      ) : (
+                        <Circle className={`h-4 w-4 shrink-0 ${task.urgent ? "text-cue-500" : "text-ink-300"}`} />
+                      )}
+                      <span className={`min-w-0 flex-1 truncate ${task.completed ? "text-ink-400 line-through" : "font-medium text-ink-800"}`}>
+                        {task.title}
+                      </span>
+                      {task.urgent && !task.completed && (
+                        <span className="font-mono text-[9.5px] uppercase tracking-label text-cue-600">Priority</span>
+                      )}
+                      <span className="timecode shrink-0 text-[11px] text-ink-400">{task.dueDate}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="py-6 text-center text-[13px] text-ink-500">No tasks yet — they appear once the plan is built.</p>
+            )}
+            <Link
+              href={`/events/${id}/plan`}
+              className="mt-3 flex items-center justify-between border-t border-ink-200 pt-3 text-[12.5px] font-semibold text-ink-700 hover:text-ink-900"
+            >
+              Review full plan
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </Panel>
+
+          {/* Activity */}
+          <Panel
+            className="lg:col-span-7"
+            eyebrow="Log"
+            title="Recent activity"
+            actions={
+              <Link href={`/events/${id}/activity`} className="btn-ghost h-7 px-2 text-[12px]">
+                See all <ArrowUpRight className="h-3 w-3" />
+              </Link>
+            }
+          >
+            {activity.length > 0 ? (
+              <ol className="relative space-y-0.5 before:absolute before:bottom-2 before:left-[5px] before:top-2 before:w-px before:bg-ink-200">
+                {activity.slice(0, 6).map((act, idx) => (
+                  <li key={act.id || idx} className="relative flex items-start gap-3 py-2 pl-5">
+                    <span
+                      className={`absolute left-0 top-[13px] h-[11px] w-[11px] rounded-full border-2 border-[#FDFCFA] ${
+                        idx === 0 ? "bg-cue-600" : "bg-ink-300"
+                      }`}
+                    />
+                    <p className="min-w-0 flex-1 text-[13px] leading-snug text-ink-700">
+                      <span className="font-semibold text-ink-900">{humanizeActor(act.actor)}</span>{" "}
+                      {humanizeInline(stripIds(act.message)) || humanizeCode(act.action)}
+                    </p>
+                    <span className="timecode shrink-0 pt-0.5 text-[11px] text-ink-400">{formatRelativeTime(act.timestamp)}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <EmptyState
+                className="border-0 bg-transparent py-6"
+                title="Nothing logged yet"
+                description="Agent actions, vendor replies and approvals will appear here as they happen."
+              />
+            )}
+          </Panel>
         </div>
-
-        {/* Right Column: Fleet Shortcuts (4 cols) */}
-        <div className="lg:col-span-4 bg-white rounded-xl border border-slate-200 p-6 shadow-sm space-y-4">
-          <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-3">
-            Operations Shortcuts
-          </h3>
-
-          <div className="space-y-2 text-xs">
-            <Link
-              href={`/events/${activeEvent.id}/live`}
-              className="p-3 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 flex items-center justify-between text-slate-800 transition"
-            >
-              <div className="flex items-center gap-2">
-                <Radio className="w-4 h-4 text-rose-600" />
-                <span className="font-semibold">Live Operations Command</span>
-              </div>
-              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
-            </Link>
-
-            <Link
-              href={`/events/${activeEvent.id}/recovery`}
-              className="p-3 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 flex items-center justify-between text-slate-800 transition"
-            >
-              <div className="flex items-center gap-2">
-                <Radar className="w-4 h-4 text-amber-600" />
-                <span className="font-semibold">Incident Recovery Engine</span>
-              </div>
-              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
-            </Link>
-
-            <Link
-              href={`/events/${activeEvent.id}/approvals`}
-              className="p-3 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 flex items-center justify-between text-slate-800 transition"
-            >
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="w-4 h-4 text-emerald-600" />
-                <span className="font-semibold">Governance Sign-off Queue</span>
-              </div>
-              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
-            </Link>
-
-            <Link
-              href={`/events/${activeEvent.id}/procurement`}
-              className="p-3 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 flex items-center justify-between text-slate-800 transition"
-            >
-              <div className="flex items-center gap-2">
-                <DollarSign className="w-4 h-4 text-slate-600" />
-                <span className="font-semibold">Quotes &amp; Supplier Matrix</span>
-              </div>
-              <ArrowUpRight className="w-3.5 h-3.5 text-slate-400" />
-            </Link>
-          </div>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }

@@ -4,7 +4,6 @@ import React from "react";
 import { useParams } from "next/navigation";
 import { EventShell } from "@/components/v2/EventShell";
 import { DiscoveryCommand } from "@/components/v2/DiscoveryCommand";
-import { AgentDiscoveryLive } from "@/components/agent/AgentDiscoveryLive";
 
 export default function VenuePage() {
   const params = useParams();
@@ -12,8 +11,7 @@ export default function VenuePage() {
 
   return (
     <EventShell eventId={eventId} currentStage="DISCOVER">
-      <AgentDiscoveryLive eventId={eventId} kind="VENUE" />
-      <DiscoveryCommand eventId={eventId} discoveryType="VENUE" defaultCategory="VENUE" />
+      <DiscoveryCommand eventId={eventId} discoveryType="VENUE" defaultCategory="VENUE" agentRunKind="VENUE" />
     </EventShell>
   );
 }

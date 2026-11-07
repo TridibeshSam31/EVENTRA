@@ -26,6 +26,7 @@ Validates all 22 mandatory requirements:
 """
 import pytest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.models.event import Event
@@ -38,12 +39,42 @@ from app.services.autonomous_operations_service import AutonomousOperationsServi
 from app.services.provider_communication_service import ProviderCommunicationService
 from app.services.live_broker import live_broker
 from app.integrations.base import IntegrationResult, IntegrationSource
+from app.models.user import User
+
+OWNER_ID = "owner-comm-1"
+OWNER_HEADERS = {"X-User-Id": OWNER_ID}
+
+
+def _wa_ok(message_id="true_919876543210@c.us_3EB0AA"):
+    return IntegrationResult(success=True, source=IntegrationSource.REAL, data={"message_id": message_id, "channel": "WHATSAPP"})
+
+
+def _call_ok(call_sid="CA123"):
+    return IntegrationResult(success=True, source=IntegrationSource.REAL, data={"call_sid": call_sid, "status": "queued"})
+
+
+def _fail(reason, code="X"):
+    return IntegrationResult(success=False, source=IntegrationSource.REAL, data={"error_code": code}, error=reason)
+
+
+@pytest.fixture
+def providers():
+    """Mocks the two real provider operations; automated tests never reach OpenWA or Twilio."""
+    with patch("app.integrations.whatsapp.client.OpenWACommunicationAdapter.send_text_strict") as wa, \
+         patch("app.integrations.communication.twilio.TwilioVoiceAdapter.place_outbound_call") as call, \
+         patch("app.core.config.settings.TWILIO_ENABLED", True):
+        wa.return_value = _wa_ok()
+        call.return_value = _call_ok()
+        yield SimpleNamespace(wa=wa, call=call)
 
 
 @pytest.fixture
 def base_event(db_session):
+    db_session.add(User(id=OWNER_ID, name="Event Owner", email="owner-comm-1@example.com"))
+    db_session.commit()
     event = Event(
         id="evt-comm-test-1",
+        owner_id=OWNER_ID,
         name="Royal Tech Gala 2026",
         location="Bengaluru",
         start_datetime=datetime(2026, 11, 20, 10, 0, tzinfo=timezone.utc).replace(tzinfo=None),
@@ -176,7 +207,7 @@ def test_dismiss_communication_causes_zero_communication(test_client, db_session
     assert comm["whatsapp_status"] == "NOT_ATTEMPTED"
 
 
-def test_approved_communication_triggers_call_and_whatsapp(db_session, base_event):
+def test_approved_communication_triggers_call_and_whatsapp(db_session, base_event, providers):
     """6 & 7. Approved communication triggers exactly one call attempt and one WhatsApp attempt."""
     entry = EventShortlistEntry(
         event_id=base_event.id,
@@ -198,31 +229,21 @@ def test_approved_communication_triggers_call_and_whatsapp(db_session, base_even
     ).first()
 
     comm_svc = ProviderCommunicationService(db_session)
+    res = comm_svc.execute_approved_communication(
+        event_id=base_event.id,
+        candidate_id="cand-appr-1",
+        approval_id=approval.id,
+    )
 
-    # Mock real providers
-    with patch.object(comm_svc, "make_call") as mock_call, \
-         patch.object(comm_svc, "send_message") as mock_wa, \
-         patch("app.core.config.settings.TWILIO_ENABLED", True), \
-         patch("app.integrations.communication.twilio.TwilioVoiceAdapter.is_configured", True), \
-         patch("app.integrations.whatsapp.client.OpenWACommunicationAdapter.is_configured", True):
-
-        mock_call.return_value = IntegrationResult(success=True, source=IntegrationSource.REAL, data={"call_sid": "CA123"})
-        mock_wa.return_value = IntegrationResult(success=True, source=IntegrationSource.REAL, data={"message_id": "WA123"})
-
-        res = comm_svc.execute_approved_communication(
-            event_id=base_event.id,
-            candidate_id="cand-appr-1",
-            approval_id=approval.id,
-        )
-
-        assert mock_call.call_count == 1
-        assert mock_wa.call_count == 1
-        assert res["call_status"] == "COMPLETED"
-        assert res["whatsapp_status"] == "SENT"
-        assert res["overall_status"] == "COMPLETED"
+    assert providers.call.call_count == 1
+    assert providers.wa.call_count == 1
+    # Twilio only queued the call and OpenWA only accepted the message: nothing more is claimed.
+    assert res["call_status"] == "QUEUED"
+    assert res["whatsapp_status"] == "ACCEPTED"
+    assert res["overall_status"] == "CONTACTED"
 
 
-def test_duplicate_approval_request_is_idempotent(db_session, base_event):
+def test_duplicate_approval_request_is_idempotent(db_session, base_event, providers):
     """8, 9, 10. Duplicate / double-click approval requests remain strictly idempotent (no duplicate calls or messages)."""
     entry = EventShortlistEntry(
         event_id=base_event.id,
@@ -241,27 +262,19 @@ def test_duplicate_approval_request_is_idempotent(db_session, base_event):
 
     comm_svc = ProviderCommunicationService(db_session)
 
-    with patch.object(comm_svc, "make_call") as mock_call, \
-         patch.object(comm_svc, "send_message") as mock_wa, \
-         patch("app.core.config.settings.TWILIO_ENABLED", True), \
-         patch("app.integrations.communication.twilio.TwilioVoiceAdapter.is_configured", True), \
-         patch("app.integrations.whatsapp.client.OpenWACommunicationAdapter.is_configured", True):
+    # First request
+    res1 = comm_svc.execute_approved_communication(base_event.id, "cand-idem-1", approval.id)
+    # Second immediate duplicate request
+    res2 = comm_svc.execute_approved_communication(base_event.id, "cand-idem-1", approval.id)
 
-        mock_call.return_value = IntegrationResult(success=True, source=IntegrationSource.REAL, data={"call_sid": "CA1"})
-        mock_wa.return_value = IntegrationResult(success=True, source=IntegrationSource.REAL, data={"message_id": "WA1"})
-
-        # First request
-        res1 = comm_svc.execute_approved_communication(base_event.id, "cand-idem-1", approval.id)
-        # Second immediate duplicate request
-        res2 = comm_svc.execute_approved_communication(base_event.id, "cand-idem-1", approval.id)
-
-        # Call and WhatsApp must only have been invoked ONCE
-        assert mock_call.call_count == 1
-        assert mock_wa.call_count == 1
-        assert res1 == res2
+    # Call and WhatsApp must only have been invoked ONCE
+    assert providers.call.call_count == 1
+    assert providers.wa.call_count == 1
+    assert res1["call_status"] == res2["call_status"] == "QUEUED"
+    assert res1["whatsapp_status"] == res2["whatsapp_status"] == "ACCEPTED"
 
 
-def test_missing_phone_truthfully_not_attempted(db_session, base_event):
+def test_missing_phone_truthfully_not_attempted(db_session, base_event, providers):
     """11 & 12. Candidate without phone number does NOT produce fake call/message success."""
     entry = EventShortlistEntry(
         event_id=base_event.id,
@@ -281,10 +294,12 @@ def test_missing_phone_truthfully_not_attempted(db_session, base_event):
     comm_svc = ProviderCommunicationService(db_session)
     res = comm_svc.execute_approved_communication(base_event.id, "cand-nophone-1", approval.id)
 
-    assert res["call_status"] == "NOT_ATTEMPTED"
-    assert res["whatsapp_status"] == "NOT_ATTEMPTED"
-    assert res["overall_status"] == "UNAVAILABLE"
-    assert "No contact phone" in res["call_error"]
+    assert providers.call.call_count == 0
+    assert providers.wa.call_count == 0
+    assert res["call_status"] == "FAILED"
+    assert res["whatsapp_status"] == "FAILED"
+    assert res["overall_status"] == "FAILED"
+    assert "phone number is missing" in res["call_error"]
 
 
 def test_provider_unavailable_produces_truthful_unavailable_status(db_session, base_event):
@@ -306,22 +321,22 @@ def test_provider_unavailable_produces_truthful_unavailable_status(db_session, b
 
     comm_svc = ProviderCommunicationService(db_session)
 
-    # Both Twilio/Exotel and OpenWA are NOT configured
+    # Neither Twilio nor OpenWA is enabled; the real adapters must report that
+    # instead of falling back to a mock success.
     with patch("app.core.config.settings.TWILIO_ENABLED", False), \
-         patch("app.core.config.settings.EXOTEL_ENABLED", False), \
-         patch("app.core.config.settings.COMMUNICATION_PROVIDER", "none"), \
-         patch("app.integrations.whatsapp.client.OpenWACommunicationAdapter.is_configured", False):
+         patch("app.core.config.settings.OPENWA_ENABLED", False), \
+         patch("app.core.config.settings.COMMUNICATION_PROVIDER", "none"):
 
         res = comm_svc.execute_approved_communication(base_event.id, "cand-unavail-1", approval.id)
 
         assert res["call_status"] == "UNAVAILABLE"
         assert res["whatsapp_status"] == "UNAVAILABLE"
         assert res["overall_status"] == "UNAVAILABLE"
-        assert "Voice provider is not configured" in res["call_error"]
-        assert "WhatsApp provider is not configured" in res["whatsapp_error"]
+        assert "TWILIO_ENABLED" in res["call_error"]
+        assert "OPENWA_ENABLED" in res["whatsapp_error"]
 
 
-def test_call_succeeds_and_whatsapp_fails_independent(db_session, base_event):
+def test_call_succeeds_and_whatsapp_fails_independent(db_session, base_event, providers):
     """14. Call succeeds while WhatsApp fails -> both represented independently with PARTIAL overall."""
     entry = EventShortlistEntry(
         event_id=base_event.id,
@@ -339,25 +354,17 @@ def test_call_succeeds_and_whatsapp_fails_independent(db_session, base_event):
     approval = db_session.query(Approval).filter(Approval.target_id == "cand-part-1").first()
 
     comm_svc = ProviderCommunicationService(db_session)
+    providers.wa.return_value = _fail("WhatsApp session timeout", "OPENWA_TIMEOUT")
 
-    with patch.object(comm_svc, "make_call") as mock_call, \
-         patch.object(comm_svc, "send_message") as mock_wa, \
-         patch("app.core.config.settings.TWILIO_ENABLED", True), \
-         patch("app.integrations.communication.twilio.TwilioVoiceAdapter.is_configured", True), \
-         patch("app.integrations.whatsapp.client.OpenWACommunicationAdapter.is_configured", True):
+    res = comm_svc.execute_approved_communication(base_event.id, "cand-part-1", approval.id)
 
-        mock_call.return_value = IntegrationResult(success=True, source=IntegrationSource.REAL, data={"call_sid": "CA1"})
-        mock_wa.return_value = IntegrationResult(success=False, source=IntegrationSource.REAL, data=None, error="WhatsApp session timeout")
-
-        res = comm_svc.execute_approved_communication(base_event.id, "cand-part-1", approval.id)
-
-        assert res["call_status"] == "COMPLETED"
-        assert res["whatsapp_status"] == "FAILED"
-        assert res["overall_status"] == "PARTIAL"
-        assert res["whatsapp_error"] == "WhatsApp session timeout"
+    assert res["call_status"] == "QUEUED"
+    assert res["whatsapp_status"] == "FAILED"
+    assert res["overall_status"] == "PARTIAL"
+    assert res["whatsapp_error"] == "WhatsApp session timeout"
 
 
-def test_whatsapp_succeeds_and_call_fails_independent(db_session, base_event):
+def test_whatsapp_succeeds_and_call_fails_independent(db_session, base_event, providers):
     """15. WhatsApp succeeds while Call fails -> both represented independently with PARTIAL overall."""
     entry = EventShortlistEntry(
         event_id=base_event.id,
@@ -375,25 +382,17 @@ def test_whatsapp_succeeds_and_call_fails_independent(db_session, base_event):
     approval = db_session.query(Approval).filter(Approval.target_id == "cand-part-2").first()
 
     comm_svc = ProviderCommunicationService(db_session)
+    providers.call.return_value = _fail("Busy signal", "TWILIO_FAILED")
 
-    with patch.object(comm_svc, "make_call") as mock_call, \
-         patch.object(comm_svc, "send_message") as mock_wa, \
-         patch("app.core.config.settings.TWILIO_ENABLED", True), \
-         patch("app.integrations.communication.twilio.TwilioVoiceAdapter.is_configured", True), \
-         patch("app.integrations.whatsapp.client.OpenWACommunicationAdapter.is_configured", True):
+    res = comm_svc.execute_approved_communication(base_event.id, "cand-part-2", approval.id)
 
-        mock_call.return_value = IntegrationResult(success=False, source=IntegrationSource.REAL, data=None, error="Busy signal")
-        mock_wa.return_value = IntegrationResult(success=True, source=IntegrationSource.REAL, data={"message_id": "WA2"})
-
-        res = comm_svc.execute_approved_communication(base_event.id, "cand-part-2", approval.id)
-
-        assert res["call_status"] == "FAILED"
-        assert res["whatsapp_status"] == "SENT"
-        assert res["overall_status"] == "PARTIAL"
-        assert res["call_error"] == "Busy signal"
+    assert res["call_status"] == "FAILED"
+    assert res["whatsapp_status"] == "ACCEPTED"
+    assert res["overall_status"] == "PARTIAL"
+    assert res["call_error"] == "Busy signal"
 
 
-def test_selecting_venue_b_does_not_contact_venue_a_or_c(test_client, db_session, base_event):
+def test_selecting_venue_b_does_not_contact_venue_a_or_c(test_client, db_session, base_event, providers):
     """16. Multiple recommendations: Selecting candidate B does NOT contact candidate A or C."""
     cand_a = EventShortlistEntry(
         event_id=base_event.id,
@@ -429,18 +428,12 @@ def test_selecting_venue_b_does_not_contact_venue_a_or_c(test_client, db_session
     sel_res = test_client.post(f"/api/events/{base_event.id}/shortlist/cand-multi-b/select")
     assert sel_res.status_code == 200
 
-    # With mocked comm
-    with patch("app.services.provider_communication_service.ProviderCommunicationService.make_call") as mock_call, \
-         patch("app.services.provider_communication_service.ProviderCommunicationService.send_message") as mock_wa, \
-         patch("app.core.config.settings.TWILIO_ENABLED", True), \
-         patch("app.integrations.communication.twilio.TwilioVoiceAdapter.is_configured", True), \
-         patch("app.integrations.whatsapp.client.OpenWACommunicationAdapter.is_configured", True):
-
-        mock_call.return_value = IntegrationResult(success=True, source=IntegrationSource.REAL, data={"call_sid": "B1"})
-        mock_wa.return_value = IntegrationResult(success=True, source=IntegrationSource.REAL, data={"message_id": "B1"})
-
-        appr_res = test_client.post(f"/api/events/{base_event.id}/shortlist/cand-multi-b/approve-communication")
-        assert appr_res.status_code == 200
+    appr_res = test_client.post(
+        f"/api/events/{base_event.id}/shortlist/cand-multi-b/approve-communication", headers=OWNER_HEADERS
+    )
+    assert appr_res.status_code == 200
+    assert providers.call.call_count == 1
+    assert providers.wa.call_count == 1
 
     # Venue A & Venue C must remain untouched in RECOMMENDED status
     db_session.refresh(cand_a)
@@ -529,6 +522,14 @@ def test_voice_call_endpoint_blocks_unapproved_outreach(test_client, db_session,
         "vendor_name": "Unapproved Vendor",
         "provider_id": "cand-unapproved-1",
     }
-    res = test_client.post("/api/v1/voice/call", json=payload)
+    res = test_client.post("/api/v1/voice/call", json=payload, headers=OWNER_HEADERS)
     assert res.status_code == 403
     assert "requires explicit organizer approval" in res.json()["detail"]
+
+
+def test_voice_call_endpoint_rejects_anonymous_identity(test_client, db_session, base_event):
+    """/voice/call cannot place a real call for the anonymous dev identity."""
+    payload = {"event_id": base_event.id, "recipient_phone": "+919876543299"}
+    res = test_client.post("/api/v1/voice/call", json=payload)
+    assert res.status_code == 403
+    assert "identified organizer" in res.json()["detail"]

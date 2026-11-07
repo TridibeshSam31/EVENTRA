@@ -75,10 +75,10 @@ export function RecoveryDiscoveryMap({
   }, [selectedId, mapPlaces]);
 
   return (
-    <div className={`bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col ${className}`}>
+    <div className={`surface overflow-hidden flex flex-col ${className}`}>
       <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between text-xs bg-slate-50/50">
         <span className="font-bold text-slate-800 flex items-center gap-1.5">
-          <MapPin className="w-3.5 h-3.5 text-[#D6003C]" />
+          <MapPin className="w-3.5 h-3.5 text-cue-600" />
           <span>Backup Provider Radar ({mapPlaces.length} mapped)</span>
         </span>
         <span className="text-[10px] text-slate-400 font-mono">

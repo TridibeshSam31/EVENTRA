@@ -27,6 +27,8 @@ from app.api.routes.discovery_runs import router as discovery_runs_router
 from app.api.routes.conversations import router as conversations_router
 from app.api.routes.reconciliation import router as reconciliation_router
 from app.api.routes.shortlist import router as shortlist_router
+from app.api.routes.quotes import router as quotes_router
+from app.api.routes.guidance import router as guidance_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.notifications import router as notifications_router
 from app.api.routes.negotiations import router as negotiations_router
@@ -170,7 +172,21 @@ async def lifespan(app: FastAPI):
         from app.services.approval_escalation_service import run_approval_sweeper_loop
         sweeper_task = asyncio.create_task(run_approval_sweeper_loop())
 
+    # UX v3 background sweepers (no-reply follow-up, late tasks)
+    extra_tasks = []
+    if settings.ENVIRONMENT != "test":
+        import asyncio
+        if settings.OUTREACH_FOLLOWUP_SWEEPER_ENABLED:
+            from app.services.outreach_followup_sweeper import run_outreach_followup_loop
+            extra_tasks.append(asyncio.create_task(run_outreach_followup_loop()))
+        if settings.LATE_TASK_SWEEPER_ENABLED:
+            from app.services.late_task_sweeper import run_late_task_loop
+            extra_tasks.append(asyncio.create_task(run_late_task_loop()))
+
     yield
+
+    for t in extra_tasks:
+        t.cancel()
 
     if sweeper_task:
         sweeper_task.cancel()
@@ -273,6 +289,10 @@ app.include_router(reconciliation_router)
 # Event Candidate Shortlist
 app.include_router(shortlist_router, prefix=settings.API_V1_STR)
 app.include_router(shortlist_router)
+app.include_router(quotes_router, prefix=settings.API_V1_STR)
+app.include_router(quotes_router)
+app.include_router(guidance_router, prefix=settings.API_V1_STR)
+app.include_router(guidance_router)
 
 # Auth & User Profile Routes
 app.include_router(auth_router, prefix=settings.API_V1_STR)

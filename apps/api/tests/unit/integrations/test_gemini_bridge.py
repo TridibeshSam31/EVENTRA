@@ -113,6 +113,8 @@ class MockGeminiSession:
     """Mock Gemini Live AsyncSession."""
     def __init__(self, responses: Optional[List[MockLiveServerMessage]] = None):
         self.sent_messages: List[Any] = []
+        self.client_content: List[Any] = []
+        self.tool_responses: List[Any] = []
         self.responses: List[MockLiveServerMessage] = list(responses or [])
         self.is_closed = False
         self._receive_queue: asyncio.Queue[Optional[MockLiveServerMessage]] = asyncio.Queue()
@@ -121,6 +123,15 @@ class MockGeminiSession:
 
     async def send(self, input: Any, end_of_turn: bool = False):
         self.sent_messages.append(input)
+
+    async def send_realtime_input(self, *, audio: Any = None, **kwargs: Any):
+        self.sent_messages.append(audio)
+
+    async def send_client_content(self, turns: Any = None, turn_complete: bool = True):
+        self.client_content.append(turns)
+
+    async def send_tool_response(self, function_responses: Any = None):
+        self.tool_responses.append(function_responses)
 
     async def receive(self) -> AsyncIterator[MockLiveServerMessage]:
         while not self.is_closed:
@@ -300,14 +311,15 @@ async def test_exotel_audio_forwarded_to_gemini():
     chunk = b"\x10\x00" * 80  # 80 samples = 160 bytes
     await bridge.on_audio_received(chunk, session)
 
-    # Allow background send task to process queue
-    await asyncio.sleep(0.05)
+    # Wait for the background send task to drain the queue (bounded, not a fixed sleep)
+    for _ in range(100):
+        if mock_gemini.sent_messages:
+            break
+        await asyncio.sleep(0.01)
 
     assert len(mock_gemini.sent_messages) >= 1
-    sent_input = mock_gemini.sent_messages[0]
-    # Verify sent payload contains media chunks
-    assert hasattr(sent_input, "media_chunks")
-    blob = sent_input.media_chunks[0]
+    # Audio is sent with send_realtime_input(audio=Blob)
+    blob = mock_gemini.sent_messages[0]
     assert blob.mime_type == "audio/pcm;rate=16000"
     assert len(blob.data) > len(chunk)  # Resampled from 8k to 16k
 
@@ -672,3 +684,54 @@ async def test_end_to_end_gateway_and_gemini_bridge():
 
     # Verify gateway cleanly closed sessions
     assert gateway.get_active_sessions_count() == 0
+
+
+def test_bridge_uses_methods_the_installed_genai_sdk_provides():
+    """The fakes above cannot catch SDK API drift, so check the real AsyncSession signatures."""
+    import inspect
+    from google.genai import live
+
+    realtime = inspect.signature(live.AsyncSession.send_realtime_input).parameters
+    assert "audio" in realtime and realtime["audio"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert "turn_complete" in inspect.signature(live.AsyncSession.send_client_content).parameters
+    assert "function_responses" in inspect.signature(live.AsyncSession.send_tool_response).parameters
+
+
+class _TurnByTurnSession(MockGeminiSession):
+    """Like the real SDK: each receive() call yields one model turn, then returns."""
+
+    def __init__(self, turns):
+        super().__init__()
+        self._turns = list(turns)
+
+    async def receive(self):
+        if not self._turns:
+            await asyncio.sleep(0.05)
+            return
+        for msg in self._turns.pop(0):
+            yield msg
+
+
+@pytest.mark.asyncio
+async def test_bridge_keeps_listening_after_the_first_turn():
+    """Regression: the bridge used to stop after the agent's first turn, so the vendor was never heard."""
+    ws = MockWebSocket()
+    session = ExotelVoiceSession(websocket=ws)
+    session.stream_sid = "stream_multi_turn"
+    turns = [
+        [MockLiveServerMessage(server_content=MockServerContent(
+            output_transcription=MockTranscription("Hello, I am an AI assistant."), turn_complete=True))],
+        [MockLiveServerMessage(server_content=MockServerContent(
+            input_transcription=MockTranscription("Yes, I am available."))),
+         MockLiveServerMessage(server_content=MockServerContent(
+            output_transcription=MockTranscription("Thank you, noted."), turn_complete=True))],
+    ]
+    bridge = GeminiLiveBridge(session=session, client_factory=lambda: MockLiveClient(_TurnByTurnSession(turns)))
+    await bridge.on_session_started(session)
+    await asyncio.sleep(0.3)
+
+    texts = [(e.speaker, e.text) for e in bridge.get_transcript()]
+    assert (TranscriptSpeaker.VENDOR, "Yes, I am available.") in texts
+    assert (TranscriptSpeaker.AGENT, "Thank you, noted.") in texts
+    assert bridge.turn_count == 2
+    await bridge.on_session_stopped(session)

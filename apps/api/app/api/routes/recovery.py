@@ -70,6 +70,8 @@ def execute_incident_recovery(
         action_execution_id=execution.id,
         current_user_id=current_user_id,
     )
+    from app.services.live_events import publish
+    publish(event_id, "recovery.executed", recovery_option_id=recovery_option_id)
     background_tasks.add_task(
         trigger_agent_run,
         event_id=event_id,

@@ -113,6 +113,10 @@ class Settings(BaseSettings):
     # Gemini Live Voice Configuration (Task 3 & 4)
     GEMINI_LIVE_MODEL: str = "gemini-3.8-live"
     GEMINI_LIVE_VOICE: str = "Aoede"
+    # Hard cap on an AI vendor call; the call is hung up when it is reached.
+    VOICE_MAX_CALL_SECONDS: int = 300
+    # Seconds of agent silence after the vendor stops speaking before the model is prompted to reply.
+    VOICE_SILENCE_NUDGE_SECONDS: float = 4.0
 
     # Speech-to-text configuration
     STT_PROVIDER: str = "gemini"  # "gemini", "whisper"
@@ -154,6 +158,24 @@ class Settings(BaseSettings):
     APPROVAL_VOICE_ESCALATION_ENABLED: bool = False
     APPROVAL_EXPIRY_SWEEPER_ENABLED: bool = True
     APPROVAL_EXPIRY_INTERVAL_SECONDS: int = 60
+    # ── UX v3 (docs/contracts/ux-v3-api.md) ──────────────────────
+    # Approval time-to-live by impact level; capped at event start.
+    APPROVAL_TTL_HOURS_MINOR: int = 72
+    APPROVAL_TTL_HOURS_MAJOR: int = 24
+    APPROVAL_TTL_HOURS_CRITICAL: int = 4
+    # Outreach with no inbound reply after this many hours is flagged no_reply.
+    OUTREACH_NO_REPLY_HOURS: float = 6.0
+    # Automatically re-send one follow-up when no reply (off by default: never message vendors silently).
+    OUTREACH_AUTO_FOLLOW_UP: bool = False
+    OUTREACH_FOLLOWUP_SWEEPER_ENABLED: bool = True
+    OUTREACH_FOLLOWUP_INTERVAL_SECONDS: int = 300
+    # Negotiation stops and hands back to the organizer after this many rounds.
+    NEGOTIATION_MAX_ROUNDS: int = 4
+    # A live task later than this (minutes) with an assigned vendor raises a DELAY incident once.
+    LATE_TASK_INCIDENT_MINUTES: int = 30
+    LATE_TASK_SWEEPER_ENABLED: bool = True
+    LATE_TASK_SWEEPER_INTERVAL_SECONDS: int = 120
+
     # Browser Runtime Configuration (Phase 1)
     BROWSER_RUNTIME_URL: str = "http://localhost:9223"
     BROWSER_VIEWER_URL: str = "http://localhost:6080"

@@ -417,7 +417,9 @@ export function VoiceIntakePanel({
         accepted_suggestions: acceptedSuggestions,
         detected_language: detectedLanguage,
         original_transcript: transcript,
-        explicit_defaults_accepted: true,
+        // Only consent to platform defaults when the organizer ticked the box. The backend
+        // requires this flag only if fields are still missing, and rejects otherwise.
+        explicit_defaults_accepted: forceProceedDefaults,
         idempotency_key: `voice_confirm_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
       };
 
@@ -480,88 +482,82 @@ export function VoiceIntakePanel({
   return (
     <div
       id="voice-intake-panel"
-      className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 sm:p-10 space-y-8 animate-in fade-in duration-200"
+      className="surface animate-rise-in space-y-8 overflow-hidden rounded-2xl p-6 sm:p-10"
     >
       {/* Header Area */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-5 gap-3">
+      <div className="flex flex-col justify-between gap-4 border-b border-ink-200 pb-5 sm:flex-row sm:items-center">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-200 flex items-center gap-1.5">
-              <Mic className="w-3 h-3 text-[#D6003C]" /> Voice Mode Active
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="chip border-cue-200 bg-cue-50 text-cue-700">
+              <Mic className="h-3 w-3" /> Voice mode
             </span>
-            <span className="text-[10px] text-slate-500 font-medium flex items-center gap-1">
-              <Shield className="w-3 h-3 text-emerald-600" /> Audio is not saved
+            <span className="flex items-center gap-1 text-[11.5px] font-medium text-ink-500">
+              <Shield className="h-3 w-3 text-go-600" /> Audio is not saved
             </span>
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight mt-1">
-            Multilingual Voice Intake
+          <h2
+            className="mt-2 font-display text-[26px] font-extrabold leading-[1.02] tracking-[-0.025em] text-ink-900 sm:text-[30px]"
+            style={{ fontStretch: "86%" }}
+          >
+            Tell me about your event
           </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Speak in any language (English, Hindi, Hinglish, Tamil, etc.). AI transcribes, verifies facts, and requests your explicit approval.
+          <p className="mt-1 max-w-[60ch] text-[13px] text-ink-500">
+            Speak in any language — English, Hindi, Hinglish, Tamil and more. I&apos;ll transcribe it, check every detail
+            against what you said, and ask before creating anything.
           </p>
         </div>
 
-        <button
-          id="btn-type-instead"
-          type="button"
-          onClick={onCancel}
-          className="self-start sm:self-center inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
-        >
-          <FileText className="w-3.5 h-3.5" /> Type instead
+        <button id="btn-type-instead" type="button" onClick={onCancel} className="btn-secondary self-start sm:self-center">
+          <FileText className="h-3.5 w-3.5" /> Type instead
         </button>
       </div>
 
       {/* Error Banner */}
       {errorMessage && (
-        <div className="p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start gap-2.5">
-          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+        <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-cue-200 bg-cue-50 p-4 text-[12.5px] text-cue-800">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-cue-600" />
           <div className="flex-1">
-            <span className="font-semibold block">Attention Required</span>
+            <span className="block font-semibold">Something needs your attention</span>
             <span>{errorMessage}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setErrorMessage("")}
-            className="text-rose-500 hover:text-rose-700 p-1"
-          >
-            <X className="w-3.5 h-3.5" />
+          <button type="button" onClick={() => setErrorMessage("")} className="p-1 text-cue-500 hover:text-cue-700" aria-label="Dismiss">
+            <X className="h-3.5 w-3.5" />
           </button>
         </div>
       )}
 
       {/* STATE 1: IDLE */}
       {state === "idle" && (
-        <div className="py-8 px-4 text-center space-y-6">
-          <div className="w-20 h-20 rounded-full bg-rose-50 border-2 border-rose-100 flex items-center justify-center mx-auto text-[#D6003C] shadow-sm">
-            <Mic className="w-10 h-10 animate-pulse" />
-          </div>
+        <div className="space-y-8 px-2 py-6 text-center">
+          <button
+            type="button"
+            onClick={startRecording}
+            aria-label="Start speaking"
+            className="group relative mx-auto grid h-36 w-36 place-items-center rounded-full"
+          >
+            <span className="absolute inset-0 rounded-full border border-cue-200 transition group-hover:scale-105" />
+            <span className="absolute inset-3 rounded-full border border-cue-300/70 transition group-hover:scale-105" />
+            <span className="absolute inset-6 rounded-full bg-cue-600 shadow-[0_18px_40px_-12px_rgba(214,0,60,0.6),inset_0_1px_0_rgba(255,255,255,0.25)] transition group-hover:scale-105 group-active:scale-95" />
+            <Mic className="relative h-10 w-10 text-white" />
+          </button>
 
-          <div className="max-w-md mx-auto space-y-2">
-            <h3 className="text-base font-semibold text-slate-900">
-              Tap to describe your event
-            </h3>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Tell us the event type, city, expected guests, dates, and budget. You can speak naturally in Hindi, English, or mixed Hinglish:
+          <div className="mx-auto max-w-md space-y-3">
+            <h3 className="text-[16px] font-semibold text-ink-900">Tap the mic and describe your event</h3>
+            <p className="text-[13px] leading-relaxed text-ink-500">
+              Mention the event type, city, number of guests, dates and budget. Speak naturally — for example:
             </p>
-            <div className="text-[11px] font-mono text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-200/80 italic">
-              &quot;Humein Delhi me ek wedding plan karni hai 15 November ko 500 logo ke liye, budget 25 lakh rupees hai.&quot;
-            </div>
+            <figure className="rounded-xl border border-dashed border-ink-300 bg-paper px-4 py-3 text-left">
+              <blockquote className="text-[13px] italic leading-relaxed text-ink-700">
+                &quot;Humein Delhi me ek wedding plan karni hai 15 November ko 500 logo ke liye, budget 25 lakh rupees hai.&quot;
+              </blockquote>
+            </figure>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
-            <button
-              id="btn-start-recording"
-              type="button"
-              onClick={startRecording}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl bg-[#D6003C] hover:bg-[#b50033] text-white text-sm font-semibold shadow-sm transition transform active:scale-98"
-            >
-              <Mic className="w-4 h-4" /> Start Speaking
+          <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <button id="btn-start-recording" type="button" onClick={startRecording} className="btn-cue h-11 w-full px-7 text-[14px] sm:w-auto">
+              <Mic className="h-4 w-4" /> Start Speaking
             </button>
-            <button
-              type="button"
-              onClick={onCancel}
-              className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
-            >
+            <button type="button" onClick={onCancel} className="btn-ghost h-11 w-full sm:w-auto">
               Use Manual Form Instead
             </button>
           </div>
@@ -570,66 +566,53 @@ export function VoiceIntakePanel({
 
       {/* STATE 2: REQUESTING PERMISSION */}
       {state === "requesting_permission" && (
-        <div className="py-12 text-center space-y-4">
-          <Loader2 className="w-8 h-8 text-[#D6003C] animate-spin mx-auto" />
-          <p className="text-sm font-medium text-slate-700">
-            Requesting microphone access…
-          </p>
-          <p className="text-xs text-slate-400">
-            Please approve the microphone prompt in your browser.
-          </p>
+        <div className="space-y-3 py-14 text-center">
+          <Loader2 className="mx-auto h-8 w-8 animate-spin text-cue-600" />
+          <p className="text-[14px] font-semibold text-ink-800">Requesting microphone access…</p>
+          <p className="text-[12.5px] text-ink-500">Please approve the microphone prompt in your browser.</p>
         </div>
       )}
 
       {/* STATE 3: RECORDING */}
       {state === "recording" && (
-        <div className="py-8 px-4 text-center space-y-6">
-          <div className="relative w-24 h-24 rounded-full bg-rose-50 border-2 border-rose-200 flex items-center justify-center mx-auto text-[#D6003C]">
-            <div
-              className="absolute inset-0 rounded-full bg-rose-400 opacity-20 animate-ping"
-              style={{ animationDuration: "1.5s" }}
+        <div className="space-y-7 px-2 py-6 text-center">
+          <div className="relative mx-auto grid h-36 w-36 place-items-center">
+            <span
+              className="absolute inset-0 rounded-full bg-cue-500/20 transition-transform duration-100"
+              style={{ transform: `scale(${1 + Math.min(audioLevel, 60) / 160})` }}
             />
-            <Mic className="w-10 h-10 relative z-10" />
+            <span className="absolute inset-3 animate-ping rounded-full bg-cue-400/20" style={{ animationDuration: "1.6s" }} />
+            <span className="absolute inset-6 rounded-full bg-cue-600 shadow-[0_18px_40px_-12px_rgba(214,0,60,0.7)]" />
+            <Mic className="relative h-10 w-10 text-white" />
           </div>
 
-          <div className="space-y-2">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-100 text-[#D6003C] font-mono text-xs font-bold">
-              <span className="w-2 h-2 rounded-full bg-[#D6003C] animate-pulse" />
-              RECORDING • {formatTime(recordingSeconds)} / 3:00
+          <div className="space-y-3">
+            <div className="inline-flex items-center gap-2 rounded-full bg-ink-900 px-3.5 py-1.5 font-mono text-[12px] font-semibold text-ink-50">
+              <span className="cue-light bg-cue-500 animate-cue-blink" />
+              REC <span className="text-ink-400">·</span> {formatTime(recordingSeconds)} <span className="text-ink-500">/ 3:00</span>
             </div>
-            <p className="text-xs text-slate-500">
-              Speak clearly about your event details. Tap finish when done.
-            </p>
+            <p className="text-[13px] text-ink-500">Speak clearly about your event. Tap stop when you&apos;re done.</p>
 
-            {/* Live Audio Level Waveform Indicator */}
-            <div className="flex items-center justify-center gap-1.5 h-8 pt-2">
-              {[0.4, 0.7, 1.0, 0.8, 0.5, 0.9, 0.6, 0.3].map((factor, idx) => (
+            {/* Live audio level */}
+            <div className="flex h-10 items-center justify-center gap-1 pt-1" aria-hidden>
+              {[0.3, 0.5, 0.75, 1.0, 0.85, 0.6, 0.95, 0.7, 0.45, 0.8, 0.55, 0.35].map((factor, idx) => (
                 <span
                   key={idx}
-                  className="w-1.5 rounded-full bg-[#D6003C] transition-all duration-75"
+                  className="w-1.5 rounded-full bg-cue-600 transition-all duration-75"
                   style={{
-                    height: `${Math.max(6, Math.min(32, audioLevel * factor))}px`,
-                    opacity: audioLevel > 10 ? 1 : 0.4,
+                    height: `${Math.max(6, Math.min(40, audioLevel * factor))}px`,
+                    opacity: audioLevel > 10 ? 1 : 0.35,
                   }}
                 />
               ))}
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-4">
-            <button
-              id="btn-stop-recording"
-              type="button"
-              onClick={stopRecording}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-3.5 rounded-xl bg-[#D6003C] hover:bg-[#b50033] text-white text-sm font-semibold shadow-sm transition transform active:scale-98"
-            >
-              <Square className="w-4 h-4 fill-white" /> Stop & Transcribe
+          <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+            <button id="btn-stop-recording" type="button" onClick={stopRecording} className="btn-primary h-11 w-full px-7 text-[14px] sm:w-auto">
+              <Square className="h-3.5 w-3.5 fill-current" /> Stop & Transcribe
             </button>
-            <button
-              type="button"
-              onClick={cancelRecording}
-              className="w-full sm:w-auto px-5 py-3 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
-            >
+            <button type="button" onClick={cancelRecording} className="btn-ghost h-11 w-full sm:w-auto">
               Cancel
             </button>
           </div>
@@ -638,18 +621,22 @@ export function VoiceIntakePanel({
 
       {/* STATE 4: UPLOADING & TRANSCRIBING */}
       {(state === "uploading" || state === "transcribing") && (
-        <div className="py-12 text-center space-y-4">
-          <div className="w-16 h-16 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center mx-auto text-slate-700">
-            <Loader2 className="w-7 h-7 text-[#D6003C] animate-spin" />
+        <div className="space-y-4 py-12 text-center">
+          <div className="mx-auto flex h-10 items-end justify-center gap-1" aria-hidden>
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+              <span
+                key={i}
+                className="w-1.5 animate-pulse rounded-full bg-cue-600"
+                style={{ height: `${10 + ((i * 7) % 26)}px`, animationDelay: `${i * 110}ms` }}
+              />
+            ))}
           </div>
           <div className="space-y-1">
-            <h3 className="text-sm font-semibold text-slate-900">
-              {state === "uploading"
-                ? "Processing speech audio…"
-                : "Multilingual transcription in progress…"}
+            <h3 className="text-[14px] font-semibold text-ink-900">
+              {state === "uploading" ? "Processing your recording…" : "Transcribing what you said…"}
             </h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              Analyzing spoken phonetics across English, Hindi, and regional dialects. Audio is processed transiently and never saved.
+            <p className="mx-auto max-w-sm text-[12.5px] text-ink-500">
+              Works across English, Hindi and regional languages. Audio is processed transiently and never saved.
             </p>
           </div>
         </div>
@@ -657,38 +644,28 @@ export function VoiceIntakePanel({
 
       {/* STATE 5: TRANSCRIPT REVIEW (Fix mishearings before extraction) */}
       {state === "transcript_review" && (
-        <div className="space-y-6 animate-in fade-in duration-200">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+        <div className="animate-rise-in space-y-6">
+          <div className="flex flex-col justify-between gap-2 border-b border-ink-200 pb-3 sm:flex-row sm:items-center">
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                Step 1: Verify Transcript
-              </span>
-              <h3 className="text-base font-bold text-slate-900">
-                Review what we heard
-              </h3>
-              <p className="text-xs text-slate-500">
-                Check for any mishearings or typos below. You can edit the text or speak more before extracting details.
+              <span className="eyebrow">Step 1 · Check the transcript</span>
+              <h3 className="mt-1 text-[16px] font-semibold text-ink-900">Here&apos;s what I heard</h3>
+              <p className="text-[12.5px] text-ink-500">
+                Fix any mishearings below. You can edit the text or add more by speaking again.
               </p>
             </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
-                Lang: {detectedLanguage}
-              </span>
-            </div>
+            <span className="chip self-start border-ink-200 bg-ink-100 font-mono text-ink-700 sm:self-auto">
+              Lang: {detectedLanguage}
+            </span>
           </div>
 
-          {/* Transcript Tabs */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="inline-flex rounded-lg border border-ink-200 bg-ink-100/70 p-0.5">
                 <button
                   type="button"
                   onClick={() => setActiveTab("original")}
-                  className={`text-xs font-semibold px-3 py-1 rounded-md transition ${
-                    activeTab === "original"
-                      ? "bg-slate-900 text-white"
-                      : "text-slate-600 hover:bg-slate-100"
+                  className={`rounded-md px-3 py-1.5 text-[12px] font-semibold transition ${
+                    activeTab === "original" ? "bg-[#FDFCFA] text-ink-900 shadow-sm" : "text-ink-500 hover:text-ink-800"
                   }`}
                 >
                   Original Speech ({detectedLanguage})
@@ -697,69 +674,56 @@ export function VoiceIntakePanel({
                   <button
                     type="button"
                     onClick={() => setActiveTab("english")}
-                    className={`text-xs font-semibold px-3 py-1 rounded-md transition ${
-                      activeTab === "english"
-                        ? "bg-slate-900 text-white"
-                        : "text-slate-600 hover:bg-slate-100"
+                    className={`rounded-md px-3 py-1.5 text-[12px] font-semibold transition ${
+                      activeTab === "english" ? "bg-[#FDFCFA] text-ink-900 shadow-sm" : "text-ink-500 hover:text-ink-800"
                     }`}
                   >
                     English Translation
                   </button>
                 )}
               </div>
-              <span className="text-[10px] text-slate-400">Editable</span>
+              <span className="font-mono text-[10.5px] uppercase tracking-label text-ink-400">Editable</span>
             </div>
 
             {activeTab === "original" ? (
               <textarea
                 id="transcript-box"
-                rows={4}
+                rows={5}
                 value={transcript}
                 onChange={(e) => setTranscript(e.target.value)}
-                className="w-full p-3.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 leading-relaxed font-sans"
+                className="w-full rounded-xl border border-ink-200 bg-paper p-4 text-[14px] leading-relaxed text-ink-900 shadow-inner outline-none focus:border-ink-400 focus:bg-[#FDFCFA] focus:ring-2 focus:ring-cue-600/15"
                 placeholder="Spoken transcript will appear here…"
               />
             ) : (
               <textarea
                 id="english-transcript-box"
-                rows={4}
+                rows={5}
                 value={englishText}
                 onChange={(e) => setEnglishText(e.target.value)}
-                className="w-full p-3.5 rounded-xl border border-slate-200 bg-slate-50 text-xs text-slate-900 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 leading-relaxed font-sans"
+                className="w-full rounded-xl border border-ink-200 bg-paper p-4 text-[14px] leading-relaxed text-ink-900 shadow-inner outline-none focus:border-ink-400 focus:bg-[#FDFCFA] focus:ring-2 focus:ring-cue-600/15"
                 placeholder="English rendering…"
               />
             )}
           </div>
 
-          {/* Action buttons */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-            <button
-              id="btn-add-more-voice"
-              type="button"
-              onClick={startRecording}
-              className="w-full sm:w-auto inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
-            >
-              <Mic className="w-3.5 h-3.5 text-[#D6003C]" /> Add more voice
+          <div className="flex flex-col items-center justify-between gap-3 pt-1 sm:flex-row">
+            <button id="btn-add-more-voice" type="button" onClick={startRecording} className="btn-secondary w-full sm:w-auto">
+              <Mic className="h-3.5 w-3.5 text-cue-600" /> Add more voice
             </button>
 
-            <div className="flex items-center gap-2 w-full sm:w-auto">
-              <button
-                type="button"
-                onClick={onCancel}
-                className="w-full sm:w-auto px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition"
-              >
+            <div className="flex w-full items-center gap-2 sm:w-auto">
+              <button type="button" onClick={onCancel} className="btn-ghost w-full sm:w-auto">
                 Type instead
               </button>
-
               <button
                 id="btn-analyze-details"
                 type="button"
                 onClick={() => handleExtractPreview()}
                 disabled={!transcript.trim()}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs transition disabled:opacity-50"
+                className="btn-primary w-full sm:w-auto"
               >
-                <span>Analyze & Verify</span>
-                <Sparkles className="w-3.5 h-3.5" />
+                Analyze & Verify
+                <Sparkles className="h-3.5 w-3.5" />
               </button>
             </div>
           </div>
@@ -768,16 +732,14 @@ export function VoiceIntakePanel({
 
       {/* STATE 6: EXTRACTING PREVIEW */}
       {state === "extracting" && (
-        <div className="py-12 text-center space-y-4">
-          <div className="w-16 h-16 rounded-full bg-violet-50 border border-violet-100 flex items-center justify-center mx-auto text-violet-600">
-            <Sparkles className="w-7 h-7 animate-spin" />
+        <div className="space-y-4 py-12 text-center">
+          <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-agent-50 text-[22px] text-agent-600 ring-1 ring-agent-200">
+            <span className="animate-pulse">✦</span>
           </div>
           <div className="space-y-1">
-            <h3 className="text-sm font-semibold text-slate-900">
-              Extracting structured event specifications…
-            </h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              Mapping facts to evidence quotes, checking provenance, and evaluating operational gaps without persisting any changes.
+            <h3 className="text-[14px] font-semibold text-ink-900">Pulling out the event details…</h3>
+            <p className="mx-auto max-w-sm text-[12.5px] text-ink-500">
+              Matching every detail to the words you used and flagging anything missing. Nothing is saved yet.
             </p>
           </div>
         </div>
@@ -789,7 +751,7 @@ export function VoiceIntakePanel({
           {/* Review Header */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-2">
             <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+              <span className="chip border-go-200 bg-go-50 text-go-700">
                 Step 2: Verification Preview
               </span>
               <h3 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight mt-1">
@@ -819,7 +781,7 @@ export function VoiceIntakePanel({
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <span className="text-xs font-bold text-amber-900">
-                    Missing Information Required for Execution Plan
+                    A few details are still missing
                   </span>
                   <p className="text-[11px] text-amber-800 leading-relaxed">
                     The following attributes were not mentioned in your speech:{" "}
@@ -831,7 +793,7 @@ export function VoiceIntakePanel({
               {/* Clarifying Questions */}
               {preview.clarifying_questions.length > 0 && (
                 <div className="bg-white/80 p-3 rounded-lg border border-amber-200/60 space-y-2">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
+                  <span className="font-mono text-[10.5px] font-medium uppercase tracking-label text-ink-500 block">
                     Clarifying Questions:
                   </span>
                   <ul className="text-xs text-slate-700 space-y-1 list-disc list-inside">
@@ -850,7 +812,7 @@ export function VoiceIntakePanel({
                         if (e.key === "Enter") handleClarifyingAnswerSubmit();
                       }}
                       placeholder="Type quick answer (e.g. Budget 10 lakh in Gurgaon)…"
-                      className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                      className="flex-1 bg-paper border border-ink-200 rounded-lg shadow-inner px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:ring-2 focus:ring-cue-600/15 focus:border-ink-400"
                     />
                     <button
                       type="button"
@@ -898,15 +860,15 @@ export function VoiceIntakePanel({
           {/* Extracted Fields Grid */}
           <div className="space-y-4">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Verified Event Attributes
+              What I understood
             </h4>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* 1. Operation Name */}
-              <div className="sm:col-span-2 p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+              <div className="sm:col-span-2 p-4 rounded-xl border border-ink-200 bg-[#FDFCFA] shadow-sm space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Operation Designation / Event Name *
+                  <label className="font-mono text-[10.5px] font-medium uppercase tracking-label text-ink-500">
+                    Event name *
                   </label>
                   <ProvenanceBadge
                     source={preview.fields.name?.source || "inferred"}
@@ -922,10 +884,10 @@ export function VoiceIntakePanel({
                     setEditableFields((prev) => ({ ...prev, name: e.target.value }))
                   }
                   placeholder="e.g. Delhi Grand Wedding 2026"
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                  className="w-full bg-paper border border-ink-200 rounded-lg shadow-inner px-3 py-2 text-[14px] font-semibold text-slate-900 focus:outline-none focus:ring-2 focus:ring-cue-600/15 focus:border-ink-400"
                 />
                 {preview.fields.name?.evidence_quote && (
-                  <p className="text-[10px] text-slate-500 italic">
+                  <p className="text-[11px] text-ink-500 border-l-2 border-ink-300 pl-2 italic">
                     &quot;{preview.fields.name.evidence_quote}&quot;
                   </p>
                 )}
@@ -937,10 +899,10 @@ export function VoiceIntakePanel({
               </div>
 
               {/* 2. Event Type */}
-              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+              <div className="p-4 rounded-xl border border-ink-200 bg-[#FDFCFA] shadow-sm space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Event Classification
+                  <label className="font-mono text-[10.5px] font-medium uppercase tracking-label text-ink-500">
+                    Event type
                   </label>
                   <ProvenanceBadge
                     source={preview.fields.event_type?.source || "stated"}
@@ -956,7 +918,7 @@ export function VoiceIntakePanel({
                       event_type: e.target.value,
                     }))
                   }
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                  className="w-full bg-paper border border-ink-200 rounded-lg shadow-inner px-3 py-2 text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-cue-600/15 focus:border-ink-400"
                 >
                   <option value="CONFERENCE">Conference / Summit</option>
                   <option value="WEDDING">Wedding / Social Gala</option>
@@ -966,17 +928,17 @@ export function VoiceIntakePanel({
                   <option value="OTHER">Other / Custom</option>
                 </select>
                 {preview.fields.event_type?.evidence_quote && (
-                  <p className="text-[10px] text-slate-500 italic">
+                  <p className="text-[11px] text-ink-500 border-l-2 border-ink-300 pl-2 italic">
                     &quot;{preview.fields.event_type.evidence_quote}&quot;
                   </p>
                 )}
               </div>
 
               {/* 3. Venue / Location */}
-              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+              <div className="p-4 rounded-xl border border-ink-200 bg-[#FDFCFA] shadow-sm space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Target City / Location
+                  <label className="font-mono text-[10.5px] font-medium uppercase tracking-label text-ink-500">
+                    City / location
                   </label>
                   <ProvenanceBadge
                     source={preview.fields.location?.source || "stated"}
@@ -996,11 +958,11 @@ export function VoiceIntakePanel({
                       }))
                     }
                     placeholder="e.g. Delhi, Mumbai, Bangalore"
-                    className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                    className="w-full pl-8 pr-3 py-2 bg-paper border border-ink-200 rounded-lg shadow-inner text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-cue-600/15 focus:border-ink-400"
                   />
                 </div>
                 {preview.fields.location?.evidence_quote ? (
-                  <p className="text-[10px] text-slate-500 italic">
+                  <p className="text-[11px] text-ink-500 border-l-2 border-ink-300 pl-2 italic">
                     &quot;{preview.fields.location.evidence_quote}&quot;
                   </p>
                 ) : (
@@ -1011,10 +973,10 @@ export function VoiceIntakePanel({
               </div>
 
               {/* 4. Projected Guest Count */}
-              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+              <div className="p-4 rounded-xl border border-ink-200 bg-[#FDFCFA] shadow-sm space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Projected Guests
+                  <label className="font-mono text-[10.5px] font-medium uppercase tracking-label text-ink-500">
+                    Guests
                   </label>
                   <ProvenanceBadge
                     source={preview.fields.guest_count?.source || "stated"}
@@ -1034,11 +996,11 @@ export function VoiceIntakePanel({
                       }))
                     }
                     placeholder="e.g. 500"
-                    className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400 font-mono"
+                    className="w-full pl-8 pr-3 py-2 bg-paper border border-ink-200 rounded-lg shadow-inner text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-cue-600/15 focus:border-ink-400 font-mono"
                   />
                 </div>
                 {preview.fields.guest_count?.evidence_quote ? (
-                  <p className="text-[10px] text-slate-500 italic">
+                  <p className="text-[11px] text-ink-500 border-l-2 border-ink-300 pl-2 italic">
                     &quot;{preview.fields.guest_count.evidence_quote}&quot;
                   </p>
                 ) : (
@@ -1049,10 +1011,10 @@ export function VoiceIntakePanel({
               </div>
 
               {/* 5. Date / Timing */}
-              <div className="p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+              <div className="p-4 rounded-xl border border-ink-200 bg-[#FDFCFA] shadow-sm space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Date / Timing
+                  <label className="font-mono text-[10.5px] font-medium uppercase tracking-label text-ink-500">
+                    Date
                   </label>
                   <ProvenanceBadge
                     source={preview.fields.date_expression?.source || "stated"}
@@ -1072,21 +1034,21 @@ export function VoiceIntakePanel({
                       }))
                     }
                     placeholder="e.g. 15 November 2026 or Next Month"
-                    className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                    className="w-full pl-8 pr-3 py-2 bg-paper border border-ink-200 rounded-lg shadow-inner text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-cue-600/15 focus:border-ink-400"
                   />
                 </div>
                 {preview.fields.date_expression?.evidence_quote && (
-                  <p className="text-[10px] text-slate-500 italic">
+                  <p className="text-[11px] text-ink-500 border-l-2 border-ink-300 pl-2 italic">
                     &quot;{preview.fields.date_expression.evidence_quote}&quot;
                   </p>
                 )}
               </div>
 
               {/* 6. Budget & Currency */}
-              <div className="sm:col-span-2 p-3.5 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
+              <div className="sm:col-span-2 p-4 rounded-xl border border-ink-200 bg-[#FDFCFA] shadow-sm space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Total Allocated Budget & Currency
+                  <label className="font-mono text-[10.5px] font-medium uppercase tracking-label text-ink-500">
+                    Budget & currency
                   </label>
                   <ProvenanceBadge
                     source={preview.fields.total_budget?.source || "stated"}
@@ -1107,7 +1069,7 @@ export function VoiceIntakePanel({
                         }))
                       }
                       placeholder="e.g. 2500000"
-                      className="w-full pl-8 pr-3 py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400 font-mono"
+                      className="w-full pl-8 pr-3 py-2 bg-paper border border-ink-200 rounded-lg shadow-inner text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-cue-600/15 focus:border-ink-400 font-mono"
                     />
                   </div>
                   <select
@@ -1119,7 +1081,7 @@ export function VoiceIntakePanel({
                         currency: e.target.value,
                       }))
                     }
-                    className="bg-white border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono font-medium text-slate-900 focus:outline-none focus:ring-1 focus:ring-slate-400"
+                    className="bg-paper border border-ink-200 rounded-lg shadow-inner px-3 py-2 text-xs font-mono font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-cue-600/15 focus:border-ink-400"
                   >
                     <option value="INR">INR (₹)</option>
                     <option value="USD">USD ($)</option>
@@ -1128,7 +1090,7 @@ export function VoiceIntakePanel({
                   </select>
                 </div>
                 {preview.fields.total_budget?.evidence_quote ? (
-                  <p className="text-[10px] text-slate-500 italic">
+                  <p className="text-[11px] text-ink-500 border-l-2 border-ink-300 pl-2 italic">
                     &quot;{preview.fields.total_budget.evidence_quote}&quot;
                   </p>
                 ) : (
@@ -1145,7 +1107,7 @@ export function VoiceIntakePanel({
             <div className="p-4 sm:p-5 rounded-xl border border-violet-200 bg-violet-50/40 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-violet-950 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-violet-600" /> Suggested Additions by AI (Not from you)
+                  <Sparkles className="w-3.5 h-3.5 text-violet-600" /> Suggestions from the agent (not from you)
                 </span>
                 <span className="text-[10px] text-violet-700 font-medium">
                   Default: Not included until checked
@@ -1197,7 +1159,7 @@ export function VoiceIntakePanel({
           )}
 
           {/* Action Footer: Two explicit ways to finish */}
-          <div className="pt-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="pt-5 border-t border-ink-200 flex flex-col sm:flex-row items-center justify-between gap-3">
             <button
               id="btn-fill-form-instead"
               type="button"
@@ -1221,12 +1183,12 @@ export function VoiceIntakePanel({
                 type="button"
                 onClick={handleApproveAndContinue}
                 disabled={isConfirming || isNameMissing || hasCriticalMissing}
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-[#D6003C] hover:bg-[#b50033] text-white text-xs font-semibold shadow-xs transition disabled:opacity-40 disabled:cursor-not-allowed"
+                className="btn-cue h-10 w-full px-6 sm:w-auto disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {isConfirming ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Materializing Plan…</span>
+                    <span>Creating your event…</span>
                   </>
                 ) : (
                   <>
@@ -1248,7 +1210,7 @@ export function VoiceIntakePanel({
           </div>
           <div className="space-y-1 max-w-md mx-auto">
             <h3 className="text-sm font-semibold text-slate-900">
-              Voice Processing Interrupted
+              Voice processing stopped
             </h3>
             <p className="text-xs text-slate-500">
               {errorMessage || "An unexpected error occurred while processing voice input."}
@@ -1258,7 +1220,7 @@ export function VoiceIntakePanel({
             <button
               type="button"
               onClick={startRecording}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#D6003C] text-white text-xs font-semibold hover:bg-[#b50033] transition"
+              className="btn-cue"
             >
               <RotateCcw className="w-3.5 h-3.5" /> Try Again
             </button>

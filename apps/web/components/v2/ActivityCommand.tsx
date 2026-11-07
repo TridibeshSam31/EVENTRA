@@ -24,6 +24,8 @@ import { AgentToolExecution } from "./AgentToolExecution";
 import { EngineStatusCard } from "./EngineStatusCard";
 import type { ActivityLogItem } from "@/types/activityLog";
 import { useEventWorkspace } from "@/hooks/useEventWorkspace";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
+import { PageHeader } from "@/components/ds";
 
 interface ActivityCommandProps {
   eventId: string;
@@ -71,17 +73,23 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
 
   useEffect(() => {
     fetchActivity();
-    if (sseConnected) return; // SSE delivers live activity to workspace
-
-    // Guarded polling every 8s only when window/tab is visible
+    // The live stream only signals changes (handled via liveVersion below), it doesn't deliver
+    // this feed — so keep a slower safety poll while connected instead of freezing.
     const interval = setInterval(() => {
       if (typeof document !== "undefined" && document.visibilityState === "visible") {
         fetchActivity(true);
       }
-    }, 8000);
+    }, sseConnected ? 30000 : 8000);
 
     return () => clearInterval(interval);
   }, [fetchActivity, sseConnected]);
+
+  const liveVersion = useWorkspaceStore((s) => (s.eventId === eventId ? s.liveVersion : 0));
+  useEffect(() => {
+    if (!liveVersion) return;
+    const t = setTimeout(() => fetchActivity(true), 400);
+    return () => clearTimeout(t);
+  }, [liveVersion, fetchActivity]);
 
   // Categories present in backend
   const categories = [
@@ -165,41 +173,48 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        eyebrow="Activity"
+        title="What EVENTRA and your team did"
+        description="A live log of agent work, engine checks and people's actions. Open any entry to see its evidence."
+      />
+
       {/* Top Banner / Operational Trace Section */}
       <OperationalTrace eventId={eventId} />
 
       {/* View Mode Switcher */}
-      <div className="flex flex-wrap items-center gap-1.5 p-1 bg-white border border-slate-200 rounded-xl shadow-xs text-xs font-medium w-max">
+      <div role="tablist" className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-lg border border-ink-200 bg-ink-100/70 p-0.5 text-[12.5px]">
         <button
           onClick={() => setActiveViewTab("STREAM")}
-          className={`px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition-all ${
             activeViewTab === "STREAM"
-              ? "bg-slate-900 text-white shadow-xs font-semibold"
-              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+              ? "bg-[#FDFCFA] text-ink-900 shadow-sm"
+              : "text-ink-500 hover:text-ink-800"
           }`}
         >
           <Activity className="w-3.5 h-3.5" />
-          <span>Operational Stream ({items.length})</span>
+          <span>Stream</span>
+          <span className="font-mono text-[10.5px] text-ink-400">{items.length}</span>
         </button>
         <button
           onClick={() => setActiveViewTab("TOOLS")}
-          className={`px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition-all ${
             activeViewTab === "TOOLS"
-              ? "bg-slate-900 text-white shadow-xs font-semibold"
-              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+              ? "bg-[#FDFCFA] text-ink-900 shadow-sm"
+              : "text-ink-500 hover:text-ink-800"
           }`}
         >
-          <span>Agent Tools & Registry</span>
+          <span>Agent tools</span>
         </button>
         <button
           onClick={() => setActiveViewTab("ENGINES")}
-          className={`px-3.5 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+          className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 font-semibold transition-all ${
             activeViewTab === "ENGINES"
-              ? "bg-slate-900 text-white shadow-xs font-semibold"
-              : "text-slate-600 hover:text-slate-900 hover:bg-slate-100"
+              ? "bg-[#FDFCFA] text-ink-900 shadow-sm"
+              : "text-ink-500 hover:text-ink-800"
           }`}
         >
-          <span>Deterministic Engines</span>
+          <span>Engines</span>
         </button>
       </div>
 
@@ -216,11 +231,11 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Column: Filter Panel (Desktop: 3 cols) */}
           <div className="lg:col-span-3 space-y-4">
-          <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-4">
+          <div className="surface p-4 space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200">
               <div className="flex items-center gap-2">
                 <Filter className="w-4 h-4 text-slate-500" />
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-800">
+                <h3 className="eyebrow text-ink-700">
                   Activity Filters
                 </h3>
               </div>
@@ -231,7 +246,7 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
 
             {/* Category Filter */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <label className="eyebrow">
                 Category
               </label>
               <div className="space-y-1">
@@ -265,7 +280,7 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
 
             {/* Actor Filter */}
             <div className="space-y-1.5 pt-3 border-t border-slate-100">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              <label className="eyebrow">
                 Actor Attribution
               </label>
               <div className="space-y-1">
@@ -297,7 +312,7 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
         {/* Center / Main Column: Activity Stream (Desktop: 9 cols) */}
         <div className="lg:col-span-9 space-y-4">
           {/* Controls Bar */}
-          <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="surface p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="relative flex-1">
               <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -322,7 +337,7 @@ export function ActivityCommand({ eventId }: ActivityCommandProps) {
           </div>
 
           {/* Activity Feed Container */}
-          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+          <div className="surface overflow-hidden">
             {loading ? (
               <div className="py-16 text-center text-xs text-slate-400">
                 Loading authoritative operational stream...

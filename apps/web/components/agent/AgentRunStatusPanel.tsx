@@ -23,7 +23,7 @@ const LIFECYCLE_LABEL: Record<RunLifecycle, string> = {
   idle: "No agent run",
   running: "Agent running",
   cancelling: "Cancelling…",
-  awaiting_selection: "Awaiting your selection",
+  awaiting_selection: "Agent paused for your picks",
   awaiting_approval: "Approval required",
   completed: "Run completed",
   failed: "Run failed",
@@ -32,15 +32,15 @@ const LIFECYCLE_LABEL: Record<RunLifecycle, string> = {
 };
 
 const LIFECYCLE_TONE: Record<RunLifecycle, string> = {
-  idle: "bg-slate-50 text-slate-600 border-slate-200",
-  running: "bg-blue-50 text-blue-700 border-blue-200",
-  cancelling: "bg-slate-100 text-slate-700 border-slate-300",
-  awaiting_selection: "bg-amber-50 text-amber-800 border-amber-200",
-  awaiting_approval: "bg-amber-50 text-amber-800 border-amber-200",
-  completed: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  failed: "bg-rose-50 text-rose-700 border-rose-200",
-  cancelled: "bg-slate-100 text-slate-700 border-slate-300",
-  paused: "bg-slate-100 text-slate-700 border-slate-300",
+  idle: "bg-ink-100/70 text-ink-600 border-ink-200",
+  running: "bg-agent-50 text-agent-700 border-agent-200",
+  cancelling: "bg-ink-100 text-ink-700 border-ink-300",
+  awaiting_selection: "bg-ink-100 text-ink-700 border-ink-200",
+  awaiting_approval: "bg-standby-50 text-standby-800 border-standby-200",
+  completed: "bg-go-50 text-go-700 border-go-200",
+  failed: "bg-cue-50 text-cue-700 border-cue-200",
+  cancelled: "bg-ink-100 text-ink-700 border-ink-300",
+  paused: "bg-ink-100 text-ink-700 border-ink-300",
 };
 
 function LifecycleIcon({ lifecycle }: { lifecycle: RunLifecycle }) {
@@ -209,7 +209,7 @@ export function AgentRunStatusPanel({ eventId }: { eventId: string }) {
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-label={`Agent status: ${pillLabel}`}
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold border transition ${LIFECYCLE_TONE[lifecycle]}`}
+        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11.5px] font-semibold transition hover:shadow-sm ${LIFECYCLE_TONE[lifecycle]}`}
       >
         <LifecycleIcon lifecycle={starting && !run ? "running" : lifecycle} />
         <span className="max-w-[14rem] truncate">{lifecycle === "running" && phaseLabel ? phaseLabel : pillLabel}</span>
@@ -220,12 +220,13 @@ export function AgentRunStatusPanel({ eventId }: { eventId: string }) {
         <div
           role="dialog"
           aria-label="Agent run status"
-          className="absolute right-0 top-9 w-[22rem] max-w-[calc(100vw-2rem)] rounded-xl border border-slate-200 bg-white shadow-lg z-50 p-4 space-y-3 text-slate-800"
+          className="absolute right-0 top-10 z-50 max-h-[calc(100vh-5rem)] w-[23rem] max-w-[calc(100vw-2rem)] animate-rise-in space-y-3 overflow-y-auto overscroll-contain rounded-xl border border-ink-200 bg-[#FDFCFA] p-4 text-ink-800 shadow-xl"
         >
           <div className="flex items-start justify-between gap-2">
             <div>
-              <p className="text-sm font-bold">{LIFECYCLE_LABEL[lifecycle]}</p>
-              <p className="text-[11px] text-slate-500 font-mono">{run.run_id}</p>
+              <p className="font-mono text-[10px] uppercase tracking-label text-agent-600">✦ Agent run</p>
+              <p className="mt-0.5 text-[14px] font-semibold text-ink-900">{LIFECYCLE_LABEL[lifecycle]}</p>
+              <p className="font-mono text-[10.5px] text-ink-400">{run.run_id}</p>
             </div>
             <span
               className="inline-flex items-center gap-1 text-[11px] text-slate-500"
@@ -260,7 +261,7 @@ export function AgentRunStatusPanel({ eventId }: { eventId: string }) {
 
           {lifecycle === "awaiting_selection" && (
             <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-md p-2">
-              Discovery finished. Review the recommendations and select providers; no one has been contacted yet.
+              Discovery finished. Pick providers on the event Overview; no one has been contacted yet.
             </p>
           )}
 
@@ -276,11 +277,11 @@ export function AgentRunStatusPanel({ eventId }: { eventId: string }) {
           <WorkflowSummary view={view} eventId={eventId} />
 
           {timeline.length > 0 && (
-            <ol className="max-h-48 overflow-y-auto space-y-1 text-[11px]" aria-label="Agent activity">
+            <ol className="max-h-48 space-y-0 overflow-y-auto rounded-lg bg-ink-950 p-3 text-[11px]" aria-label="Agent activity">
               {timeline.map(({ ev, text }) => (
-                <li key={ev.id} className="flex gap-2">
-                  <span className="text-slate-400 font-mono shrink-0">{formatTime(ev.timestamp)}</span>
-                  <span className="text-slate-700">{text}</span>
+                <li key={ev.id} className="flex gap-2.5 py-0.5">
+                  <span className="shrink-0 font-mono text-ink-500">{formatTime(ev.timestamp)}</span>
+                  <span className="text-ink-200">{text}</span>
                 </li>
               ))}
             </ol>
@@ -299,7 +300,7 @@ export function AgentRunStatusPanel({ eventId }: { eventId: string }) {
               <button
                 onClick={() => void cancelRun()}
                 disabled={cancelling || lifecycle === "cancelling"}
-                className="px-2.5 py-1 rounded-md text-[11px] font-semibold border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                className="btn-secondary h-7 px-2.5 text-[11.5px]"
               >
                 {lifecycle === "cancelling" ? "Cancelling…" : "Cancel run"}
               </button>

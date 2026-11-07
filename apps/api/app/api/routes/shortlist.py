@@ -5,6 +5,7 @@ Survives refresh, navigation, and page reloads, and synchronizes across the work
 """
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_current_user_id, get_db_session
@@ -245,7 +246,9 @@ def select_event_shortlist_candidate(
         )
         .first()
     )
-    if not existing_asg and entry.provider_id:
+    # Venue and discovery-candidate ids are not vendor ids; only real vendors get an assignment.
+    from app.models.vendor import Vendor
+    if not existing_asg and entry.provider_id and db.get(Vendor, entry.provider_id):
         asg = VendorAssignment(
             event_id=event_id,
             vendor_id=entry.provider_id,
@@ -327,49 +330,11 @@ def approve_candidate_communication(
     current_user_id: str = Depends(get_current_user_id),
 ) -> ShortlistEntryResponse:
     """Organizer explicitly approves communication with the selected candidate.
-    Strictly gated: verifies event ownership, candidate selection, and dispatches real Call + WhatsApp.
+    Strictly gated: verifies an identified organizer, candidate selection, then dispatches
+    a real WhatsApp message and a real AI phone call as independent operations.
     """
-    event = db.query(Event).filter(Event.id == event_id).first()
-    if not event:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Event '{event_id}' not found.",
-        )
-
-    # Security: Verify organizer/manager role and authorization
-    from app.services.authorization_service import AuthorizationService
-    from app.engines.auth.policy import ApprovalPolicy
-    from app.core.exceptions import ForbiddenException
-    try:
-        auth_service = AuthorizationService(db)
-        user_role = auth_service.get_user_role(event, current_user_id)
-        if not ApprovalPolicy.is_eligible_approver(user_role, "MAJOR"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Role '{user_role}' is not authorized to approve communication.",
-            )
-    except ForbiddenException as fe:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(fe))
-
-    entry = (
-        db.query(EventShortlistEntry)
-        .filter(
-            EventShortlistEntry.event_id == event_id,
-            (EventShortlistEntry.candidate_id == candidate_id) | (EventShortlistEntry.id == candidate_id),
-        )
-        .first()
-    )
-    if not entry:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Candidate '{candidate_id}' not found in event '{event_id}' shortlist.",
-        )
-
-    if entry.status != "SELECTED":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Candidate '{candidate_id}' is in status '{entry.status}'. Communication approval requires candidate to be SELECTED first.",
-        )
+    event, entry = _load_selected_entry(db, event_id, candidate_id)
+    _require_outreach_authority(db, event, current_user_id)
 
     # Find or create Approval record via central ApprovalService boundary
     from app.services.approval_service import ApprovalService
@@ -383,21 +348,174 @@ def approve_candidate_communication(
         provider_id=entry.provider_id,
     )
 
+    from app.models.shortlist import utc_now
     from app.services.identity_service import ensure_user_exists
     approver = ensure_user_exists(db, current_user_id)
+    if approval.status != "APPROVED":
+        approval.status = "APPROVED"
+        approval.approver_id = approver.id
+        approval.decided_at = utc_now()
+    c_data = dict(entry.candidate_data or {})
+    comm = dict(c_data.get("communication") or {})
+    comm.update({"approval_id": approval.id, "approval_status": "APPROVED"})
+    c_data["communication"] = comm
+    entry.candidate_data = c_data
+    db.commit()
 
-    # Execute approved communication via ProviderCommunicationService
-    from app.services.provider_communication_service import ProviderCommunicationService
-    comm_service = ProviderCommunicationService(db)
-    comm_service.execute_approved_communication(
-        event_id=event_id,
-        candidate_id=entry.candidate_id,
-        approval_id=approval.id,
-        approver_id=approver.id,
-    )
+    from app.services.vendor_outreach_service import VendorOutreachService
+    VendorOutreachService(db).start_outreach(event, entry, actor_id=approver.id, approval_id=approval.id)
 
     db.refresh(entry)
     return ShortlistEntryResponse.model_validate(entry)
+
+
+@router.get(
+    "/{event_id}/shortlist/{candidate_id}/communication",
+    status_code=status.HTTP_200_OK,
+)
+def get_candidate_communication(
+    event_id: str,
+    candidate_id: str,
+    refresh: bool = Query(False, description="Pull the latest WhatsApp ack from OpenWA and call state from Twilio"),
+    db: Session = Depends(get_db_session),
+):
+    """Returns the persisted per-channel communication status for a selected candidate."""
+    from app.services.vendor_outreach_service import VendorOutreachService
+
+    _, entry = _load_selected_entry(db, event_id, candidate_id, require_selected=False)
+    service = VendorOutreachService(db)
+    if refresh:
+        service.refresh_whatsapp_acks(entry)
+        service.refresh_whatsapp_replies(entry)
+        service.refresh_call_status(entry)
+        service.refresh_call_analysis(entry)
+    return service.summary(entry)
+
+
+@router.post(
+    "/{event_id}/shortlist/{candidate_id}/communication/{channel}/retry",
+    response_model=ShortlistEntryResponse,
+    status_code=status.HTTP_200_OK,
+)
+def retry_candidate_communication(
+    event_id: str,
+    candidate_id: str,
+    channel: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+) -> ShortlistEntryResponse:
+    """Retries one failed channel. The other channel is never re-sent."""
+    from app.services.vendor_outreach_service import CHANNELS, VendorOutreachService
+
+    channel_key = channel.upper()
+    if channel_key not in CHANNELS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Channel must be 'whatsapp' or 'call'.")
+    event, entry = _load_selected_entry(db, event_id, candidate_id)
+    _require_outreach_authority(db, event, current_user_id)
+
+    comm = (entry.candidate_data or {}).get("communication") or {}
+    if comm.get("approval_status") != "APPROVED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Communication with this candidate has not been approved yet.",
+        )
+    service = VendorOutreachService(db)
+    current = service.summary(entry)["whatsapp" if channel_key == "WHATSAPP" else "call"]
+    redial = channel_key == "CALL" and current["status"] == "COMPLETED"
+    if current["status"] != "NOT_ATTEMPTED" and not current["retryable"] and not redial:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This {channel.lower()} is '{current['status']}' and cannot be retried.",
+        )
+    service.start_outreach(
+        event, entry, actor_id=current_user_id, approval_id=comm.get("approval_id"), channels=[channel_key], redial=redial
+    )
+    db.refresh(entry)
+    return ShortlistEntryResponse.model_validate(entry)
+
+
+class WhatsAppFollowupRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1000)
+
+
+def _approved_outreach(db: Session, event_id: str, candidate_id: str, user_id: str):
+    event, entry = _load_selected_entry(db, event_id, candidate_id)
+    _require_outreach_authority(db, event, user_id)
+    comm = (entry.candidate_data or {}).get("communication") or {}
+    if comm.get("approval_status") != "APPROVED":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Communication with this candidate has not been approved yet.")
+    return event, entry
+
+
+@router.get("/{event_id}/shortlist/{candidate_id}/communication/whatsapp/draft", status_code=status.HTTP_200_OK)
+def draft_whatsapp_followup(
+    event_id: str,
+    candidate_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Drafts the next WhatsApp message for the organizer to review. Nothing is sent."""
+    from app.services.vendor_outreach_service import VendorOutreachService
+
+    _, entry = _approved_outreach(db, event_id, candidate_id, current_user_id)
+    return VendorOutreachService(db).draft_whatsapp_followup(entry)
+
+
+@router.post("/{event_id}/shortlist/{candidate_id}/communication/whatsapp/send", status_code=status.HTTP_200_OK)
+def send_whatsapp_followup(
+    event_id: str,
+    candidate_id: str,
+    payload: WhatsAppFollowupRequest,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Sends the organizer-reviewed follow-up text to the vendor on WhatsApp (one explicit click = one message)."""
+    from app.services.vendor_outreach_service import VendorOutreachService
+
+    event, entry = _approved_outreach(db, event_id, candidate_id, current_user_id)
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is empty.")
+    try:
+        return VendorOutreachService(db).send_whatsapp_followup(event, entry, text, current_user_id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(err))
+    except RuntimeError as err:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(err))
+
+
+def _load_selected_entry(db: Session, event_id: str, candidate_id: str, require_selected: bool = True):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Event '{event_id}' not found.")
+    entry = (
+        db.query(EventShortlistEntry)
+        .filter(
+            EventShortlistEntry.event_id == event_id,
+            (EventShortlistEntry.candidate_id == candidate_id) | (EventShortlistEntry.id == candidate_id),
+        )
+        .first()
+    )
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Candidate '{candidate_id}' not found in event '{event_id}' shortlist.",
+        )
+    if require_selected and entry.status != "SELECTED":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Candidate '{candidate_id}' is in status '{entry.status}'. Communication approval requires candidate to be SELECTED first.",
+        )
+    return event, entry
+
+
+def _require_outreach_authority(db: Session, event: Event, user_id: str) -> None:
+    from app.services.vendor_outreach_service import OutreachAuthorizationError, require_real_organizer
+
+    try:
+        require_real_organizer(db, event, user_id)
+    except OutreachAuthorizationError as err:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(err))
 
 
 @router.post(
