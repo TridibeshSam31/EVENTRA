@@ -163,6 +163,38 @@ class ActionService:
             self.db.rollback()
             raise err
 
+    # Recovery strategies mapped onto the action types the impact classifier understands.
+    _RECOVERY_ACTION_TYPES = {
+        "BACKUP": "REASSIGN_VENDOR",
+        "REASSIGN": "REASSIGN_VENDOR",
+        "WAIT": "ADJUST_SCHEDULE",
+        "RESCHEDULE": "ADJUST_SCHEDULE",
+        "COMPRESS": "ADJUST_SCHEDULE",
+    }
+
+    def _recovery_needs_approval(self, event: Event, executor_id: str, recovery: Recovery) -> bool:
+        from app.engines.auth.classifier import ActionImpactClassifier
+        from app.engines.auth.policy import ApprovalPolicy
+        from app.services.authorization_service import AuthorizationService
+
+        action_type = self._RECOVERY_ACTION_TYPES.get(recovery.strategy_type)
+        changes = recovery.proposed_changes or {}
+        if action_type is None:
+            impact_level = "CRITICAL"  # dropping scope or changing capacity is always high impact
+            action_type = f"RECOVERY_{recovery.strategy_type}"
+        else:
+            task = None
+            if recovery.affected_tasks:
+                task = self.db.query(Task).filter(Task.id == recovery.affected_tasks[0], Task.event_id == event.id).first()
+            payload = {
+                "delay_minutes": changes.get("delay_minutes", 0),
+                "shift_minutes": changes.get("shift_minutes", 0),
+                "cost_delta": (recovery.budget_delta or {}).get("net_delta", 0),
+            }
+            impact_level = ActionImpactClassifier.classify(action_type, payload, event=event, task=task)
+        role = AuthorizationService(self.db).get_user_role(event, executor_id)
+        return ApprovalPolicy.requires_approval(role, impact_level, action_type)
+
     def execute_recovery_option(
         self,
         event_id: str,
@@ -201,8 +233,23 @@ class ActionService:
         if not recovery:
             raise NotFoundException(f"Recovery option '{recovery_option_id}' not found for event '{event_id}'.")
 
+        # Idempotent: an option already executed (e.g. on approval) is never applied twice.
+        if recovery.status == "EXECUTED":
+            prior = (
+                self.db.query(ActionExecution)
+                .filter(ActionExecution.recovery_option_id == recovery.id, ActionExecution.status == "SUCCESS")
+                .order_by(ActionExecution.executed_at.desc())
+                .first()
+            )
+            if prior:
+                return prior
+
+        # Role policy (server-side): the executor's role and the option's impact tier decide
+        # whether a separate approval is needed. The main organizer may act directly.
+        needs_approval = recovery.requires_approval or self._recovery_needs_approval(event, executor_id, recovery)
+
         # Approval Gate Enforcement (B2)
-        if recovery.requires_approval:
+        if needs_approval:
             approval = self.db.query(Approval).filter(
                 Approval.recovery_option_id == recovery_option_id,
                 Approval.event_id == event_id,

@@ -7,8 +7,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Adaptive event operations platform for real-time live event control",
     start_url: "/dashboard",
     display: "standalone",
-    background_color: "#f8fafc",
-    theme_color: "#ffffff",
+    background_color: "#F4F1EB",
+    theme_color: "#100E0C",
     icons: [
       {
         src: "/icons/icon-192.png",

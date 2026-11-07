@@ -65,11 +65,11 @@ export function RecoveryTimeline({
   };
 
   return (
-    <div className={`p-5 rounded-xl border border-slate-200 bg-white shadow-xs space-y-4 ${className}`}>
+    <div className={`p-5 rounded-xl border border-slate-200 bg-[#FDFCFA] shadow-sm space-y-4 ${className}`}>
       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
         <div>
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-            <Activity className="w-3.5 h-3.5 text-[#D6003C]" />
+          <span className="eyebrow flex items-center gap-1">
+            <Activity className="w-3.5 h-3.5 text-cue-600" />
             Closed-Loop Resolution Stepper
           </span>
           <h4 className="text-sm font-bold text-slate-900 mt-0.5">
@@ -93,7 +93,7 @@ export function RecoveryTimeline({
               key={stage.key}
               className={`p-3 rounded-xl border transition flex flex-col justify-between space-y-2 ${
                 stage.status === "COMPLETED"
-                  ? "bg-white border-emerald-200/90 shadow-xs"
+                  ? "bg-[#FDFCFA] border-emerald-200/90 shadow-sm"
                   : stage.status === "IN_PROGRESS"
                   ? "bg-blue-50/20 border-blue-300 ring-1 ring-blue-300/40"
                   : stage.status === "FAILED"

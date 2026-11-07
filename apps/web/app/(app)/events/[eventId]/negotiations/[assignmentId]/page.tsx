@@ -41,6 +41,8 @@ import { getOperatorId } from "@/lib/api/client";
 import { getEvent } from "@/lib/api/events";
 import type { EventResponse } from "@/types/api";
 import { EventShell } from "@/components/v2/EventShell";
+import { ProvenanceBadge } from "@/components/v2/ProvenanceBadge";
+import { CueChip, EmptyState } from "@/components/ds";
 
 export default function LiveNegotiationPage() {
   const params = useParams();
@@ -402,9 +404,11 @@ export default function LiveNegotiationPage() {
   if (loading && !timeline) {
     return (
       <EventShell event={eventData} eventId={eventId} currentStage="READY">
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
-          <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
-          <p className="text-sm text-zinc-400">Connecting to live negotiation stream...</p>
+        <div className="mx-auto max-w-4xl space-y-4">
+          <div className="workspace-shimmer h-20 rounded-xl" />
+          <div className="workspace-shimmer h-44 rounded-xl" />
+          <div className="workspace-shimmer h-[420px] rounded-xl" />
+          <p className="text-center text-[12.5px] text-ink-500">Connecting to the live negotiation…</p>
         </div>
       </EventShell>
     );
@@ -413,16 +417,17 @@ export default function LiveNegotiationPage() {
   if (!timeline) {
     return (
       <EventShell event={eventData} eventId={eventId} currentStage="READY">
-        <div className="max-w-xl mx-auto py-12 px-4 text-center">
-          <AlertTriangle className="w-12 h-12 text-amber-400 mx-auto mb-3" />
-          <h2 className="text-lg font-semibold text-white">Negotiation Not Found</h2>
-          <p className="text-sm text-zinc-400 mt-1">This negotiation session could not be located or has expired.</p>
-          <Link
-            href={`/events/${eventId}/negotiations`}
-            className="inline-flex items-center gap-2 mt-4 px-4 py-2 text-sm text-white bg-zinc-800 hover:bg-zinc-700 rounded-xl"
-          >
-            <ArrowLeft className="w-4 h-4" /> Back to Negotiations
-          </Link>
+        <div className="mx-auto max-w-xl">
+          <EmptyState
+            icon={<AlertTriangle className="h-5 w-5 text-standby-600" />}
+            title="Negotiation not found"
+            description="This negotiation could not be found or has ended."
+            action={
+              <Link href={`/events/${eventId}/negotiations`} className="btn-secondary">
+                <ArrowLeft className="h-3.5 w-3.5" /> All negotiations
+              </Link>
+            }
+          />
         </div>
       </EventShell>
     );
@@ -434,304 +439,218 @@ export default function LiveNegotiationPage() {
   const vendorQuote = timeline.latest_vendor_quote || 0;
   const agentCounter = timeline.latest_agent_counter || 0;
 
-  // Cap Meter Math
-  // Scale max value is 120% of cap or 110% of quote, whichever is larger
+  // Cap meter scale: the largest of 125% cap, 110% quote, 135% target.
   const maxScale = Math.max(cap * 1.25, vendorQuote * 1.1, target * 1.35, 100);
-  const targetPct = Math.min(100, Math.max(0, (target / maxScale) * 100));
-  const capPct = Math.min(100, Math.max(0, (cap / maxScale) * 100));
-  const quotePct = Math.min(100, Math.max(0, (vendorQuote / maxScale) * 100));
-  const counterPct = Math.min(100, Math.max(0, (agentCounter / maxScale) * 100));
+  const pct = (v: number) => Math.min(100, Math.max(0, (v / maxScale) * 100));
+  const targetPct = pct(target);
+  const capPct = pct(cap);
+  const quotePct = pct(vendorQuote);
+  const counterPct = pct(agentCounter);
 
   const isQuoteOverCap = vendorQuote > cap && cap > 0;
   const hasApproval = Boolean(timeline.approval_id || timeline.status === "AWAITING_APPROVAL");
+  const rupee = (n: number) => (n ? `₹${n.toLocaleString()}` : "—");
 
   return (
     <EventShell event={eventData} eventId={eventId} currentStage="READY">
-      <div className="max-w-4xl mx-auto px-4 py-4 space-y-4">
-        {/* Toast Alert */}
+      <div className="mx-auto max-w-5xl space-y-4">
+        {/* Toast */}
         {toastMessage && (
           <div
-            className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl border text-sm font-medium flex items-center gap-2.5 transition-all animate-in fade-in slide-in-from-top-4 ${
+            role="status"
+            className={`fixed right-4 top-4 z-50 flex max-w-sm animate-rise-in items-center gap-2.5 rounded-xl border px-4 py-3 text-[13px] font-medium shadow-xl ${
               toastMessage.type === "success"
-                ? "bg-emerald-950/90 text-emerald-200 border-emerald-500/30"
+                ? "border-go-200 bg-go-50 text-go-900"
                 : toastMessage.type === "error"
-                ? "bg-red-950/90 text-red-200 border-red-500/30"
-                : "bg-zinc-900/90 text-zinc-200 border-white/20"
+                ? "border-cue-200 bg-cue-50 text-cue-900"
+                : "border-ink-200 bg-[#FDFCFA] text-ink-800"
             }`}
           >
-            {toastMessage.type === "success" && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
-            {toastMessage.type === "error" && <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />}
-            {toastMessage.type === "info" && <Sparkles className="w-4 h-4 text-indigo-400 shrink-0" />}
+            {toastMessage.type === "success" && <CheckCircle2 className="h-4 w-4 shrink-0 text-go-600" />}
+            {toastMessage.type === "error" && <AlertTriangle className="h-4 w-4 shrink-0 text-cue-600" />}
+            {toastMessage.type === "info" && <Sparkles className="h-4 w-4 shrink-0 text-agent-500" />}
             <span>{toastMessage.text}</span>
           </div>
         )}
 
-        {/* Hangup Warning Alert Banner */}
         {hangupWarning && (
-          <div className="flex items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-xs font-medium">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>{hangupWarning}</span>
-            </div>
-            <button
-              onClick={() => setHangupWarning(null)}
-              className="text-amber-400 hover:text-white px-2 py-0.5 rounded text-[11px] bg-amber-500/20"
-            >
+          <div className="flex items-center justify-between gap-3 rounded-xl border border-standby-200 bg-standby-50 px-4 py-3 text-[13px] font-medium text-standby-900">
+            <span className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-standby-600" />
+              {hangupWarning}
+            </span>
+            <button onClick={() => setHangupWarning(null)} className="btn-ghost h-7 !px-2 text-standby-800">
               Dismiss
             </button>
           </div>
         )}
 
-        {/* 1. Header Bar */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 rounded-2xl bg-zinc-900/80 border border-white/10 backdrop-blur-md">
-          <div className="flex items-center gap-3">
+        {/* ── Header ─────────────────────────────────── */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+          <div className="flex items-start gap-3">
             <Link
               href={`/events/${eventId}/negotiations`}
-              className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 flex items-center justify-center text-zinc-400 hover:text-white transition-colors"
+              className="mt-1 rounded-lg border border-ink-200 bg-[#FDFCFA] p-1.5 text-ink-500 shadow-sm transition hover:text-ink-900"
+              aria-label="All negotiations"
             >
-              <ArrowLeft className="w-4 h-4" />
+              <ArrowLeft className="h-4 w-4" />
             </Link>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg font-bold text-white tracking-tight">{timeline.vendor_name}</h1>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 font-medium">
-                  {timeline.vendor_type}
-                </span>
-
-                {/* Control Chip */}
-                <span
-                  className={`text-xs px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1.5 transition-all ${
-                    isHuman
-                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm shadow-amber-500/20"
-                      : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm shadow-emerald-500/20"
-                  }`}
-                >
-                  {isHuman ? (
-                    <>
-                      <User className="w-3.5 h-3.5" />
-                      YOU (HUMAN)
-                    </>
-                  ) : (
-                    <>
-                      <Bot className="w-3.5 h-3.5" />
-                      AGENT AUTONOMOUS
-                    </>
-                  )}
-                </span>
-
-                {/* Round Chip */}
+              <div className="eyebrow mb-1.5 flex flex-wrap items-center gap-2">
+                Live negotiation
+                <span className="text-ink-300">·</span>
+                <span>{timeline.vendor_type}</span>
                 {timeline.round_number > 0 && (
-                  <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-white/10 font-medium">
-                    Round {timeline.round_number}
-                  </span>
+                  <>
+                    <span className="text-ink-300">·</span>
+                    <span className="text-ink-700">Round {timeline.round_number}</span>
+                  </>
                 )}
               </div>
-              <p className="text-xs text-zinc-400 mt-0.5">Status: {timeline.status}</p>
+              <h1 className="font-display text-[28px] font-extrabold leading-tight tracking-[-0.025em] text-ink-900" style={{ fontStretch: "88%" }}>
+                {timeline.vendor_name}
+              </h1>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {isHuman ? (
+                  <CueChip tone="standby">
+                    <User className="h-3 w-3" /> You are in control
+                  </CueChip>
+                ) : (
+                  <CueChip tone="agent" pulse>
+                    <Bot className="h-3 w-3" /> Agent negotiating
+                  </CueChip>
+                )}
+                <CueChip tone="idle">{String(timeline.status).replace(/_/g, " ").toLowerCase()}</CueChip>
+              </div>
             </div>
           </div>
 
-          {/* Connection state & Demo action */}
-          <div className="flex items-center gap-2.5 self-end sm:self-center">
-            {/* Live Indicator */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/40 border border-white/10 text-xs">
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  connectionState === "LIVE"
-                    ? "bg-emerald-400 animate-pulse shadow-sm shadow-emerald-400"
-                    : connectionState === "CONNECTING"
-                    ? "bg-amber-400 animate-ping"
-                    : "bg-zinc-600"
-                }`}
-              />
-              <span className="text-zinc-300 font-mono text-[11px] font-semibold">{connectionState}</span>
-            </div>
-
-            {/* Hackathon Demo Simulation Trigger */}
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <CueChip
+              tone={connectionState === "LIVE" ? "go" : connectionState === "CONNECTING" ? "standby" : "idle"}
+              pulse={connectionState !== "OFFLINE"}
+              className="font-mono !text-[10.5px] uppercase"
+            >
+              {connectionState === "LIVE" ? "Live" : connectionState === "CONNECTING" ? "Connecting" : "Offline · polling"}
+            </CueChip>
             <button
               onClick={handleRunDemo}
               disabled={simulationRunning}
-              className="text-xs px-3 py-1.5 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30 font-medium flex items-center gap-1.5 transition-colors"
-              title="Plays scripted multi-turn negotiation for demo"
+              className="btn-secondary h-8"
+              title="Plays a scripted multi-turn negotiation (demo data)"
             >
-              {simulationRunning ? (
-                <Loader2 className="w-3 h-3 animate-spin" />
-              ) : (
-                <Sparkles className="w-3 h-3 text-indigo-400" />
-              )}
-              Demo Sim
+              {simulationRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+              Demo simulation
             </button>
           </div>
         </div>
 
-        {/* 2. CAP METER (The Authority & Safety Guard) */}
-        <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-b from-zinc-900/90 to-zinc-950 border border-white/10 shadow-xl space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-white/5 pb-3">
+        {/* ── Cap meter ──────────────────────────────── */}
+        <section className="surface overflow-hidden">
+          <header className="flex flex-col gap-2 border-b border-ink-200 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="flex items-center gap-2">
-                <Shield className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-sm font-semibold text-white tracking-wide">ORGANIZER BUDGET CAP GUARD</h3>
-                <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                  Deterministic
-                </span>
+                <Shield className="h-4 w-4 text-engine-600" />
+                <h3 className="text-[14px] font-semibold text-ink-900">Your budget cap</h3>
+                <ProvenanceBadge source="ENGINE" size="sm" />
               </div>
-              <p className="text-xs text-zinc-400 mt-0.5">
-                The agent is strictly prohibited from exceeding your cap. Ceiling is never disclosed to vendors.
+              <p className="mt-1 text-[12.5px] text-ink-500">
+                The agent can never offer above your cap, and the cap is never told to the vendor.
               </p>
             </div>
             {timeline.budget_validation && (
-              <div className="text-right text-xs">
-                <span className="text-zinc-400">Remaining Event Budget: </span>
-                <span className="font-bold text-emerald-400">
+              <div className="text-right">
+                <div className="font-mono text-[9.5px] uppercase tracking-label text-ink-400">Event budget left after this</div>
+                <div className="font-display text-[18px] font-bold tabular-nums text-go-700" style={{ fontStretch: "90%" }}>
                   ₹{timeline.budget_validation.remaining_after?.toLocaleString() || "—"}
-                </span>
+                </div>
               </div>
             )}
+          </header>
+
+          <div className="grid grid-cols-2 divide-ink-200 sm:grid-cols-4 sm:divide-x">
+            <Readout label="Target" value={rupee(target)} swatch="bg-info-500" />
+            <Readout label="Agent's last offer" value={rupee(agentCounter)} swatch="bg-agent-500" />
+            <Readout
+              label="Vendor's quote"
+              value={rupee(vendorQuote)}
+              swatch={isQuoteOverCap ? "bg-cue-600" : "bg-ink-900"}
+              tone={isQuoteOverCap ? "text-cue-700" : undefined}
+              note={isQuoteOverCap ? "Above your cap" : undefined}
+            />
+            <Readout label="Hard cap" value={rupee(cap)} swatch="bg-go-500" tone="text-go-700" strong />
           </div>
 
-          {/* Metric Badges */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
-              <span className="text-zinc-400 block text-[11px]">Target Goal</span>
-              <span className="text-sm font-bold text-white">₹{target ? target.toLocaleString() : "—"}</span>
-            </div>
-            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
-              <span className="text-zinc-400 block text-[11px]">Latest Agent Counter</span>
-              <span className="text-sm font-bold text-indigo-400">
-                ₹{agentCounter ? agentCounter.toLocaleString() : "—"}
-              </span>
-            </div>
-            <div className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5">
-              <span className="text-zinc-400 block text-[11px]">Vendor Quote</span>
-              <span
-                className={`text-sm font-bold ${
-                  isQuoteOverCap ? "text-red-400 animate-pulse" : "text-emerald-400"
-                }`}
-              >
-                ₹{vendorQuote ? vendorQuote.toLocaleString() : "—"}
-              </span>
-            </div>
-            <div className="p-2.5 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-              <span className="text-emerald-300 block text-[11px] font-medium">Your Hard Cap</span>
-              <span className="text-sm font-black text-emerald-400">₹{cap ? cap.toLocaleString() : "—"}</span>
-            </div>
-          </div>
-
-          {/* Visual Horizontal Cap Bar */}
-          <div className="space-y-1.5 pt-1">
-            <div className="relative h-6 bg-zinc-800/80 rounded-full overflow-hidden border border-white/10">
-              {/* Safe Zone (0 to Cap) */}
+          <div className="border-t border-ink-200 px-5 pb-5 pt-6">
+            <div className="relative h-3 rounded-full bg-ink-100 ring-1 ring-inset ring-ink-200">
+              {/* allowed zone */}
+              <div className="absolute inset-y-0 left-0 rounded-l-full bg-go-500/25" style={{ width: `${capPct}%` }} />
+              {/* blocked zone */}
               <div
-                className="absolute top-0 bottom-0 left-0 bg-gradient-to-r from-emerald-600/30 to-emerald-500/40"
-                style={{ width: `${capPct}%` }}
+                className="absolute inset-y-0 right-0 rounded-r-full"
+                style={{
+                  left: `${capPct}%`,
+                  backgroundImage: "repeating-linear-gradient(135deg, rgba(214,0,60,0.22) 0 6px, rgba(214,0,60,0.08) 6px 12px)",
+                }}
               />
-
-              {/* Red Zone (Beyond Cap) */}
-              <div
-                className="absolute top-0 bottom-0 right-0 bg-red-600/30 border-l border-red-500/40"
-                style={{ left: `${capPct}%` }}
-              />
-
-              {/* Target Marker */}
-              {target > 0 && (
-                <div
-                  className="absolute top-0 bottom-0 w-0.5 bg-blue-400 z-10"
-                  style={{ left: `${targetPct}%` }}
-                  title={`Target: ₹${target.toLocaleString()}`}
-                />
-              )}
-
-              {/* Agent Counter Position */}
-              {agentCounter > 0 && (
-                <div
-                  className="absolute top-0 bottom-0 w-1.5 bg-indigo-400 z-20 shadow-md"
-                  style={{ left: `${counterPct}%` }}
-                  title={`Agent Counter: ₹${agentCounter.toLocaleString()}`}
-                />
-              )}
-
-              {/* Vendor Quote Position */}
+              {target > 0 && <Marker pct={targetPct} cls="bg-info-500" label={`Target ${rupee(target)}`} />}
+              {agentCounter > 0 && <Marker pct={counterPct} cls="bg-agent-500" label={`Agent ${rupee(agentCounter)}`} />}
               {vendorQuote > 0 && (
-                <div
-                  className={`absolute top-0 bottom-0 w-2 z-30 shadow-lg ${
-                    isQuoteOverCap ? "bg-red-500 animate-pulse" : "bg-emerald-400"
-                  }`}
-                  style={{ left: `${quotePct}%` }}
-                  title={`Vendor Quote: ₹${vendorQuote.toLocaleString()}`}
+                <Marker
+                  pct={quotePct}
+                  cls={isQuoteOverCap ? "bg-cue-600 animate-cue-blink" : "bg-ink-900"}
+                  label={`Vendor ${rupee(vendorQuote)}`}
+                  big
                 />
               )}
-
-              {/* Hard Cap Line */}
-              <div
-                className="absolute top-0 bottom-0 w-1 bg-emerald-300 z-20 shadow-[0_0_10px_rgba(52,211,153,0.8)]"
-                style={{ left: `${capPct}%` }}
-                title={`Budget Cap: ₹${cap.toLocaleString()}`}
-              />
+              {/* cap line */}
+              <div className="absolute -bottom-1.5 -top-1.5 w-[3px] -translate-x-1/2 rounded-full bg-go-600" style={{ left: `${capPct}%` }} title={`Cap ${rupee(cap)}`} />
             </div>
-
-            {/* Scale Labels */}
-            <div className="flex justify-between text-[10px] text-zinc-400 px-1 font-mono">
+            <div className="mt-2 flex justify-between font-mono text-[10.5px] text-ink-400">
               <span>₹0</span>
-              {target > 0 && (
-                <span className="text-blue-400 font-semibold" style={{ marginLeft: `${Math.max(0, targetPct - 15)}%` }}>
-                  Target: ₹{target.toLocaleString()}
-                </span>
-              )}
-              <span className="text-emerald-400 font-bold" style={{ marginLeft: `${Math.max(0, capPct - 25)}%` }}>
-                Cap: ₹{cap.toLocaleString()}
-              </span>
-              <span className="text-red-400 font-bold">Red Zone (Blocked)</span>
+              <span className="font-semibold text-go-700">cap {rupee(cap)}</span>
+              <span className="text-cue-600">blocked above cap</span>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* 3. Approval Card (When agreement reached within ceiling) */}
+        {/* ── Agreement ──────────────────────────────── */}
         {hasApproval && (
-          <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-emerald-950/60 to-zinc-900 border border-emerald-500/40 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                <h3 className="text-base font-bold text-white">Negotiation Agreed Within Budget Cap!</h3>
+          <section className="flex animate-rise-in flex-col justify-between gap-4 rounded-xl border border-go-200 bg-go-50 px-5 py-4 sm:flex-row sm:items-center">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-go-600" />
+              <div>
+                <h3 className="text-[15px] font-semibold text-go-900">Agreement reached within your cap</h3>
+                <p className="mt-0.5 text-[12.5px] text-go-800">
+                  Nothing is booked yet. An approval request is waiting for your review.
+                </p>
               </div>
-              <p className="text-xs text-zinc-300">
-                Final negotiated offer sits comfortably under your cap. Per policy, an operational approval request is
-                staged for formal review.
-              </p>
             </div>
-            {timeline.approval_id ? (
-              <Link
-                href={`/events/${eventId}/approvals/${timeline.approval_id}`}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-black bg-emerald-400 hover:bg-emerald-300 transition-all shadow-lg shadow-emerald-500/20 shrink-0"
-              >
-                Review & Approve <ExternalLink className="w-4 h-4" />
-              </Link>
-            ) : (
-              <Link
-                href={`/events/${eventId}/approvals`}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-black bg-emerald-400 hover:bg-emerald-300 transition-all shadow-lg shadow-emerald-500/20 shrink-0"
-              >
-                View Approvals <ExternalLink className="w-4 h-4" />
-              </Link>
-            )}
-          </div>
+            <Link
+              href={timeline.approval_id ? `/events/${eventId}/approvals/${timeline.approval_id}` : `/events/${eventId}/approvals`}
+              className="btn-cue shrink-0"
+            >
+              {timeline.approval_id ? "Review & approve" : "View approvals"} <ExternalLink className="h-3.5 w-3.5" />
+            </Link>
+          </section>
         )}
 
-        {/* 4. Chat-style Transcript Stream */}
-        <div className="rounded-2xl bg-zinc-950/90 border border-white/10 shadow-2xl flex flex-col h-[480px]">
-          {/* Transcript Header */}
-          <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-zinc-900/40 rounded-t-2xl">
-            <div className="flex items-center gap-2 text-xs font-semibold text-zinc-300">
-              <MessageSquare className="w-4 h-4 text-indigo-400" />
-              <span>Real-Time Transcript ({timeline.messages.length} messages)</span>
-            </div>
-            <span className="text-[11px] text-zinc-400">WhatsApp & Voice Synced</span>
-          </div>
+        {/* ── Transcript (ink console) ───────────────── */}
+        <section className="surface-ink flex h-[520px] flex-col overflow-hidden shadow-lg">
+          <header className="flex items-center justify-between border-b border-white/[0.07] px-4 py-3">
+            <span className="flex items-center gap-2 text-[12.5px] font-semibold text-ink-200">
+              <Radio className="h-4 w-4 text-cue-400" />
+              Transcript
+              <span className="font-mono text-[11px] font-normal text-ink-500">{timeline.messages.length} messages</span>
+            </span>
+            <span className="font-mono text-[10.5px] uppercase tracking-label text-ink-500">WhatsApp + voice</span>
+          </header>
 
-          {/* Scrollable Bubble Stream */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+          <div className="flex-1 space-y-4 overflow-y-auto bg-dots-dark px-4 py-5">
             {timeline.messages.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-zinc-500 text-xs">
-                <Clock className="w-8 h-8 mb-2 opacity-40" />
-                <p>Waiting for first conversation exchange...</p>
+              <div className="flex h-full flex-col items-center justify-center text-[12.5px] text-ink-500">
+                <Clock className="mb-2 h-6 w-6 opacity-50" />
+                Waiting for the first exchange…
               </div>
             ) : (
               timeline.messages.map((msg) => {
@@ -742,10 +661,10 @@ export default function LiveNegotiationPage() {
 
                 if (msg.sender_type === "SYSTEM") {
                   return (
-                    <div key={msg.id} className="flex justify-center my-2">
-                      <span className="text-[11px] px-3 py-1 rounded-full bg-white/5 text-zinc-400 border border-white/5">
-                        {msg.text}
-                      </span>
+                    <div key={msg.id} className="flex items-center gap-3">
+                      <span className="h-px flex-1 bg-white/[0.08]" />
+                      <span className="font-mono text-[10.5px] text-ink-500">{msg.text}</span>
+                      <span className="h-px flex-1 bg-white/[0.08]" />
                     </div>
                   );
                 }
@@ -753,78 +672,38 @@ export default function LiveNegotiationPage() {
                 return (
                   <div
                     key={msg.id}
-                    className={`flex flex-col ${
-                      isOrganizer ? "items-end" : "items-start"
-                    } max-w-[85%] sm:max-w-[75%] ${isOrganizer ? "ml-auto" : "mr-auto"}`}
+                    className={`flex max-w-[88%] flex-col sm:max-w-[72%] ${isOrganizer ? "ml-auto items-end" : "mr-auto items-start"}`}
                   >
-                    {/* Sender Identity & Channel Badge */}
-                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-zinc-400 mb-1 px-1">
-                      {isAgent && (
-                        <>
-                          <Bot className="w-3.5 h-3.5 text-emerald-400" />
-                          <span className="text-emerald-400">Autonomous Agent</span>
-                        </>
-                      )}
-                      {isVendor && (
-                        <>
-                          <MessageSquare className="w-3.5 h-3.5 text-blue-400" />
-                          <span className="text-blue-400">{timeline.vendor_name}</span>
-                        </>
-                      )}
-                      {isOrganizer && (
-                        <>
-                          <User className="w-3.5 h-3.5 text-amber-400" />
-                          <span className="text-amber-400">You (Organizer)</span>
-                        </>
-                      )}
-
-                      {/* Channel Icon */}
-                      <span className="text-zinc-600">•</span>
-                      <span className="text-zinc-400 text-[10px] flex items-center gap-0.5">
-                        {isVoice ? (
-                          <>
-                            <PhoneCall className="w-3 h-3 text-purple-400" /> Voice Call
-                          </>
-                        ) : (
-                          <>
-                            <MessageSquare className="w-3 h-3 text-emerald-400" /> WhatsApp
-                          </>
-                        )}
+                    <div className="mb-1 flex items-center gap-2 px-1 font-mono text-[10.5px] uppercase tracking-label">
+                      {isAgent && <span className="text-agent-300">✦ Agent</span>}
+                      {isVendor && <span className="text-ink-300">{timeline.vendor_name}</span>}
+                      {isOrganizer && <span className="text-standby-300">You</span>}
+                      <span className="flex items-center gap-1 normal-case tracking-normal text-ink-500">
+                        {isVoice ? <PhoneCall className="h-3 w-3" /> : <MessageSquare className="h-3 w-3" />}
+                        {isVoice ? "voice" : "whatsapp"}
                       </span>
                     </div>
-
-                    {/* Message Bubble */}
                     <div
-                      className={`p-3.5 rounded-2xl text-sm leading-relaxed ${
+                      className={`rounded-2xl px-3.5 py-2.5 text-[13.5px] leading-relaxed ${
                         isOrganizer
-                          ? "bg-amber-600/20 text-white border border-amber-500/30 rounded-tr-sm"
+                          ? "rounded-tr-md bg-standby-500/15 text-ink-50 ring-1 ring-standby-400/30"
                           : isAgent
-                          ? "bg-zinc-900 text-zinc-100 border border-emerald-500/30 rounded-tl-sm shadow-sm"
-                          : "bg-blue-950/30 text-zinc-100 border border-blue-500/30 rounded-tl-sm shadow-sm"
+                          ? "rounded-tl-md bg-agent-500/15 text-ink-50 ring-1 ring-agent-400/30"
+                          : "rounded-tl-md bg-white/[0.06] text-ink-100 ring-1 ring-white/10"
                       }`}
                     >
                       <p className="whitespace-pre-wrap">{msg.text}</p>
-
-                      {/* Highlight Extracted Amount */}
                       {msg.amount_extracted != null && (
-                        <div className="mt-2 pt-2 border-t border-white/10 flex items-center gap-1.5">
-                          <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-semibold">
-                            Extracted Quote:
-                          </span>
-                          <span className="text-xs font-bold text-white bg-black/40 px-2 py-0.5 rounded border border-white/10">
+                        <div className="mt-2 flex items-center gap-2 border-t border-white/10 pt-2">
+                          <span className="font-mono text-[10px] uppercase tracking-label text-agent-300">✦ Amount read</span>
+                          <span className="rounded bg-black/30 px-1.5 py-0.5 font-mono text-[12px] font-semibold text-white">
                             ₹{msg.amount_extracted.toLocaleString()}
                           </span>
                         </div>
                       )}
                     </div>
-
-                    {/* Timestamp */}
-                    <span className="text-[10px] text-zinc-400 mt-1 px-1">
-                      {new Date(msg.timestamp * 1000).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                      })}
+                    <span className="mt-1 px-1 font-mono text-[10px] text-ink-500">
+                      {new Date(msg.timestamp * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
                     </span>
                   </div>
                 );
@@ -833,120 +712,95 @@ export default function LiveNegotiationPage() {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* 5. Bottom Action Bar */}
-          <div className="p-3 border-t border-white/10 bg-zinc-900/80 rounded-b-2xl">
-            {/* If in AGENT mode: Large Takeover Button */}
+          <div className="border-t border-white/[0.07] bg-black/20 p-3">
             {!isHuman ? (
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>Agent is actively negotiating. Cap is enforced automatically.</span>
-                </div>
-                <button
-                  onClick={handleTakeOver}
-                  disabled={Boolean(actionLoading)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-xs text-white bg-amber-600 hover:bg-amber-500 active:scale-95 transition-all shadow-lg shadow-amber-600/20 shrink-0"
-                >
-                  {actionLoading === "takeover" ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <ShieldAlert className="w-4 h-4" />
-                  )}
-                  Stop Agent / Take Over
+              <div className="flex flex-col items-stretch justify-between gap-3 sm:flex-row sm:items-center">
+                <span className="flex items-center gap-2 text-[12.5px] text-ink-400">
+                  <span className="cue-light animate-cue-blink bg-agent-400" />
+                  The agent is negotiating. Your cap is enforced automatically.
+                </span>
+                <button onClick={handleTakeOver} disabled={Boolean(actionLoading)} className="btn bg-standby-500 text-ink-950 hover:bg-standby-400">
+                  {actionLoading === "takeover" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldAlert className="h-4 w-4" />}
+                  Stop agent &amp; take over
                 </button>
               </div>
             ) : (
-              /* If in HUMAN mode: Message Input + Resume + Cancel */
-              <div className="space-y-3">
-                <div className="flex items-center justify-between text-xs text-amber-300 bg-amber-500/10 px-3 py-1.5 rounded-lg border border-amber-500/20">
-                  <span className="flex items-center gap-1.5 font-medium">
-                    <User className="w-3.5 h-3.5" />
-                    You are in manual control. Outbound agent replies are paused.
+              <div className="space-y-2.5">
+                <div className="flex flex-col justify-between gap-2 rounded-lg bg-standby-500/10 px-3 py-2 text-[12.5px] text-standby-200 ring-1 ring-standby-400/20 sm:flex-row sm:items-center">
+                  <span className="flex items-center gap-1.5">
+                    <User className="h-3.5 w-3.5" />
+                    You are in control. The agent won&apos;t reply until you resume it.
                   </span>
                   <div className="flex items-center gap-2">
-                    <button
-                      onClick={handleResume}
-                      disabled={Boolean(actionLoading)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
-                    >
-                      {actionLoading === "resume" ? (
-                        <Loader2 className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Play className="w-3 h-3" />
-                      )}
-                      Resume Agent
+                    <button onClick={handleResume} disabled={Boolean(actionLoading)} className="btn h-7 bg-go-500 px-2.5 text-[12px] text-white hover:bg-go-600">
+                      {actionLoading === "resume" ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+                      Resume agent
                     </button>
                     <button
                       onClick={() => setShowCancelDialog(true)}
                       disabled={Boolean(actionLoading)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold bg-red-600/30 hover:bg-red-600/50 text-red-300 border border-red-500/30 transition-colors"
+                      className="btn h-7 px-2.5 text-[12px] text-cue-300 ring-1 ring-cue-400/40 hover:bg-cue-500/15"
                     >
-                      <XCircle className="w-3 h-3" />
-                      Cancel
+                      <XCircle className="h-3 w-3" />
+                      End negotiation
                     </button>
                   </div>
                 </div>
-
-                {/* Organizer Chat Input */}
                 <form onSubmit={handleSendMessage} className="flex items-center gap-2">
                   <input
                     type="text"
                     value={organizerText}
                     onChange={(e) => setOrganizerText(e.target.value)}
-                    placeholder="Type a manual reply to the vendor (WhatsApp)..."
-                    className="flex-1 bg-black/40 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/50 transition-colors"
+                    placeholder="Write to the vendor on WhatsApp…"
+                    aria-label="Message to vendor"
+                    className="h-10 flex-1 rounded-lg border border-white/10 bg-black/30 px-3.5 text-[13.5px] text-white placeholder:text-ink-500 focus:border-standby-400/60 focus:outline-none"
                   />
                   <button
                     type="submit"
                     disabled={!organizerText.trim() || sendingMessage}
-                    className="p-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all shrink-0"
+                    className="btn h-10 bg-ink-50 text-ink-950 hover:bg-white"
+                    aria-label="Send"
                   >
-                    {sendingMessage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+                    {sendingMessage ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                   </button>
                 </form>
               </div>
             )}
           </div>
-        </div>
+        </section>
 
-        {/* Cancel Confirmation Modal */}
         {showCancelDialog && (
-          <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="max-w-md w-full rounded-2xl bg-zinc-900 border border-white/10 p-5 space-y-4 shadow-2xl">
-              <div className="flex items-center gap-3 text-red-400">
-                <AlertTriangle className="w-6 h-6 shrink-0" />
-                <h3 className="text-base font-bold text-white">Cancel Negotiation?</h3>
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/60 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
+            <div className="w-full max-w-md animate-rise-in space-y-4 rounded-2xl border border-ink-200 bg-[#FDFCFA] p-6 shadow-2xl">
+              <div className="flex items-center gap-3">
+                <span className="grid h-9 w-9 place-items-center rounded-full bg-cue-50 text-cue-600">
+                  <AlertTriangle className="h-5 w-5" />
+                </span>
+                <h3 className="text-[16px] font-semibold text-ink-900">End this negotiation?</h3>
               </div>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                This will immediately terminate the conversation and mark the vendor assignment as DECLINED. Any active
-                call will be disconnected.
+              <p className="text-[13px] leading-relaxed text-ink-600">
+                The conversation stops now and this vendor is marked as declined. Any call in progress will be hung up.
               </p>
               <div>
-                <label className="block text-xs text-zinc-300 mb-1">Reason (Optional):</label>
+                <label htmlFor="cancel-reason" className="eyebrow mb-1.5 block">
+                  Reason (optional)
+                </label>
                 <input
+                  id="cancel-reason"
                   type="text"
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
-                  placeholder="e.g. Budget mismatch, venue booked elsewhere"
-                  className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none focus:border-red-500/50"
+                  placeholder="e.g. Over budget, booked elsewhere"
+                  className="h-10 w-full rounded-lg border border-ink-200 bg-ink-50 px-3 text-[13px] text-ink-900 placeholder:text-ink-400 focus:border-cue-400 focus:bg-white focus:outline-none"
                 />
               </div>
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowCancelDialog(false)}
-                  className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10"
-                >
-                  Go Back
+              <div className="flex items-center justify-end gap-2 pt-1">
+                <button type="button" onClick={() => setShowCancelDialog(false)} className="btn-ghost">
+                  Keep negotiating
                 </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmCancel}
-                  disabled={Boolean(actionLoading)}
-                  className="px-4 py-1.5 rounded-lg text-xs font-bold text-white bg-red-600 hover:bg-red-500 flex items-center gap-1.5"
-                >
-                  {actionLoading === "cancel" && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  Confirm Termination
+                <button type="button" onClick={handleConfirmCancel} disabled={Boolean(actionLoading)} className="btn-cue">
+                  {actionLoading === "cancel" && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  End negotiation
                 </button>
               </div>
             </div>
@@ -954,5 +808,45 @@ export default function LiveNegotiationPage() {
         )}
       </div>
     </EventShell>
+  );
+}
+
+function Readout({
+  label,
+  value,
+  swatch,
+  tone,
+  note,
+  strong,
+}: {
+  label: string;
+  value: string;
+  swatch: string;
+  tone?: string;
+  note?: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className={`px-5 py-3.5 ${strong ? "bg-go-50/60" : ""}`}>
+      <div className="flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-label text-ink-500">
+        <span className={`h-2 w-2 rounded-sm ${swatch}`} />
+        {label}
+      </div>
+      <div className={`mt-1 font-display text-[22px] font-bold tabular-nums ${tone || "text-ink-900"}`} style={{ fontStretch: "90%" }}>
+        {value}
+      </div>
+      {note && <div className="text-[11px] font-semibold text-cue-600">{note}</div>}
+    </div>
+  );
+}
+
+function Marker({ pct, cls, label, big }: { pct: number; cls: string; label: string; big?: boolean }) {
+  return (
+    <div
+      className={`absolute top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-[#FDFCFA] transition-[left] duration-700 ${cls} ${big ? "h-5 w-5" : "h-3.5 w-3.5"}`}
+      style={{ left: `${pct}%` }}
+      title={label}
+      aria-label={label}
+    />
   );
 }

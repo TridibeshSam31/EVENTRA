@@ -16,7 +16,7 @@ import {
   type AgentRunEvent,
   type AgentRunRecord,
 } from "@/lib/api/agentRuns";
-import { openSseStream } from "@/lib/sse";
+import { onTabVisibilityChange, openSseStream } from "@/lib/sse";
 import { decideAutoNav, navTargetForEvent, type NavTarget } from "@/lib/agentRun/navigation";
 import { isExecuting, isStreamOpen, lifecycleOf } from "@/lib/agentRun/view";
 
@@ -73,6 +73,9 @@ function errorMessage(err: unknown, fallback: string): string {
 let streamAbort: AbortController | null = null;
 let streamGeneration = 0;
 let hydrateInFlight: { eventId: string; promise: Promise<void> } | null = null;
+// Stream paused because the tab is in the background; resumed (replaying by sequence) when visible.
+let pausedStream: { eventId: string; runId: string } | null = null;
+let visibilityBound = false;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -125,10 +128,31 @@ export const useAgentRunStore = create<AgentRunState>((set, get) => {
 
   function connect(eventId: string, runId: string) {
     get().disconnect();
+    bindVisibility();
     streamGeneration += 1;
     const controller = new AbortController();
     streamAbort = controller;
     void streamLoop(eventId, runId, streamGeneration, controller.signal);
+  }
+
+  function bindVisibility() {
+    if (visibilityBound) return;
+    visibilityBound = true;
+    onTabVisibilityChange(
+      () => {
+        const { eventId, run } = get();
+        if (streamAbort && eventId && run) {
+          pausedStream = { eventId, runId: run.run_id };
+          get().disconnect();
+          set({ connection: "idle" });
+        }
+      },
+      () => {
+        const paused = pausedStream;
+        pausedStream = null;
+        if (paused && get().eventId === paused.eventId && runIsLive()) connect(paused.eventId, paused.runId);
+      },
+    );
   }
 
   function adoptSnapshot(eventId: string, run: AgentRunRecord | null, events: AgentRunEvent[], live: boolean) {

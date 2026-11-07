@@ -21,6 +21,8 @@ import {
 import type { ExecutionPlanTask } from "@/types/api";
 import { updateTaskStatus } from "@/lib/api/live";
 import { ProvenanceBadge } from "./ProvenanceBadge";
+import { STATUS_CHIP, fmtDuration, fmtSlack, taskStatus } from "./planningFormat";
+import { humanizeCode, humanizeCategory, shortId } from "@/lib/humanize";
 
 interface TaskCommandProps {
   eventId: string;
@@ -174,7 +176,7 @@ export function TaskCommand({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Controls Bar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
+      <div className="surface space-y-3 p-4">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           {/* Search Input */}
           <div className="relative flex-1 max-w-md">
@@ -184,7 +186,7 @@ export function TaskCommand({
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search tasks, providers, or IDs..."
-              className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#D6003C] transition"
+              className="w-full rounded-lg border border-ink-200 bg-ink-50 py-2 pl-9 pr-3 text-[12.5px] text-ink-800 transition placeholder:text-ink-400 focus:border-ink-400 focus:bg-[#FDFCFA] focus:outline-none"
             />
           </div>
 
@@ -194,7 +196,7 @@ export function TaskCommand({
             <select
               value={groupBy}
               onChange={(e) => setGroupBy(e.target.value as GroupByOption)}
-              className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 bg-white focus:outline-none"
+              className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 bg-[#FDFCFA] focus:outline-none"
             >
               <option value="STATUS">Operational Status</option>
               <option value="CRITICAL_PATH">Critical Path</option>
@@ -218,10 +220,10 @@ export function TaskCommand({
             <button
               key={btn.id}
               onClick={() => setFilter(btn.id as FilterOption)}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
+              className={`rounded-md px-2.5 py-1 text-[12px] font-semibold transition ${
                 filter === btn.id
-                  ? "bg-slate-900 text-white shadow-xs"
-                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  ? "bg-ink-900 text-ink-50 shadow-sm"
+                  : "text-ink-600 hover:bg-ink-100 hover:text-ink-900"
               }`}
             >
               {btn.label}
@@ -248,13 +250,14 @@ export function TaskCommand({
 
         return (
           <div key={groupIdx} className="space-y-2">
-            <div className="flex items-center justify-between px-1">
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                {group.groupName} ({group.tasks.length})
+            <div className="flex items-center px-1 pt-1">
+              <span className="eyebrow text-ink-600">
+                {group.groupName} <span className="text-ink-400">· {group.tasks.length}</span>
               </span>
+              <span className="ml-3 h-px flex-1 bg-ink-200" aria-hidden />
             </div>
 
-            <div className="grid grid-cols-1 gap-2.5">
+            <div className="grid grid-cols-1 gap-2">
               {group.tasks.map((task) => {
                 const isCritical = task.is_critical_path;
                 const isCompleted = task.status.toUpperCase() === "COMPLETED";
@@ -264,53 +267,49 @@ export function TaskCommand({
                 return (
                   <div
                     key={task.task_id}
-                    className={`bg-white border rounded-xl p-4 shadow-xs transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                    className={`relative flex flex-col justify-between gap-4 overflow-hidden rounded-xl border bg-[#FDFCFA] p-4 pl-5 shadow-sm transition-all hover:shadow-md md:flex-row md:items-center ${
                       isCompleted
-                        ? "border-slate-200/80 bg-slate-50/50 opacity-80"
+                        ? "border-ink-200 bg-ink-50/60 opacity-75"
                         : isInProgress
-                        ? "border-blue-200 bg-white ring-1 ring-blue-100"
+                        ? "border-go-300 ring-1 ring-go-100"
                         : isCritical
-                        ? "border-rose-200 bg-white"
-                        : "border-slate-200"
+                        ? "border-cue-200"
+                        : "border-ink-200"
                     }`}
                   >
+                    <span
+                      className={`absolute inset-y-0 left-0 w-1 ${
+                        isCompleted ? "bg-go-400" : isInProgress ? "bg-go-500" : isCritical ? "bg-cue-500" : "bg-ink-200"
+                      }`}
+                      aria-hidden
+                    />
                     {/* Left: Task Identity & Info */}
                     <div className="flex-1 min-w-0">
                       <div className="flex flex-wrap items-center gap-2 mb-1">
-                        <span className="text-[10px] font-mono font-bold text-slate-400">
-                          {task.task_id}
-                        </span>
 
                         {isCritical && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200 flex items-center gap-1">
-                            <Activity className="w-2.5 h-2.5" /> Critical Path
+                          <span className="chip border-cue-200 bg-cue-50 text-cue-700">
+                            <span className="cue-light bg-cue-500" /> Critical path
                           </span>
                         )}
 
-                        <span
-                          className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${
-                            isCompleted
-                              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                              : isInProgress
-                              ? "bg-blue-50 text-blue-700 border-blue-200"
-                              : "bg-slate-100 text-slate-700 border-slate-200"
-                          }`}
-                        >
-                          {task.status}
+                        <span className={`chip ${STATUS_CHIP[taskStatus(task.status).tone]}`}>
+                          {isInProgress && <span className="cue-light bg-go-500 animate-cue-blink" />}
+                          {taskStatus(task.status).label}
                         </span>
 
                         {task.phase && (
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-mono text-slate-500 bg-slate-100">
-                            {task.phase}
+                          <span className="rounded bg-ink-100 px-1.5 py-0.5 text-[11px] text-ink-600">
+                            {humanizeCode(task.phase)}
                           </span>
                         )}
                       </div>
 
                       <h4
-                        className={`text-sm font-semibold ${
+                        className={`text-[14px] font-semibold ${
                           isCompleted
-                            ? "line-through text-slate-500"
-                            : "text-slate-900"
+                            ? "text-ink-500 line-through decoration-ink-300"
+                            : "text-ink-900"
                         }`}
                       >
                         {task.task_name}
@@ -330,8 +329,16 @@ export function TaskCommand({
                             {task.assigned_provider_name}
                           </span>
                         ) : (
-                          <span className="text-amber-600 font-medium">
-                            Unassigned Provider
+                          <span className="inline-flex items-center gap-1.5 font-medium text-standby-700">
+                            <span className="cue-light bg-standby-400" /> No vendor yet
+                            {task.required_provider_category && (
+                              <a
+                                href={`/events/${eventId}/${String(task.required_provider_category).toUpperCase() === "VENUE" ? "venue" : `vendors?category=${encodeURIComponent(String(task.required_provider_category).toUpperCase())}`}`}
+                                className="ml-1 font-semibold text-ink-800 underline decoration-ink-300 underline-offset-2 hover:text-cue-700"
+                              >
+                                Find {humanizeCategory(task.required_provider_category).toLowerCase()} vendor
+                              </a>
+                            )}
                           </span>
                         )}
 
@@ -347,15 +354,15 @@ export function TaskCommand({
                     {/* Right: Telemetry & Actions */}
                     <div className="flex items-center gap-3 shrink-0 border-t md:border-t-0 pt-3 md:pt-0 border-slate-100">
                       <div className="text-left md:text-right text-xs font-mono">
-                        <span className="text-[9px] uppercase font-bold text-slate-400 block font-sans">
+                        <span className="eyebrow block font-sans">
                           Duration
                         </span>
-                        <span className="font-semibold text-slate-800">
-                          {task.duration_minutes}m
+                        <span className="font-sans font-semibold text-slate-800">
+                          {fmtDuration(task.duration_minutes)}
                         </span>
-                        {task.slack_minutes != null && (
-                          <span className="text-[10px] text-slate-400 block">
-                            Slack: {task.slack_minutes}m
+                        {fmtSlack(task.slack_minutes) && (
+                          <span className="block font-sans text-[11px] text-slate-400" title={`Task ${shortId(task.task_id)}`}>
+                            {fmtSlack(task.slack_minutes)}
                           </span>
                         )}
                       </div>
@@ -373,19 +380,19 @@ export function TaskCommand({
                               )
                             }
                             disabled={isUpdating}
-                            className="px-3 py-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1.5 disabled:opacity-50 border-slate-200 hover:bg-slate-50 text-slate-700"
+                            className={`${task.status.toUpperCase() === "IN_PROGRESS" ? "btn bg-go-600 text-white hover:bg-go-700" : "btn-secondary"} h-8`}
                           >
                             {isUpdating ? (
                               <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />
                             ) : task.status.toUpperCase() === "IN_PROGRESS" ? (
                               <>
-                                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                Mark Complete
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Mark complete
                               </>
                             ) : (
                               <>
-                                <Zap className="w-3.5 h-3.5 text-blue-600" />
-                                Start Task
+                                <Zap className="w-3.5 h-3.5 text-go-600" />
+                                Start task
                               </>
                             )}
                           </button>
@@ -395,7 +402,7 @@ export function TaskCommand({
                           <button
                             onClick={() => handleStatusChange(task.task_id, "PENDING")}
                             disabled={isUpdating}
-                            className="px-2 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-500 hover:bg-slate-50 transition"
+                            className="btn-secondary h-8 w-8 px-0"
                             title="Reset to Pending"
                           >
                             {isUpdating ? (
@@ -416,11 +423,13 @@ export function TaskCommand({
       })}
 
       {tasks.length === 0 && (
-        <div className="p-12 text-center bg-white border border-slate-200 rounded-xl text-slate-500 text-xs">
-          <ListTodo className="w-8 h-8 mx-auto mb-2 text-slate-300" />
-          <p className="font-semibold text-slate-700">No planning tasks have been created.</p>
-          <p className="text-slate-400 mt-1">
-            Generate an operational plan or compile the final execution plan to materialize tasks.
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-ink-300 bg-[#FDFCFA]/60 px-6 py-12 text-center">
+          <div className="mb-4 grid h-11 w-11 place-items-center rounded-xl border border-ink-200 bg-[#FDFCFA] text-ink-500 shadow-sm">
+            <ListTodo className="h-5 w-5" />
+          </div>
+          <p className="text-[15px] font-semibold text-ink-900">No tasks yet</p>
+          <p className="mt-1.5 max-w-[46ch] text-[13px] text-ink-500">
+            Compile the final plan and the engine will break your event into tasks, with times and dependencies.
           </p>
         </div>
       )}

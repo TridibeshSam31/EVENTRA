@@ -13,6 +13,19 @@ from app.schemas.approval import (
     ApprovalRequestListResponse,
 )
 from app.schemas.action import ActionExecutionResponse
+from app.services.approval_presenter import ApprovalPresenter
+
+
+def _present(db: Session, approval, presenter: Optional[ApprovalPresenter] = None) -> ApprovalRequestResponse:
+    """Serialize an approval with the UX v3 human-facing fields. Presentation never blocks the response."""
+    response = ApprovalRequestResponse.model_validate(approval)
+    try:
+        extra = (presenter or ApprovalPresenter(db)).present(approval)
+        return ApprovalRequestResponse.model_validate({**response.model_dump(), **extra}) if extra else response
+    except Exception as exc:  # pragma: no cover - defensive: data oddities must not break approvals
+        import logging
+        logging.getLogger(__name__).warning("Approval presentation failed for %s: %s", getattr(approval, "id", "?"), exc)
+        return response
 
 router = APIRouter(prefix="/events", tags=["approvals"])
 
@@ -31,7 +44,7 @@ def create_approval_request(
     """Submit an operational action for formal approval review."""
     service = ApprovalService(db)
     approval = service.create_request(event_id, current_user_id, payload)
-    return ApprovalRequestResponse.model_validate(approval)
+    return _present(db, approval)
 
 
 @router.get(
@@ -57,9 +70,10 @@ def list_approval_requests(
         offset=offset,
         current_user_id=current_user_id,
     )
+    presenter = ApprovalPresenter(db)
     return ApprovalRequestListResponse(
         total=total,
-        items=[ApprovalRequestResponse.model_validate(item) for item in items],
+        items=[_present(db, item, presenter) for item in items],
         limit=limit,
         offset=offset,
     )
@@ -79,7 +93,7 @@ def get_approval_request(
     """Retrieves a single approval request with current decision status. Allows view with valid token."""
     service = ApprovalService(db)
     approval = service.get_request(event_id, approval_id, current_user_id=current_user_id, view_token=token)
-    return ApprovalRequestResponse.model_validate(approval)
+    return _present(db, approval)
 
 
 @router.get(
@@ -133,7 +147,7 @@ def approve_request(
         user_id=current_user_id,
         approval_id=approval_id,
     )
-    return ApprovalRequestResponse.model_validate(approval)
+    return _present(db, approval)
 
 
 @router.post(
@@ -155,7 +169,7 @@ def reject_request(
         approver_id=current_user_id,
         reason=payload.reason,
     )
-    return ApprovalRequestResponse.model_validate(approval)
+    return _present(db, approval)
 
 
 @router.post(
@@ -177,4 +191,4 @@ def cancel_request(
         requester_id=current_user_id,
         reason=payload.reason,
     )
-    return ApprovalRequestResponse.model_validate(approval)
+    return _present(db, approval)

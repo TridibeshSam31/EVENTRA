@@ -1,187 +1,267 @@
 "use client";
 
-import React from 'react';
-import Link from 'next/link';
-import { motion, AnimatePresence, useScroll, useTransform } from 'framer-motion';
-import { ArrowRight, ArrowDown } from 'lucide-react';
-import { EncryptedText } from '../../components/ui/encrypted-text';
-import BlueprintSection from '../../components/marketing/BlueprintSection';
-import FeaturesScrollSection from '../../components/marketing/FeaturesScrollSection';
-import ServicesSection from '../../components/marketing/ServicesSection';
-import FooterSection from '../../components/marketing/FooterSection';
+import React from "react";
+import Link from "next/link";
+import { motion, AnimatePresence, useScroll, useTransform, useReducedMotion } from "framer-motion";
+import { ArrowRight, ArrowDown } from "lucide-react";
+import { EncryptedText } from "../../components/ui/encrypted-text";
+import { BrandMark } from "../../components/shell/BrandMark";
+import BlueprintSection from "../../components/marketing/BlueprintSection";
+import FeaturesScrollSection from "../../components/marketing/FeaturesScrollSection";
+import ServicesSection from "../../components/marketing/ServicesSection";
+import FooterSection from "../../components/marketing/FooterSection";
 
-const WORDS = ["DETECT", "RECOVER", "ADAPT", "ORCHESTRATE", "ANTICIPATE"];
+// The hero cycles through the real event lifecycle, and the cue strip above it
+// lights the matching stage.
+const STAGES = ["DEFINE", "DISCOVER", "PLAN", "READY", "LIVE", "RECOVER"];
+
+// An illustrative recovery run (clearly labelled as an example on the page).
+const EXAMPLE_RUN: Array<{ t: string; kind: "source" | "agent" | "engine" | "go"; text: string }> = [
+  { t: "18:02:11", kind: "source", text: "WhatsApp · Caterer: “Stuck in traffic, won't make it.”" },
+  { t: "18:02:12", kind: "agent", text: "Interpreted as provider unavailable · catering · critical" },
+  { t: "18:02:13", kind: "engine", text: "Impact: 6 tasks blocked, dinner service on critical path" },
+  { t: "18:02:19", kind: "agent", text: "47 caterers found → 6 match 500 guests within 20 km" },
+  { t: "18:03:40", kind: "source", text: "Backup B replied: available, ₹85,000, 30 min away" },
+  { t: "18:03:41", kind: "engine", text: "Capacity ✓  Time ✓  Budget ✓  Location ✓" },
+  { t: "18:04:02", kind: "go", text: "You approved. Backup B booked. Dinner back on schedule." },
+];
+
+const KIND_STYLE: Record<string, { glyph: string; cls: string; label: string }> = {
+  source: { glyph: "◎", cls: "text-info-300", label: "Source" },
+  agent: { glyph: "✦", cls: "text-agent-300", label: "Agent" },
+  engine: { glyph: "✓", cls: "text-engine-300", label: "Engine" },
+  go: { glyph: "▲", cls: "text-go-400", label: "Done" },
+};
+
+function ExampleRun() {
+  const reduce = useReducedMotion();
+  const [count, setCount] = React.useState(reduce ? EXAMPLE_RUN.length : 1);
+
+  React.useEffect(() => {
+    if (reduce) return;
+    const id = setInterval(() => {
+      setCount((c) => (c >= EXAMPLE_RUN.length + 2 ? 1 : c + 1)); // hold on the final line briefly, then replay
+    }, 1400);
+    return () => clearInterval(id);
+  }, [reduce]);
+
+  const visible = EXAMPLE_RUN.slice(0, Math.min(count, EXAMPLE_RUN.length));
+
+  return (
+    <div className="w-full max-w-[460px] overflow-hidden rounded-2xl border border-white/[0.08] bg-white/[0.03] shadow-2xl backdrop-blur-md">
+      <div className="flex items-center justify-between border-b border-white/[0.06] px-4 py-2.5">
+        <span className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-label text-ink-400">
+          <span className="cue-light bg-cue-500 animate-cue-blink" />
+          Example run · caterer cancels
+        </span>
+        <span className="font-mono text-[10px] text-ink-500">recover</span>
+      </div>
+      <ol className="h-[236px] space-y-0 overflow-hidden px-4 py-3 font-mono text-[11.5px] leading-[1.55]">
+        <AnimatePresence initial={false}>
+          {visible.map((line) => {
+            const k = KIND_STYLE[line.kind];
+            return (
+              <motion.li
+                key={line.t + line.text}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.35, ease: [0.2, 0.7, 0.2, 1] }}
+                className="grid grid-cols-[64px_14px_1fr] gap-2 py-[3px]"
+              >
+                <span className="text-ink-500">{line.t}</span>
+                <span className={k.cls} title={k.label}>
+                  {k.glyph}
+                </span>
+                <span className={line.kind === "go" ? "text-go-300" : "text-ink-200"}>{line.text}</span>
+              </motion.li>
+            );
+          })}
+        </AnimatePresence>
+      </ol>
+      <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-white/[0.06] px-4 py-2.5 font-mono text-[10px] text-ink-500">
+        <span>
+          <span className="text-agent-300">✦</span> agent proposed
+        </span>
+        <span>
+          <span className="text-engine-300">✓</span> engine verified
+        </span>
+        <span>
+          <span className="text-info-300">◎</span> external source
+        </span>
+        <span>
+          <span className="text-go-400">▲</span> executed
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function LandingPage() {
-  const [currentWordIndex, setCurrentWordIndex] = React.useState(0);
+  const [stageIndex, setStageIndex] = React.useState(1);
   const { scrollY } = useScroll();
 
-  const navWidth = useTransform(scrollY, [0, 150], ["95%", "70%"]);
-  const navMaxWidth = useTransform(scrollY, [0, 150], ["1200px", "850px"]);
-  const navPadding = useTransform(scrollY, [0, 150], ["16px 24px", "8px 20px"]);
-  const navTop = useTransform(scrollY, [0, 150], ["24px", "16px"]);
+  const navWidth = useTransform(scrollY, [0, 150], ["95%", "72%"]);
+  const navMaxWidth = useTransform(scrollY, [0, 150], ["1200px", "980px"]);
+  const navPadding = useTransform(scrollY, [0, 150], ["14px 22px", "8px 16px"]);
+  const navTop = useTransform(scrollY, [0, 150], ["20px", "12px"]);
 
   React.useEffect(() => {
     const interval = setInterval(() => {
-      setCurrentWordIndex((prev) => (prev + 1) % WORDS.length);
-    }, 4000); // Change word every 4 seconds
+      setStageIndex((prev) => (prev + 1) % STAGES.length);
+    }, 3600);
     return () => clearInterval(interval);
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0E0E10] text-[#F7F7F5] selection:bg-[#D6003C] selection:text-white relative font-sans">
-      
-      {/* Background radial glow */}
-      <div 
-        className="absolute top-[30%] left-[10%] w-[400px] h-[400px] rounded-full pointer-events-none z-0"
-        style={{
-          background: 'radial-gradient(circle, rgba(214,0,60,0.1) 0%, rgba(214,0,60,0) 70%)'
-        }}
+    <div className="relative min-h-screen bg-ink-950 font-sans text-ink-50 selection:bg-cue-600 selection:text-white">
+      {/* Atmosphere: dot field + crimson stage glow */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[110vh] bg-dots-dark opacity-70" aria-hidden />
+      <div
+        className="pointer-events-none absolute left-1/2 top-[18%] z-0 h-[620px] w-[620px] -translate-x-1/2 rounded-full"
+        style={{ background: "radial-gradient(circle, rgba(214,0,60,0.16) 0%, rgba(214,0,60,0) 65%)" }}
+        aria-hidden
       />
 
-      {/* Floating Navbar */}
-      <motion.header 
-        style={{ top: navTop }}
-        className="fixed left-0 w-full z-50 flex justify-center px-6 transition-all"
-      >
-        <motion.div 
+      {/* Floating nav */}
+      <motion.header style={{ top: navTop }} className="fixed left-0 z-50 flex w-full justify-center px-4 sm:px-6">
+        <motion.div
           style={{ width: navWidth, maxWidth: navMaxWidth, padding: navPadding }}
-          className="flex items-center justify-between gap-10 rounded-full bg-black/30 backdrop-blur-md border border-white/10 shadow-[4px_4px_0px_rgba(255,255,255,0.05)] text-white"
+          className="flex min-w-0 items-center justify-between gap-6 rounded-full border border-white/10 bg-ink-950/60 text-white shadow-[0_10px_40px_-12px_rgba(0,0,0,0.6)] backdrop-blur-md"
         >
-          <Link href="/" className="flex items-center gap-3 font-bold tracking-widest uppercase text-sm pl-2 flex-shrink-0 group cursor-pointer">
-             <div className="w-8 h-8 rounded-full bg-[#D6003C] flex items-center justify-center border border-transparent shadow-[0_0_15px_rgba(214,0,60,0.5)] group-hover:scale-105 transition-transform">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="square" strokeLinejoin="miter">
-                  <polygon points="12 2 2 7 2 17 12 22 22 17 22 7"></polygon>
-                  <circle cx="12" cy="12" r="3" fill="white"></circle>
-                </svg>
-             </div>
-             <span className="group-hover:text-white transition-colors">Eventra</span>
+          <Link href="/" className="flex flex-shrink-0 items-center gap-2.5 pl-1">
+            <BrandMark className="h-7 w-7" />
+            <span className="font-display text-[14px] font-extrabold tracking-[0.1em]" style={{ fontStretch: "88%" }}>
+              EVENTRA
+            </span>
           </Link>
-          <nav className="hidden md:flex items-center justify-center gap-8 text-[11px] font-bold uppercase tracking-widest text-gray-500 flex-1 whitespace-nowrap overflow-hidden">
-            <Link href="#" className="hover:text-white transition-colors">Home</Link>
-            <Link href="#" className="hover:text-white transition-colors">Projects</Link>
-            <Link href="#" className="hover:text-white transition-colors">About</Link>
-            <Link href="#" className="hover:text-white transition-colors">Services</Link>
-            <Link href="#" className="hover:text-white transition-colors">FAQs</Link>
-            <Link href="#" className="hover:text-white transition-colors">Careers</Link>
+          <nav className="hidden min-w-0 flex-1 items-center justify-center gap-7 whitespace-nowrap text-[12.5px] font-medium text-ink-400 lg:flex">
+            <a href="#product" className="transition-colors hover:text-white">
+              Product
+            </a>
+            <a href="#features" className="transition-colors hover:text-white">
+              Features
+            </a>
+            <a href="#how" className="transition-colors hover:text-white">
+              How it works
+            </a>
+            <Link href="/events/conference_demo/live" className="transition-colors hover:text-white">
+              Live demo
+            </Link>
           </nav>
-          <Link href="/auth" className="hidden sm:inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest rounded-full bg-[#D6003C] text-white px-6 py-3 transition-colors border border-transparent hover:border-white hover:bg-white hover:text-black flex-shrink-0">
-            Initialize event <ArrowRight className="w-4 h-4" />
-          </Link>
+          <div className="flex flex-shrink-0 items-center gap-1.5">
+            <Link
+              href="/login"
+              className="hidden rounded-full px-4 py-2 text-[12.5px] font-semibold text-ink-300 transition-colors hover:text-white sm:inline-flex"
+            >
+              Sign in
+            </Link>
+            <Link
+              href="/dashboard"
+              className="inline-flex items-center gap-1.5 rounded-full bg-cue-600 px-4 py-2 text-[12.5px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2)] transition-colors hover:bg-cue-500"
+            >
+              Open app <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          </div>
         </motion.div>
       </motion.header>
 
-      <main className="relative z-10 flex flex-col items-center pt-[22vh] px-6 sm:px-12 max-w-6xl mx-auto min-h-screen">
-        
-        {/* Top Status Bar */}
-        <div className="w-full flex justify-between items-center text-[10px] font-bold tracking-[0.15em] text-[#6F6A72] uppercase mb-12">
-          <div className="flex items-center gap-3">
-            <span className="relative flex h-1.5 w-1.5">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#22C55E] opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-[#22C55E] shadow-[0_0_8px_#22C55E]"></span>
-            </span>
-            <span>Available for new events</span>
-          </div>
-          <div className="hidden md:block text-[#D6003C]">
-            ● SOFTWARE, AI & DESIGN
-          </div>
-          <div>
-            2026 EDITION
-          </div>
-        </div>
-
-        {/* Huge Animated Text */}
-        <div className="flex-1 flex items-center justify-center min-h-[300px] w-full mb-16 relative">
-           <AnimatePresence mode="wait">
-             <motion.div
-               key={WORDS[currentWordIndex]}
-               initial={{ opacity: 0 }}
-               animate={{ opacity: 1 }}
-               exit={{ opacity: 0 }}
-               transition={{ duration: 0.5 }}
-               className="text-center flex justify-center items-center w-full"
-             >
-                <EncryptedText
-                  text={WORDS[currentWordIndex]}
-                  revealDelayMs={70}
-                  flipDelayMs={30}
-                  className="font-bold font-[family-name:var(--font-merriweather)] text-[clamp(50px,10vw,150px)] tracking-tighter leading-none"
-                  encryptedClassName="text-[#D6003C] opacity-70 drop-shadow-[0_0_15px_rgba(214,0,60,0.5)]"
-                  revealedClassName="text-white drop-shadow-[0_0_20px_rgba(255,255,255,0.2)]"
-                  style={{
-                    WebkitMaskImage: 'radial-gradient(circle, black 35%, transparent 40%)',
-                    WebkitMaskSize: '6px 6px',
-                    maskImage: 'radial-gradient(circle, black 35%, transparent 40%)',
-                    maskSize: '6px 6px',
-                  }}
+      <main className="relative z-10 mx-auto flex min-h-screen max-w-6xl flex-col items-center px-5 pt-[18vh] sm:px-10">
+        {/* Cue strip — the six lifecycle stages, the current one lit */}
+        <ol className="mb-10 grid w-full grid-cols-3 gap-y-2 font-mono text-[10px] uppercase tracking-label sm:grid-cols-6" aria-label="Event lifecycle">
+          {STAGES.map((s, i) => {
+            const on = i === stageIndex;
+            return (
+              <li key={s} className="flex items-center gap-2">
+                <span
+                  className={`cue-light transition-colors duration-500 ${
+                    on ? "bg-cue-500" : i < stageIndex ? "bg-ink-500" : "bg-ink-700"
+                  }`}
                 />
-             </motion.div>
-           </AnimatePresence>
+                <span className={`transition-colors duration-500 ${on ? "text-white" : "text-ink-500"}`}>
+                  {String(i + 1).padStart(2, "0")} {s}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+
+        {/* Dot-matrix stage word */}
+        <div className="relative mb-12 flex min-h-[220px] w-full flex-1 items-center justify-center sm:min-h-[280px]">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={STAGES[stageIndex]}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.45 }}
+              className="flex w-full items-center justify-center text-center"
+              aria-live="polite"
+            >
+              <EncryptedText
+                text={STAGES[stageIndex]}
+                charset="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                revealDelayMs={70}
+                flipDelayMs={30}
+                className="font-display text-[clamp(64px,13vw,190px)] font-black leading-none tracking-[-0.04em]"
+                encryptedClassName="text-cue-500 opacity-80 drop-shadow-[0_0_18px_rgba(214,0,60,0.55)]"
+                revealedClassName="text-white drop-shadow-[0_0_24px_rgba(255,255,255,0.18)]"
+                style={{
+                  fontStretch: "80%",
+                  WebkitMaskImage: "radial-gradient(circle, black 38%, transparent 42%)",
+                  WebkitMaskSize: "6px 6px",
+                  maskImage: "radial-gradient(circle, black 38%, transparent 42%)",
+                  maskSize: "6px 6px",
+                }}
+              />
+            </motion.div>
+          </AnimatePresence>
         </div>
 
-        {/* Bottom Content Grid */}
-        <div className="w-full grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-12 lg:gap-20 items-end pb-12">
-          <div className="max-w-[48ch]">
-            <h1 className="text-[32px] sm:text-[36px] font-extrabold leading-[1.05] tracking-tight text-white m-0 mb-6">
-              Plan, run, and adapt<br/>event operations.
+        {/* Pitch + example run */}
+        <div className="grid w-full grid-cols-1 items-end gap-12 pb-16 lg:grid-cols-[1fr_auto] lg:gap-16">
+          <div className="max-w-[54ch]">
+            <h1
+              className="m-0 mb-5 font-display text-[36px] font-extrabold leading-[1] tracking-[-0.03em] text-white sm:text-[48px]"
+              style={{ fontStretch: "85%" }}
+            >
+              Plan the event. Run the event.{" "}
+              <span className="text-cue-500">Adapt when reality changes.</span>
             </h1>
-            
-            <p className="text-[#C9C4CB] text-[16px] sm:text-[18px] font-medium leading-[1.5] mb-8 max-w-[42ch]">
-              We help event organizers scale with strong flows, conversion-ready dashboards, and integrated tech, AI, design, and automation solutions.
+            <p className="mb-8 max-w-[50ch] text-[16px] leading-[1.6] text-ink-300 sm:text-[17px]">
+              EVENTRA finds real venues and vendors, calls and messages them for quotes, and when
+              something breaks on the day, traces the impact and lines up a recovery. Every step shows
+              what the agent proposed, what the engine verified, and what you approved.
             </p>
-            
-            <div className="flex flex-wrap items-center gap-4">
-              <Link 
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
                 href="/dashboard"
-                className="inline-flex items-center gap-2 text-[14px] font-bold rounded-full text-white transition-all duration-300 hover:scale-105 hover:shadow-[0_12px_28px_rgba(214,0,60,0.4)]"
-                style={{
-                  background: '#D6003C',
-                  padding: '12px 24px',
-                }}
+                className="inline-flex items-center gap-2 rounded-full bg-cue-600 px-6 py-3 text-[14px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_14px_30px_-10px_rgba(214,0,60,0.6)] transition-all hover:-translate-y-0.5 hover:bg-cue-500"
               >
-                <span>Initialize Event</span>
-                <ArrowRight className="w-4 h-4" />
+                Start planning <ArrowRight className="h-4 w-4" />
               </Link>
-              
-              <Link 
-                href="#features"
-                className="inline-flex items-center gap-2 text-[14px] font-bold rounded-full text-[#F7F7F5] transition-colors hover:bg-white/5"
-                style={{
-                  background: 'transparent',
-                  border: '1px solid rgba(247,247,245,0.18)',
-                  padding: '12px 20px'
-                }}
+              <a
+                href="#product"
+                className="inline-flex items-center gap-2 rounded-full border border-white/15 px-5 py-3 text-[14px] font-semibold text-ink-100 transition-colors hover:bg-white/5"
               >
-                <span>Our Work</span>
-                <ArrowDown className="w-4 h-4 text-[#F7F7F5]" />
-              </Link>
+                See how it works <ArrowDown className="h-4 w-4" />
+              </a>
             </div>
           </div>
 
-          <div className="hidden lg:flex flex-col items-end gap-3 pb-2">
-            <span className="text-[9.5px] font-bold uppercase tracking-[0.18em] text-[#5A555C]">
-              Move to push · Click to detonate
-            </span>
-            <div className="flex flex-col items-end gap-2 mt-2">
-              <span className="text-[9.5px] font-bold uppercase tracking-[0.18em] text-[#6F6A72]">
-                Behaviour
-              </span>
-              <div className="flex gap-[3px] rounded-full p-[3px] bg-white/[0.05] border border-white/10">
-                <button className="rounded-full px-[15px] py-2 text-[10.5px] font-bold uppercase tracking-[0.1em] bg-[#D6003C] text-white transition-all">
-                  Form
-                </button>
-                <button className="rounded-full px-[15px] py-2 text-[10.5px] font-bold uppercase tracking-[0.1em] bg-transparent text-[#9C96A0] hover:text-white transition-all">
-                  Drift
-                </button>
-              </div>
-            </div>
-          </div>
+          <ExampleRun />
         </div>
       </main>
 
-      <BlueprintSection />
-      <FeaturesScrollSection />
-      <ServicesSection />
+      <div id="product">
+        <BlueprintSection />
+      </div>
+      <div id="features">
+        <FeaturesScrollSection />
+      </div>
+      <div id="how">
+        <ServicesSection />
+      </div>
       <FooterSection />
     </div>
   );

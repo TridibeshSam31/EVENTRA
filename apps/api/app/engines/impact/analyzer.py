@@ -169,7 +169,7 @@ class ImpactAnalyzer:
                 delay_minutes = 60
             elif incident_type in ("VENDOR_NO_SHOW", "VENDOR_FAILURE", "VENDOR_CANCELLATION"):
                 # Default delay is duration of direct task or 120
-                delay_minutes = max((t.get("duration_minutes", 60) for t in direct_tasks_data), default=120)
+                delay_minutes = max((t.get("duration_minutes") or 60 for t in direct_tasks_data), default=120)
             elif incident_type in ("SCHEDULE_DEVIATION", "TASK_DELAY"):
                 delay_minutes = metadata.get("deviation_minutes", 30)
             elif incident_type in ("RESOURCE_SHORTAGE", "RESOURCE_UNAVAILABLE", "EQUIPMENT_FAILURE", "VENUE_ISSUE", "DEPENDENCY_FAILURE", "CAPACITY_CHANGE"):

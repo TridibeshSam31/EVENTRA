@@ -10,7 +10,8 @@ vi.mock("@/lib/api/agentRuns", async (importOriginal) => ({
   getCurrentAgentRun: vi.fn(),
   cancelAgentRun: vi.fn(),
 }));
-vi.mock("@/lib/sse", () => ({
+vi.mock("@/lib/sse", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sse")>()),
   openSseStream: (opts: any) => harness.current!.openSseStream(opts),
 }));
 
@@ -159,5 +160,25 @@ describe("agent run store", () => {
 
     expect(harness.current!.connections).toHaveLength(1);
     expect(store().connection).toBe("closed");
+  });
+});
+
+describe("background tabs", () => {
+  it("pauses the live stream while the tab is hidden and resumes it when visible", async () => {
+    const { onTabVisibilityChange } = await import("@/lib/sse");
+    const hidden = vi.fn();
+    const visible = vi.fn();
+    const stop = onTabVisibilityChange(hidden, visible);
+    const setState = (state: string) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    setState("hidden");
+    expect(hidden).toHaveBeenCalledTimes(1);
+    setState("visible");
+    expect(visible).toHaveBeenCalledTimes(1);
+    stop();
+    setState("hidden");
+    expect(hidden).toHaveBeenCalledTimes(1);
   });
 });

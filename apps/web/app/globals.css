@@ -2,111 +2,319 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * EVENTRA — "Run Sheet" design tokens.
+ * Warm paper canvas, ink type, crimson cue light. See tailwind.config.ts for
+ * the full palette and the legacy-hue remap.
+ */
 :root {
-  /* Clean Light Enterprise SaaS Tokens */
-  --background: 210 40% 98%;      /* #f8fafc slate-50 */
-  --foreground: 222 47% 11%;      /* #0f172a slate-900 */
-  
-  --card: 0 0% 100%;             /* #ffffff pure white */
-  --card-foreground: 222 47% 11%; /* #0f172a slate-900 */
-  
-  --popover: 0 0% 100%;          /* #ffffff */
-  --popover-foreground: 222 47% 11%;
-  
-  --primary: 343 100% 42%;        /* #D6003C brand accent */
+  --background: 40 27% 94%;        /* paper  #F4F1EB */
+  --foreground: 30 13% 9%;         /* ink-900 */
+
+  --card: 40 33% 99%;              /* #FDFCFA */
+  --card-foreground: 30 13% 9%;
+
+  --popover: 40 33% 99%;
+  --popover-foreground: 30 13% 9%;
+
+  --primary: 343 100% 42%;         /* cue #D6003C */
   --primary-foreground: 0 0% 100%;
-  
-  --secondary: 210 40% 96%;      /* #f1f5f9 slate-100 */
-  --secondary-foreground: 222 47% 11%;
-  
-  --muted: 210 40% 96%;          /* #f1f5f9 */
-  --muted-foreground: 215 16% 47%;/* #64748b slate-500 */
-  
-  --accent: 210 40% 96%;
-  --accent-foreground: 222 47% 11%;
-  
-  --destructive: 0 84% 60%;      /* #dc2626 red-600 */
+
+  --secondary: 38 20% 92%;
+  --secondary-foreground: 30 13% 9%;
+
+  --muted: 38 20% 92%;
+  --muted-foreground: 34 8% 44%;
+
+  --accent: 38 20% 92%;
+  --accent-foreground: 30 13% 9%;
+
+  --destructive: 343 100% 42%;
   --destructive-foreground: 0 0% 100%;
-  
-  --border: 214 32% 91%;         /* #e2e8f0 slate-200 */
-  --input: 214 32% 91%;          /* #e2e8f0 */
-  --ring: 215 20% 65%;           /* #94a3b8 slate-400 */
-  
+
+  --border: 38 17% 86%;            /* ink-200 */
+  --input: 38 17% 86%;
+  --ring: 343 100% 42%;
+
   --radius: 0.5rem;
 
-  /* Semantic Status Variables */
-  --success: 158 64% 52%;        /* #10b981 emerald-500 */
-  --success-foreground: 161 94% 13%;
-  --warning: 38 92% 50%;         /* #f59e0b amber-500 */
-  --warning-foreground: 26 83% 14%;
-  --info: 217 91% 60%;           /* #3b82f6 blue-500 */
-  --info-foreground: 224 76% 20%;
+  --success: 147 75% 35%;
+  --success-foreground: 0 0% 100%;
+  --warning: 33 90% 46%;
+  --warning-foreground: 0 0% 100%;
+  --info: 228 74% 60%;
+  --info-foreground: 0 0% 100%;
+
+  /* Raw values for inline styles / SVG */
+  --ink-950: #100e0c;
+  --ink-900: #1b1815;
+  --paper: #f4f1eb;
+  --cue: #d6003c;
+  --go: #179e56;
+  --standby: #dd800b;
+  --agent: #5d47e1;
+  --engine: #157d76;
+
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background-color: #f8fafc;
-  color: #0f172a;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  background-color: var(--paper);
+  color: var(--ink-900);
+  font-feature-settings: "ss01", "cv11";
   overflow-x: hidden;
 }
 
-/* Subtle, clean enterprise scrollbars */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: #f1f5f9;
-}
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+::selection {
+  background: #d6003c;
+  color: #fff;
 }
 
-/* Operational pulse indicators */
+/* Headings default to the display face; utilities can still override. */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display), var(--font-body), ui-sans-serif, sans-serif;
+  letter-spacing: -0.015em;
+}
+
+/* Numbers in data UIs should line up */
+.font-mono,
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 2px solid #d6003c;
+  outline-offset: 2px;
+}
+/* Text fields show focus through their own border/ring instead of an outline */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+  border-color: #1b1815;
+}
+
+/* Quiet, warm scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #d9d3c8;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b9b1a4;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+@layer components {
+  /* ── Surfaces ─────────────────────────────────────────── */
+  .surface {
+    @apply rounded-xl border border-ink-200 bg-[#FDFCFA] shadow-sm;
+  }
+  .surface-sunk {
+    @apply rounded-xl border border-ink-200/80 bg-ink-100/60;
+  }
+  .surface-ink {
+    @apply rounded-xl border border-white/[0.07] bg-ink-950 text-ink-100;
+  }
+
+  /* ── Type ─────────────────────────────────────────────── */
+  .eyebrow {
+    @apply font-mono text-[10.5px] font-medium uppercase tracking-label text-ink-500;
+  }
+  .display-xl {
+    @apply font-display font-extrabold tracking-[-0.035em] leading-[0.92];
+    font-stretch: 85%;
+  }
+  .display {
+    @apply font-display font-bold tracking-[-0.025em] leading-[1.02];
+    font-stretch: 90%;
+  }
+  .timecode {
+    @apply font-mono tabular-nums tracking-tight;
+  }
+
+  /* ── Buttons ──────────────────────────────────────────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-3.5 h-9 text-[13px] font-semibold transition-[background-color,color,box-shadow,transform] duration-150 active:translate-y-px disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn bg-ink-900 text-ink-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_1px_2px_rgba(16,14,12,0.3)] hover:bg-ink-800;
+  }
+  .btn-cue {
+    @apply btn bg-cue-600 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.18),0_1px_2px_rgba(110,10,39,0.35)] hover:bg-cue-700;
+  }
+  .btn-secondary {
+    @apply btn border border-ink-200 bg-[#FDFCFA] text-ink-800 shadow-sm hover:bg-ink-50 hover:border-ink-300;
+  }
+  .btn-ghost {
+    @apply btn text-ink-600 hover:bg-ink-100 hover:text-ink-900;
+  }
+
+  /* ── Chips / cue lights ───────────────────────────────── */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold leading-4;
+  }
+  .cue-light {
+    @apply relative inline-flex h-2 w-2 shrink-0 rounded-full;
+  }
+  .cue-light::after {
+    content: "";
+    @apply absolute inset-0 rounded-full opacity-60 blur-[3px];
+    background: inherit;
+  }
+
+  /* ── Data rows ────────────────────────────────────────── */
+  .ruled > * + * {
+    @apply border-t border-dashed border-ink-200;
+  }
+}
+
+/* ── Motion ──────────────────────────────────────────────── */
 @keyframes radar-pulse {
   0% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.4);
+    box-shadow: 0 0 0 0 rgba(214, 0, 60, 0.4);
   }
   70% {
     transform: scale(1);
-    box-shadow: 0 0 0 6px rgba(220, 38, 38, 0);
+    box-shadow: 0 0 0 6px rgba(214, 0, 60, 0);
   }
   100% {
     transform: scale(0.95);
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
+    box-shadow: 0 0 0 0 rgba(214, 0, 60, 0);
   }
 }
-
 .animate-radar {
   animation: radar-pulse 2s infinite;
 }
 
 @keyframes live-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.5);
+    box-shadow: 0 0 0 0 rgba(23, 158, 86, 0.5);
   }
   70% {
-    box-shadow: 0 0 0 5px rgba(16, 185, 129, 0);
+    box-shadow: 0 0 0 5px rgba(23, 158, 86, 0);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    box-shadow: 0 0 0 0 rgba(23, 158, 86, 0);
   }
 }
-
 .animate-live {
   animation: live-pulse 2s infinite;
 }
 
-/* Subtle subtle grid overlay for technical maps when enabled */
-.bg-grid-pattern {
-  background-size: 24px 24px;
-  background-image: 
-    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+@keyframes workspace-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes workspace-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+@keyframes workspace-ping {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
 }
 
+.workspace-loading {
+  opacity: 0;
+  animation: workspace-fade-in 300ms ease-out 150ms forwards;
+}
+.workspace-shimmer {
+  background: linear-gradient(90deg, #efebe4 25%, #e4dfd6 37%, #efebe4 63%);
+  background-size: 400% 100%;
+  animation: workspace-shimmer 1.4s ease-in-out infinite;
+}
+.workspace-ping {
+  animation: workspace-ping 1.2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.workspace-enter {
+  animation: workspace-fade-in 320ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+/* Staggered entry for direct children */
+.stagger > * {
+  animation: workspace-fade-in 420ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.stagger > *:nth-child(2) { animation-delay: 50ms; }
+.stagger > *:nth-child(3) { animation-delay: 100ms; }
+.stagger > *:nth-child(4) { animation-delay: 150ms; }
+.stagger > *:nth-child(5) { animation-delay: 200ms; }
+.stagger > *:nth-child(6) { animation-delay: 250ms; }
+.stagger > *:nth-child(n + 7) { animation-delay: 300ms; }
+
+/* ── Textures ────────────────────────────────────────────── */
+.bg-grid-pattern {
+  background-size: 24px 24px;
+  background-image: linear-gradient(to right, rgba(27, 24, 21, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(27, 24, 21, 0.045) 1px, transparent 1px);
+}
+.bg-dots {
+  background-image: radial-gradient(rgba(27, 24, 21, 0.12) 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+.bg-dots-dark {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.07) 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+/* Paper grain — a very light SVG noise so large paper areas don't look flat */
+.grain {
+  position: relative;
+}
+.grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.35;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.42  0 0 0 0 0.38  0 0 0 0 0.33  0 0 0 0.07 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .workspace-loading,
+  .workspace-enter {
+    opacity: 1;
+  }
+}

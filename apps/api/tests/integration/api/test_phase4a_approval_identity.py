@@ -63,6 +63,8 @@ def test_event_with_owner(db_session, owner_user):
 
 @pytest.fixture
 def test_shortlist_entry(db_session, test_event_with_owner):
+    # Assignments reference vendors.id, so the selected provider must be a real vendor row.
+    db_session.add(Vendor(id="prov-venue-4a-1", name="Taj Palace New Delhi", category="VENUE", city="New Delhi"))
     entry = EventShortlistEntry(
         id="sl-entry-4a-1",
         event_id=test_event_with_owner.id,

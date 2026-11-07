@@ -144,7 +144,7 @@ export function CallExecutionCard({
 
   return (
     <div
-      className={`p-3.5 rounded-xl border border-slate-200 bg-white shadow-xs space-y-2.5 ${className}`}
+      className={`p-3.5 rounded-xl border border-slate-200 bg-[#FDFCFA] shadow-sm space-y-2.5 ${className}`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2">
@@ -167,6 +167,9 @@ export function CallExecutionCard({
           {config.label}
         </span>
       </div>
+
+      {/* Call state machine — only steps the backend confirmed are lit */}
+      <CallStateTrack state={normState} />
 
       {/* Operational Telemetry Grid */}
       <div className="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-2.5 rounded-lg border border-slate-100">
@@ -222,9 +225,48 @@ export function CallExecutionCard({
           className="w-full mt-1 py-1.5 px-3 rounded-lg border border-slate-300 text-xs font-semibold text-slate-700 hover:bg-slate-50 flex items-center justify-center gap-1.5 transition disabled:opacity-50"
         >
           <RotateCcw className={`w-3 h-3 ${isRetrying ? "animate-spin" : ""}`} />
-          <span>{isRetrying ? "Re-initiating Call..." : "Retry Telephony Call"}</span>
+          <span>{isRetrying ? "Calling again…" : "Retry call"}</span>
         </button>
       )}
     </div>
+  );
+}
+
+const CALL_STEPS: Array<{ id: CallState; label: string }> = [
+  { id: "QUEUED", label: "Queued" },
+  { id: "RINGING", label: "Ringing" },
+  { id: "CONNECTED", label: "Connected" },
+  { id: "COMPLETED", label: "Done" },
+];
+
+function CallStateTrack({ state }: { state: CallState }) {
+  const order: Record<string, number> = { QUEUED: 0, RINGING: 1, CONNECTED: 2, IN_PROGRESS: 2, COMPLETED: 3 };
+  const failed = state === "FAILED" || state === "NO_ANSWER" || state === "BUSY" || state === "CANCELED";
+  const reached = order[state] ?? (failed ? 1 : -1);
+  const live = state === "RINGING" || state === "CONNECTED" || state === "IN_PROGRESS";
+  return (
+    <ol className="flex items-center gap-1" aria-label={`Call state: ${state.toLowerCase().replace(/_/g, " ")}`}>
+      {CALL_STEPS.map((s, i) => {
+        const done = i <= reached && !(failed && i === reached);
+        const isFailHere = failed && i === reached;
+        const isNow = !failed && i === reached;
+        return (
+          <li key={s.id} className="flex min-w-0 flex-1 flex-col gap-1">
+            <span
+              className={`h-1 rounded-full ${
+                isFailHere ? "bg-cue-500" : done ? (isNow && live ? "bg-go-500 animate-cue-blink" : "bg-go-500") : "bg-ink-200"
+              }`}
+            />
+            <span
+              className={`truncate font-mono text-[9.5px] uppercase tracking-label ${
+                isFailHere ? "text-cue-600" : done ? "text-ink-700" : "text-ink-400"
+              }`}
+            >
+              {isFailHere ? state.replace(/_/g, " ").toLowerCase() : s.label}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

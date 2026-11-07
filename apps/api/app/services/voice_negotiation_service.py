@@ -335,7 +335,9 @@ class VoiceNegotiationService:
             )
 
         quoted_val = float(response.quoted_price)
-        assignment.quoted_amount = quoted_val
+        from app.services.quotes_service import apply_quote
+
+        apply_quote(self.db, assignment, quoted_val, source="VOICE_CALL")
 
         # Ceiling & Target Authority Boundaries
         ceiling = context.allowed_price_limit
@@ -367,7 +369,10 @@ class VoiceNegotiationService:
         # Case A: Over Ceiling → Counter-offer toward target or Escalate
         if ceiling is not None and quoted_val > ceiling:
             round_num = int(assignment.negotiation_round or "0")
-            if round_num < 3 and target is not None:
+            from app.core.config import settings as _settings
+
+            # In-call counters are limited to 3, and never beyond the global negotiation round cap.
+            if round_num < min(3, int(_settings.NEGOTIATION_MAX_ROUNDS)) and target is not None:
                 # Deterministic counter-offer using NegotiationService rules
                 assignment.negotiation_status = NegotiationStatus.NEGOTIATING.value
                 self.db.commit()

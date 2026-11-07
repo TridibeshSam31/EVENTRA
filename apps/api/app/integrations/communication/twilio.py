@@ -6,20 +6,26 @@ Follows official Twilio Programmable Voice REST API and TwiML Media Streams spec
 Falls back safely to MockCommunicationProvider when unconfigured.
 """
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import time
 import uuid
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
+from xml.sax.saxutils import escape as xml_escape
 import httpx
 
 from app.core.config import settings
+from app.core.phone import scrub_phone_numbers
 from app.integrations.base import ProviderCommunicationProvider, IntegrationResult, IntegrationSource
 from app.integrations.communication.mock import MockCommunicationProvider
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT = object()
+_ATTR = {'"': "&quot;"}
 
 
 def _normalize_e164_phone(phone: Optional[str]) -> str:
@@ -34,6 +40,64 @@ def _normalize_e164_phone(phone: Optional[str]) -> str:
         else:
             cleaned = "+" + cleaned
     return cleaned
+
+
+_TWILIO_ERROR_HINTS = {
+    21219: " (Twilio trial accounts can only call Verified Caller IDs: verify this number in the Twilio console.)",
+    21215: " (Enable voice geo-permissions for this country in the Twilio console.)",
+    21211: " (The destination number is invalid.)",
+    21210: " (TWILIO_CALLER_NUMBER is not a number owned by this Twilio account.)",
+}
+
+
+def _call_failure(code: str, reason: str) -> IntegrationResult[Dict[str, Any]]:
+    return IntegrationResult(
+        data={"error_code": code, "channel": "CALL"},
+        source=IntegrationSource.REAL,
+        success=False,
+        error=reason,
+    )
+
+
+def public_endpoint_error(callback_url: str, timeout: float = 6.0) -> Optional[str]:
+    """Checks that the public tunnel actually reaches this API before a real call is placed.
+
+    Without it Twilio connects the vendor to a dead stream URL: the phone rings, the vendor
+    hears silence and no status update can come back. Returns None when reachable.
+    """
+    parts = urlsplit(callback_url)
+    health_url = f"{parts.scheme}://{parts.netloc}/health"
+    try:
+        resp = httpx.get(health_url, timeout=timeout)
+    except httpx.HTTPError:
+        return "The public tunnel URL in TWILIO_CALLBACK_URL is not reachable. Start the tunnel and update TWILIO_STREAM_URL/TWILIO_CALLBACK_URL in .env; no call was placed."
+    if resp.status_code != 200:
+        return f"The public tunnel returned HTTP {resp.status_code} instead of reaching this API (tunnel stopped or URL changed). Restart the tunnel and update .env; no call was placed."
+    return None
+
+
+def sign_stream_session(session_id: str) -> str:
+    """Token proving a media stream was started by a call this API placed."""
+    return hmac.new(settings.SECRET_KEY.encode("utf-8"), f"twilio-stream:{session_id}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def verify_stream_token(session_id: Optional[str], token: Optional[str]) -> bool:
+    if not session_id or not token:
+        return False
+    return hmac.compare_digest(sign_stream_session(session_id), token)
+
+
+def build_stream_twiml(stream_url: str, parameters: Dict[str, str]) -> str:
+    """Builds <Connect><Stream> TwiML with XML-escaped custom parameters."""
+    param_xml = "".join(
+        f'<Parameter name="{xml_escape(str(k), _ATTR)}" value="{xml_escape(str(v), _ATTR)}" />'
+        for k, v in parameters.items()
+        if v is not None and v != ""
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<Response><Connect><Stream url="{xml_escape(stream_url, _ATTR)}">{param_xml}</Stream></Connect></Response>'
+    )
 
 
 class TwilioVoiceAdapter(ProviderCommunicationProvider):
@@ -225,6 +289,115 @@ class TwilioVoiceAdapter(ProviderCommunicationProvider):
             res.source = IntegrationSource.MOCK
             res.error = err_msg
             return res
+
+    def fetch_call(self, call_sid: str) -> Optional[Dict[str, Any]]:
+        """Reads a call's current state from Twilio (used when status callbacks cannot arrive)."""
+        if not self.is_configured:
+            return None
+        url = f"https://api.twilio.com/2010-04-01/Accounts/{self.account_sid}/Calls/{call_sid}.json"
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as http_client:
+                resp = http_client.get(url, auth=(self.account_sid, self.auth_token))
+        except httpx.HTTPError:
+            return None
+        if resp.status_code != 200:
+            return None
+        body = resp.json()
+        return {"status": body.get("status"), "duration": body.get("duration"), "answered_by": body.get("answered_by")}
+
+    def place_outbound_call(
+        self,
+        to_e164: str,
+        stream_parameters: Dict[str, str],
+        status_callback_url: Optional[str] = None,
+    ) -> IntegrationResult[Dict[str, Any]]:
+        """Places a real outbound call whose audio is bridged to the AI voice agent.
+
+        Single request, no SDK/HTTP double-submit and no mock fallback: if Twilio does
+        not return a CallSid the call was not placed. Success here only means Twilio
+        queued the call; ringing/answered/completed arrive via the status callback.
+        """
+        start_time = time.time()
+        if not self.is_configured:
+            return _call_failure(
+                "TWILIO_NOT_CONFIGURED",
+                "Phone calling is not configured. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_CALLER_NUMBER in .env.",
+            )
+        stream_url = (self.stream_url or "").strip()
+        if not stream_url.startswith("wss://") or "example.com" in stream_url or "api.eventra.ai" in stream_url:
+            return _call_failure(
+                "TWILIO_STREAM_URL_INVALID",
+                "TWILIO_STREAM_URL must be a public wss:// URL that reaches this API (start a tunnel and update .env).",
+            )
+        callback_url = (status_callback_url or self.callback_url or "").strip()
+        if not callback_url.startswith("https://"):
+            return _call_failure(
+                "TWILIO_CALLBACK_URL_INVALID",
+                "TWILIO_CALLBACK_URL must be a public https:// URL so real call statuses can be received.",
+            )
+
+        tunnel_error = public_endpoint_error(callback_url)
+        if tunnel_error:
+            return _call_failure("TWILIO_TUNNEL_UNREACHABLE", tunnel_error)
+
+        params = dict(stream_parameters)
+        params["stream_token"] = sign_stream_session(params.get("session_id", ""))
+        twiml = build_stream_twiml(stream_url, params)
+
+        form = {
+            "To": to_e164,
+            "From": self.caller_number,
+            "Twiml": twiml,
+            "StatusCallback": callback_url,
+            "StatusCallbackMethod": "POST",
+            "Timeout": "30",
+            # httpx encodes a list value as a repeated form key, which Twilio expects here.
+            "StatusCallbackEvent": ["initiated", "ringing", "answered", "completed"],
+        }
+
+        api_url = f"https://api.twilio.com/2010-04-01/Accounts/{self.account_sid}/Calls.json"
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as http_client:
+                resp = http_client.post(api_url, data=form, auth=(self.account_sid, self.auth_token))
+        except httpx.TimeoutException:
+            # The request may or may not have reached Twilio; never auto-retry a call.
+            return _call_failure(
+                "TWILIO_TIMEOUT",
+                "Twilio did not respond in time. Check the Twilio console before retrying to avoid a duplicate call.",
+            )
+        except httpx.HTTPError:
+            return _call_failure("TWILIO_UNREACHABLE", "Could not reach the Twilio API.")
+
+        try:
+            body = resp.json()
+        except Exception:
+            body = {}
+        if resp.status_code not in (200, 201) or not body.get("sid"):
+            code = body.get("code")
+            message = scrub_phone_numbers(str(body.get("message") or f"HTTP {resp.status_code}"))[:300]
+            hint = _TWILIO_ERROR_HINTS.get(code, "")
+            return _call_failure(f"TWILIO_{code or resp.status_code}", f"Twilio rejected the call: {message}{hint}")
+
+        return IntegrationResult(
+            data={
+                "call_sid": body["sid"],
+                "status": body.get("status") or "queued",
+                "session_id": params.get("session_id"),
+                "channel": "CALL",
+            },
+            source=IntegrationSource.REAL,
+            success=True,
+            latency_ms=round((time.time() - start_time) * 1000, 2),
+        )
+
+    def validate_request_signature(self, url: str, params: Dict[str, Any], signature: Optional[str]) -> bool:
+        """Validates X-Twilio-Signature for a form-encoded webhook (HMAC-SHA1 of URL + sorted params)."""
+        if not signature or not self.auth_token:
+            return False
+        payload = url + "".join(f"{key}{params[key]}" for key in sorted(params.keys()))
+        digest = hmac.new(self.auth_token.encode("utf-8"), payload.encode("utf-8"), hashlib.sha1).digest()
+        expected = base64.b64encode(digest).decode("ascii")
+        return hmac.compare_digest(expected, signature)
 
     def hangup_call(
         self,

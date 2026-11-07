@@ -46,6 +46,7 @@ import type {
 } from "@/types/api";
 import type { ActivityLogItem } from "@/types/activityLog";
 import { useEventWorkspace } from "@/hooks/useEventWorkspace";
+import { useWorkspaceStore } from "@/stores/workspaceStore";
 
 import { OperationalHealthCard } from "./OperationalHealthCard";
 import { ExecutionOverview } from "./ExecutionOverview";
@@ -144,18 +145,25 @@ export function LiveOperationsCommand({
   // Initial load + Controlled fallback polling only if SSE is disconnected
   useEffect(() => {
     loadLiveData();
-    if (sseConnected) return; // Real-time mutations streamed via SSE
-
+    // The live stream signals changes (liveVersion, below) but doesn't carry this data, so keep
+    // a slower safety poll while connected — never let event-day data silently freeze.
     const intervalId = setInterval(() => {
       // Avoid polling if browser tab is in background
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
         return;
       }
       loadLiveData();
-    }, 8000);
+    }, sseConnected ? 30000 : 8000);
 
     return () => clearInterval(intervalId);
   }, [loadLiveData, sseConnected]);
+
+  const liveVersion = useWorkspaceStore((s) => (s.eventId === eventId ? s.liveVersion : 0));
+  useEffect(() => {
+    if (!liveVersion) return;
+    const t = setTimeout(loadLiveData, 400);
+    return () => clearTimeout(t);
+  }, [liveVersion, loadLiveData]);
 
   // Action: Conclude Event
   const handleConcludeEvent = async () => {
@@ -189,12 +197,12 @@ export function LiveOperationsCommand({
   return (
     <div className={`space-y-4 ${className}`}>
       {/* Top Command Bar & Operational Pulse */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs">
+      <div className="surface p-5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2 mb-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
-                <Radio className="w-3 h-3 text-[#D6003C] animate-pulse" />
+              <span className="eyebrow bg-slate-100 px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
+                <Radio className="w-3 h-3 text-cue-600 animate-pulse" />
                 Live Operational Command
               </span>
               <ProvenanceBadge source="ENGINE" size="sm" />
@@ -322,11 +330,11 @@ export function LiveOperationsCommand({
         </div>
 
         {/* Incident Monitor */}
-        <div className="lg:col-span-5 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden flex flex-col">
+        <div className="lg:col-span-5 surface overflow-hidden flex flex-col">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
-                <AlertTriangle className="w-3 h-3 text-[#D6003C]" />
+              <span className="eyebrow bg-[#FDFCFA] px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
+                <AlertTriangle className="w-3 h-3 text-cue-600" />
                 Incident Monitor
               </span>
               <span
@@ -342,7 +350,7 @@ export function LiveOperationsCommand({
 
             <Link
               href={`/events/${eventId}/incidents`}
-              className="text-xs font-semibold text-[#D6003C] hover:underline inline-flex items-center gap-1"
+              className="text-xs font-semibold text-cue-600 hover:underline inline-flex items-center gap-1"
             >
               <span>Incident Command</span>
               <ExternalLink className="w-3 h-3" />
@@ -353,7 +361,7 @@ export function LiveOperationsCommand({
             {activeIncidents.map((inc) => (
               <div
                 key={inc.id}
-                className="p-3 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-all text-xs space-y-1.5"
+                className="p-3 rounded-lg border border-slate-200 bg-[#FDFCFA] hover:border-slate-300 transition-all text-xs space-y-1.5"
               >
                 <div className="flex items-center justify-between">
                   <span className="px-1.5 py-0.2 rounded text-[9px] font-bold uppercase bg-rose-50 text-rose-700 border border-rose-200">
@@ -376,8 +384,8 @@ export function LiveOperationsCommand({
                     Status: {inc.status}
                   </span>
                   <Link
-                    href={`/events/${eventId}/recovery?incidentId=${inc.id}`}
-                    className="text-[10px] font-bold text-[#D6003C] hover:underline"
+                    href={`/events/${eventId}/incidents?incidentId=${inc.id}`}
+                    className="text-[10px] font-bold text-cue-600 hover:underline"
                   >
                     View Recovery &rarr;
                   </Link>
@@ -401,10 +409,10 @@ export function LiveOperationsCommand({
       {/* Row 5: Pending Governance Approvals & Live Activity Log */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Pending Approvals */}
-        <div className="lg:col-span-6 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div className="lg:col-span-6 surface overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">
+              <span className="eyebrow bg-[#FDFCFA] px-2 py-0.5 rounded border border-slate-200">
                 Governance Gate
               </span>
               <span className="text-xs font-bold text-slate-800">
@@ -413,7 +421,7 @@ export function LiveOperationsCommand({
             </div>
             <Link
               href={`/events/${eventId}/approvals`}
-              className="text-xs font-semibold text-[#D6003C] hover:underline inline-flex items-center gap-1"
+              className="text-xs font-semibold text-cue-600 hover:underline inline-flex items-center gap-1"
             >
               <span>Approvals Command</span>
               <ExternalLink className="w-3 h-3" />
@@ -456,11 +464,11 @@ export function LiveOperationsCommand({
         </div>
 
         {/* Live Activity Stream */}
-        <div className="lg:col-span-6 bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
+        <div className="lg:col-span-6 surface overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
-                <History className="w-3 h-3 text-[#D6003C]" />
+              <span className="eyebrow bg-[#FDFCFA] px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
+                <History className="w-3 h-3 text-cue-600" />
                 Activity Stream
               </span>
               <span className="text-xs font-bold text-slate-800">
@@ -469,7 +477,7 @@ export function LiveOperationsCommand({
             </div>
             <Link
               href={`/events/${eventId}/activity`}
-              className="text-xs font-semibold text-[#D6003C] hover:underline inline-flex items-center gap-1"
+              className="text-xs font-semibold text-cue-600 hover:underline inline-flex items-center gap-1"
             >
               <span>Full Feed</span>
               <ExternalLink className="w-3 h-3" />

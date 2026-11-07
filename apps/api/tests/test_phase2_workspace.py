@@ -200,7 +200,7 @@ def test_operations_status_coherent_snapshot(test_client, db_session):
 
 def test_explicit_selection_persistence_and_assignment(test_client, db_session):
     """Selecting a candidate updates status to SELECTED, records selected_by/selected_at,
-    creates VendorAssignment, sets event.venue_id if venue, and survives re-fetch."""
+    sets event.venue_id if venue, and survives re-fetch."""
     event = Event(
         id="evt-select-1",
         name="Tech Conference 2026",
@@ -262,11 +262,10 @@ def test_explicit_selection_persistence_and_assignment(test_client, db_session):
     assert selections[0]["selected_by"] == "organizer_jane"
     assert selections[0]["selected_at"] is not None
 
-    # VendorAssignment was created
+    # A Venue is not a vendors row: no VendorAssignment is created for it (vendor_id is a
+    # foreign key to vendors, which Postgres enforces even though SQLite does not).
     assignments = db_session.query(VendorAssignment).filter(VendorAssignment.event_id == "evt-select-1").all()
-    assert len(assignments) == 1
-    assert assignments[0].category.upper() == "VENUE"
-    assert assignments[0].status == "ASSIGNED"
+    assert len(assignments) == 0
 
     # Event venue_id was populated
     refreshed_event = db_session.query(Event).filter(Event.id == "evt-select-1").first()

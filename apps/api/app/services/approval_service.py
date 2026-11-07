@@ -1,5 +1,6 @@
 """Domain Service: ApprovalService (Governance, Separation of Duties, Stale Revalidation)"""
-from datetime import datetime, timezone
+from app.services.live_events import publish
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from sqlalchemy.orm import Session
 
@@ -20,10 +21,40 @@ from app.engines.auth.policy import ApprovalPolicy
 from app.engines.auth.permissions import Permissions, ROLE_PERMISSIONS_MAP
 from app.services.authorization_service import AuthorizationService
 from app.services.action_service import ActionService
+from app.core.config import settings
 
 
 def utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# Minimum lifetime of an approval when the event start is close: we never create
+# a request that is already (or almost) expired.
+_MIN_APPROVAL_TTL = timedelta(minutes=30)
+
+
+def compute_approval_expiry(impact_level: Optional[str], event_start: Optional[datetime], now: Optional[datetime] = None) -> datetime:
+    """Expiry for a new approval (UX v3 §6): TTL by impact level, never later than the event start.
+
+    The event-start cap only applies while the event is still comfortably in the future; for
+    events that are about to start or already live (e.g. recovery approvals on the day) the
+    plain TTL is used so requests are not born expired.
+    """
+    now = now or utc_now()
+    level = (impact_level or "").upper()
+    if level == "CRITICAL":
+        hours = settings.APPROVAL_TTL_HOURS_CRITICAL
+    elif level == "MAJOR":
+        hours = settings.APPROVAL_TTL_HOURS_MAJOR
+    else:
+        hours = settings.APPROVAL_TTL_HOURS_MINOR
+    expires = now + timedelta(hours=max(0.0, float(hours)))
+
+    if event_start is not None:
+        start = event_start.astimezone(timezone.utc).replace(tzinfo=None) if event_start.tzinfo else event_start
+        if start - now >= _MIN_APPROVAL_TTL and start < expires:
+            expires = start
+    return expires
 
 
 class ApprovalService:
@@ -39,6 +70,10 @@ class ApprovalService:
         if not event:
             raise NotFoundException(f"Event with id '{event_id}' not found.")
         return event
+
+    def _event_start(self, event_id: str) -> Optional[datetime]:
+        event = self.db.query(Event).filter(Event.id == event_id).first()
+        return event.start_datetime if event else None
 
     def _ensure_user_exists(self, user_id: Optional[str]) -> Optional[str]:
         if not user_id:
@@ -84,7 +119,10 @@ class ApprovalService:
                 Approval.event_id == event_id,
                 Approval.action_type == "COMMUNICATION_OUTREACH",
                 Approval.target_id == candidate_id,
+                # An expired request no longer blocks a fresh one (approvals now carry a TTL).
+                Approval.status != "EXPIRED",
             )
+            .order_by(Approval.created_at.desc())
             .first()
         )
         if existing:
@@ -109,6 +147,7 @@ class ApprovalService:
             status="PENDING",
             state_snapshot=compute_event_state_snapshot(self.db, event_id),
             created_at=utc_now(),
+            expires_at=compute_approval_expiry("MAJOR", self._event_start(event_id)),
         )
         self.db.add(approval)
         self.db.commit()
@@ -164,6 +203,7 @@ class ApprovalService:
             state_snapshot=current_snapshot,
             decision_notes=data.notes,
             created_at=utc_now(),
+            expires_at=compute_approval_expiry(decision.impact_level, event.start_datetime),
         )
         self.db.add(approval)
         self.db.commit()
@@ -256,6 +296,7 @@ class ApprovalService:
 
         self.db.commit()
         self.db.refresh(approval)
+        publish(approval.event_id, "approval.decided", approval_id=approval.id, status=approval.status)
         return approval, execution
 
     def reject(
@@ -326,6 +367,7 @@ class ApprovalService:
 
         self.db.commit()
         self.db.refresh(approval)
+        publish(approval.event_id, "approval.decided", approval_id=approval.id, status=approval.status)
         return approval
 
 
@@ -360,6 +402,7 @@ class ApprovalService:
 
         self.db.commit()
         self.db.refresh(approval)
+        publish(approval.event_id, "approval.decided", approval_id=approval.id, status=approval.status)
         return approval
 
     def expire(
@@ -382,10 +425,35 @@ class ApprovalService:
             approval.status = "EXPIRED"
             approval.rejection_reason = reason
             approval.decided_at = utc_now()
+            if approval.action_type == "COMMUNICATION_OUTREACH" and approval.target_id:
+                self._mirror_outreach_status(event_id, approval, "EXPIRED")
             self.db.commit()
             self.db.refresh(approval)
+            publish(approval.event_id, "approval.decided", approval_id=approval.id, status=approval.status)
 
         return approval
+
+    def _mirror_outreach_status(self, event_id: str, approval: Approval, status: str) -> None:
+        """Reflect an outreach approval's terminal status on the shortlist communication record."""
+        from app.models.shortlist import EventShortlistEntry
+        entry = self.db.query(EventShortlistEntry).filter(
+            EventShortlistEntry.event_id == event_id,
+            (EventShortlistEntry.candidate_id == approval.target_id) | (EventShortlistEntry.id == approval.target_id),
+        ).first()
+        if not entry:
+            return
+        c_data = dict(entry.candidate_data or {})
+        comm_data = dict(c_data.get("communication") or {})
+        if comm_data.get("approval_id") not in (None, approval.id):
+            return  # a newer request now owns this candidate's communication
+        comm_data["approval_id"] = approval.id
+        comm_data["approval_status"] = status
+        if (comm_data.get("overall_status") or "PENDING_APPROVAL") == "PENDING_APPROVAL":
+            comm_data["overall_status"] = status
+        comm_data["updated_at"] = utc_now().isoformat()
+        c_data["communication"] = comm_data
+        entry.candidate_data = c_data
+        self.db.add(entry)
 
     def list_requests(
         self,

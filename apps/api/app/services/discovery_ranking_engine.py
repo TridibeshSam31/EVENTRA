@@ -64,6 +64,8 @@ class RankedCandidate(BaseModel):
     field_sources: Dict[str, str] = Field(default_factory=dict)
     distance_km: Optional[float] = None
     qual_result: Optional[QualificationResult] = None
+    # Per-dimension sub-scores (0..1) backed by evidence; dimensions without evidence are omitted.
+    score_breakdown: Dict[str, float] = Field(default_factory=dict)
 
 
 class DiscoveryRankingEngine:
@@ -86,6 +88,32 @@ class DiscoveryRankingEngine:
         required_amenities: Optional[List[str]] = None,
     ) -> Tuple[float, List[str]]:
         """Calculates evidence-based score (0.0 to 1.0) and generates human-readable evidence reasons."""
+        score, reasons, _ = cls.score_candidate_detailed(
+            candidate=candidate,
+            event_type=event_type,
+            distance_km=distance_km,
+            max_budget=max_budget,
+            guest_count=guest_count,
+            required_amenities=required_amenities,
+        )
+        return score, reasons
+
+    @classmethod
+    def score_candidate_detailed(
+        cls,
+        candidate: NormalizedProvider,
+        event_type: str,
+        distance_km: Optional[float] = None,
+        max_budget: Optional[float] = None,
+        guest_count: Optional[int] = None,
+        required_amenities: Optional[List[str]] = None,
+    ) -> Tuple[float, List[str], Dict[str, float]]:
+        """Like score_candidate, plus a per-dimension breakdown of evidence-backed sub-scores.
+
+        Dimensions with no evidence (e.g. no rating) use a neutral value in the total but are
+        NOT included in the breakdown, so the UI never presents a default as a measured fact.
+        """
+        breakdown: Dict[str, float] = {}
         profile = cls.get_weight_profile(event_type)
         score = 0.0
         reasons: List[str] = []
@@ -94,17 +122,20 @@ class DiscoveryRankingEngine:
         rating_score = (candidate.rating / 5.0) if candidate.rating is not None else 0.70
         if candidate.rating:
             reasons.append(f"{candidate.rating}★ rating on Google Maps")
+            breakdown["rating"] = round(rating_score, 3)
 
         # 2. Review Count Sub-score (log scale up to 200 reviews)
         rev_count = candidate.review_count or 0
         review_score = min(1.0, math.log10(max(1, rev_count) + 1) / 2.3)
         if rev_count > 0:
             reasons.append(f"{rev_count} verified Google reviews")
+            breakdown["reviews"] = round(review_score, 3)
 
         # 3. Location / Proximity Sub-score
         if distance_km is not None:
             loc_score = max(0.0, 1.0 - (distance_km / 25.0))
             reasons.append(f"{distance_km}km from event location")
+            breakdown["location"] = round(loc_score, 3)
         else:
             loc_score = 0.75
 
@@ -113,6 +144,7 @@ class DiscoveryRankingEngine:
             price_ratio = candidate.base_cost / max_budget
             price_score = max(0.0, 1.0 - (price_ratio * 0.5))
             reasons.append(f"Estimated cost: ${candidate.base_cost:.2f} (Within ${max_budget:.2f} budget)")
+            breakdown["price"] = round(price_score, 3)
         else:
             price_score = 0.75
 
@@ -126,12 +158,14 @@ class DiscoveryRankingEngine:
             reasons.append("Phone contact available")
         elif candidate.website:
             contact_score = 0.75
+        breakdown["contactability"] = round(contact_score, 3)
 
         # 6. Capacity / Scale Fit Sub-score
         if guest_count and candidate.capacity:
             cap_ratio = candidate.capacity / max(1, guest_count)
             cap_score = 1.0 if 1.0 <= cap_ratio <= 3.0 else (0.80 if cap_ratio > 3.0 else 0.50)
             reasons.append(f"Capacity confirmed for {candidate.capacity} guests")
+            breakdown["capacity_fit"] = round(cap_score, 3)
         else:
             cap_score = 0.75
 
@@ -153,7 +187,7 @@ class DiscoveryRankingEngine:
                 score += 0.85 * weight
 
         final_score = round(min(1.0, max(0.0, score)), 3)
-        return final_score, reasons
+        return final_score, reasons, breakdown
 
     @classmethod
     def rank_candidates(
@@ -177,7 +211,7 @@ class DiscoveryRankingEngine:
             if qual and qual.qualification == "rejected":
                 continue
 
-            score, evidence_reasons = cls.score_candidate(
+            score, evidence_reasons, breakdown = cls.score_candidate_detailed(
                 candidate=cand,
                 event_type=event_type,
                 distance_km=dist,
@@ -200,6 +234,7 @@ class DiscoveryRankingEngine:
                     field_sources=cand.field_sources or {},
                     distance_km=dist,
                     qual_result=qual,
+                    score_breakdown=breakdown,
                 )
             )
 

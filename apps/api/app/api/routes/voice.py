@@ -64,10 +64,36 @@ class InitiateCallRequest(BaseModel):
     provider_id: Optional[str] = None
 
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from app.api.dependencies import get_db_session
+from app.api.dependencies import get_current_user_id, get_db_session
 from app.models.approval import Approval
+
+
+@router.post("/voice/twilio/status")
+async def twilio_call_status_callback(request: Request, db: Session = Depends(get_db_session)):
+    """Receives Twilio call-status callbacks (initiated/ringing/answered/completed...).
+
+    The X-Twilio-Signature is verified against TWILIO_CALLBACK_URL, the exact URL
+    Twilio was told to call, so it stays valid behind a tunnel or proxy.
+    """
+    from app.integrations.communication.twilio import TwilioVoiceAdapter
+    from app.services.vendor_outreach_service import VendorOutreachService
+
+    form = await request.form()
+    params = {k: v for k, v in form.items()}
+    adapter = TwilioVoiceAdapter()
+    signed_url = settings.TWILIO_CALLBACK_URL or str(request.url)
+    if not adapter.validate_request_signature(signed_url, params, request.headers.get("X-Twilio-Signature")):
+        logger.warning("Rejected Twilio status callback with an invalid signature.")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid Twilio signature.")
+
+    call_sid = params.get("CallSid")
+    attempt = VendorOutreachService(db).apply_call_status(call_sid, params.get("CallStatus", ""), params)
+    if attempt is None:
+        logger.info("Twilio status callback for an unknown call (status=%s) ignored.", params.get("CallStatus"))
+    return Response(status_code=204)
 
 
 @router.post("/voice/call")
@@ -75,26 +101,41 @@ from app.models.approval import Approval
 def initiate_voice_call(
     payload: InitiateCallRequest,
     db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
 ):
     """Initiates an outbound telephony call to a phone number via configured voice provider.
-    Strictly guarded: requires prior explicit communication approval for the event.
+    Strictly guarded: requires an identified organizer of a real event and prior explicit
+    communication approval for that event.
     """
-    if payload.event_id and payload.event_id != "default-event":
-        # Backend guard: Ensure there is an approved communication request
-        target_filter = [
-            Approval.event_id == payload.event_id,
-            Approval.action_type == "COMMUNICATION_OUTREACH",
-            Approval.status == "APPROVED",
-        ]
-        if payload.provider_id:
-            target_filter.append(Approval.target_id == payload.provider_id)
+    if not payload.event_id or payload.event_id == "default-event":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Outbound calls must be tied to a real event with approved communication.",
+        )
+    from app.models.event import Event
+    from app.services.vendor_outreach_service import OutreachAuthorizationError, require_real_organizer
+    event = db.query(Event).filter(Event.id == payload.event_id).first()
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Event '{payload.event_id}' not found.")
+    try:
+        require_real_organizer(db, event, current_user_id)
+    except OutreachAuthorizationError as err:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(err))
+    # Backend guard: Ensure there is an approved communication request
+    target_filter = [
+        Approval.event_id == payload.event_id,
+        Approval.action_type == "COMMUNICATION_OUTREACH",
+        Approval.status == "APPROVED",
+    ]
+    if payload.provider_id:
+        target_filter.append(Approval.target_id == payload.provider_id)
 
-        approved = db.query(Approval).filter(*target_filter).first()
-        if not approved:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Communication outreach requires explicit organizer approval.",
-            )
+    approved = db.query(Approval).filter(*target_filter).first()
+    if not approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Communication outreach requires explicit organizer approval.",
+        )
 
     adapter = registry.get_communication_provider()
     # If resolved provider has make_call, invoke it

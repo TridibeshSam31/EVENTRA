@@ -123,7 +123,7 @@ export function AgentToolExecution({
   });
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
+    <div className={`bg-[#FDFCFA] border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-3">
         <div className="flex items-center gap-2.5">
@@ -132,7 +132,7 @@ export function AgentToolExecution({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+              <h3 className="text-[13.5px] font-semibold text-slate-900">
                 Agent Tool Execution & Registry
               </h3>
               <ProvenanceBadge provenance="AGENT" size="sm" />
@@ -149,7 +149,7 @@ export function AgentToolExecution({
             onClick={() => setActiveTab("HISTORY")}
             className={`px-3 py-1 rounded font-medium transition ${
               activeTab === "HISTORY"
-                ? "bg-white text-slate-900 shadow-sm"
+                ? "bg-[#FDFCFA] text-slate-900 shadow-sm"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
@@ -159,7 +159,7 @@ export function AgentToolExecution({
             onClick={() => setActiveTab("REGISTRY")}
             className={`px-3 py-1 rounded font-medium transition ${
               activeTab === "REGISTRY"
-                ? "bg-white text-slate-900 shadow-sm"
+                ? "bg-[#FDFCFA] text-slate-900 shadow-sm"
                 : "text-slate-600 hover:text-slate-900"
             }`}
           >
@@ -256,7 +256,7 @@ export function AgentToolExecution({
 
                   {isExpanded && (
                     <div className="mt-3 pt-3 border-t border-slate-100 pl-8 space-y-2">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+                      <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-400 block">
                         Sanitized Arguments & Details
                       </span>
                       {item.arguments && Object.keys(item.arguments).length > 0 ? (
@@ -291,7 +291,7 @@ export function AgentToolExecution({
           ) : (
             <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
               {filteredTools.map((tool) => (
-                <div key={tool.name} className="p-3 bg-white hover:bg-slate-50/60 transition-colors">
+                <div key={tool.name} className="p-3 bg-[#FDFCFA] hover:bg-slate-50/60 transition-colors">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="space-y-0.5">
                       <div className="flex items-center gap-2">

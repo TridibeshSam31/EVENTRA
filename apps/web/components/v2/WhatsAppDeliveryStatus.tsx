@@ -85,12 +85,24 @@ export function WhatsAppDeliveryStatus({
 
   const Icon = config.icon;
 
+  // Honest state track: queued → sent → delivered → read. Only steps the
+  // backend has reported are filled; failed/unknown show no progress.
+  const STEPS: WhatsAppStatus[] = ["QUEUED", "SENT", "DELIVERED", "READ"];
+  const reached = STEPS.indexOf(normStatus);
+
   return (
     <span
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border ${config.badgeClass} ${className}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${config.badgeClass} ${className}`}
       title={timestamp ? `Status updated at ${new Date(timestamp).toLocaleTimeString()}` : undefined}
     >
       <Icon className={`w-3 h-3 ${config.iconClass}`} />
+      {reached >= 0 && (
+        <span className="flex items-center gap-[2px]" aria-hidden>
+          {STEPS.map((s, i) => (
+            <span key={s} className={`h-1 w-1.5 rounded-full ${i <= reached ? "bg-current" : "bg-current opacity-20"}`} />
+          ))}
+        </span>
+      )}
       {showLabel && <span>{config.label}</span>}
       {timestamp && (
         <span className="text-[9px] text-slate-400 font-mono ml-0.5">

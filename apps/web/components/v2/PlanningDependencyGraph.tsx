@@ -1,20 +1,10 @@
 "use client";
 
 import React, { useMemo } from "react";
-import {
-  GitCommit,
-  ArrowRight,
-  Layers,
-  AlertCircle,
-  Clock,
-  CheckCircle2,
-  Building2,
-} from "lucide-react";
-import type {
-  ExecutionPlanTask,
-  PlanDependencyEntry,
-} from "@/types/api";
+import { ArrowRight, GitCommit } from "lucide-react";
+import type { ExecutionPlanTask, PlanDependencyEntry } from "@/types/api";
 import { ProvenanceBadge } from "./ProvenanceBadge";
+import { STATUS_CHIP, taskStatus } from "./planningFormat";
 
 interface PlanningDependencyGraphProps {
   tasks?: ExecutionPlanTask[];
@@ -33,11 +23,37 @@ interface ResolvedEdge {
   lagMinutes?: number;
 }
 
-export function PlanningDependencyGraph({
-  tasks = [],
-  dependencies = [],
-  className = "",
-}: PlanningDependencyGraphProps) {
+const TYPE_SHORT: Record<string, string> = {
+  FINISH_TO_START: "FS",
+  START_TO_START: "SS",
+  FINISH_TO_FINISH: "FF",
+  START_TO_FINISH: "SF",
+};
+
+function statusDot(status: string) {
+  if (status === "COMPLETED") return "bg-go-500";
+  if (status === "IN_PROGRESS") return "bg-cue-500 animate-cue-blink";
+  if (status === "BLOCKED" || status === "FAILED") return "bg-cue-600";
+  if (status === "UNKNOWN") return "bg-ink-300";
+  return "bg-standby-400";
+}
+
+function Node({ label, name, id, status }: { label: string; name: string; id: string; status: string }) {
+  return (
+    <div className="min-w-0 flex-1 rounded-lg border border-ink-200 bg-[#FDFCFA] px-3 py-2.5">
+      <div className="eyebrow">{label}</div>
+      <div className="mt-1 flex items-center gap-2">
+        <span className={`cue-light ${statusDot(status)}`} />
+        <span className="truncate text-[13px] font-semibold text-ink-900">{name}</span>
+      </div>
+      <div className="mt-0.5 text-[11.5px] text-ink-500" title={id}>
+        {taskStatus(status === "UNKNOWN" ? "" : status).label}
+      </div>
+    </div>
+  );
+}
+
+export function PlanningDependencyGraph({ tasks = [], dependencies = [], className = "" }: PlanningDependencyGraphProps) {
   // Extract explicit directed edges from tasks or plan dependencies
   const edges: ResolvedEdge[] = useMemo(() => {
     const list: ResolvedEdge[] = [];
@@ -86,154 +102,90 @@ export function PlanningDependencyGraph({
   }, [tasks, dependencies]);
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden ${className}`}>
-      {/* Header */}
-      <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
-              <GitCommit className="w-3 h-3 text-[#D6003C]" />
-              Dependency Graph & Blast Radius
-            </span>
-            <ProvenanceBadge provenance="ENGINE" size="sm" />
-            <span className="text-[10px] font-mono text-slate-400">
-              {edges.length} Authoritative Edges
-            </span>
-          </div>
-          <h3 className="text-base font-bold text-slate-900 tracking-tight">
-            Directed Acyclic Graph (DAG) Traversal
-          </h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Explicit Predecessor &rarr; Successor edges enforcing workflow execution constraints.
-          </p>
+    <section className={`surface overflow-hidden ${className}`}>
+      <header className="border-b border-ink-200 px-5 py-4">
+        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+          <span className="eyebrow">Dependencies</span>
+          <ProvenanceBadge provenance="ENGINE" size="sm" />
+          <span className="font-mono text-[10.5px] text-ink-400">{edges.length} links</span>
         </div>
-      </div>
+        <h3 className="text-[15px] font-semibold text-ink-900">What has to happen before what</h3>
+        <p className="mt-0.5 text-[12.5px] text-ink-500">
+          Each link means the second task can’t start until the first one is done. A problem upstream ripples down this chain.
+        </p>
+      </header>
 
       {edges.length > 0 ? (
-        /* Visual Edge List */
-        <div className="p-5 space-y-3">
+        <ol className="space-y-2 px-5 py-4">
           {edges.map((edge, idx) => (
-            <div
-              key={idx}
-              className="p-3.5 rounded-lg border border-slate-200 bg-white hover:border-slate-300 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs"
-            >
-              {/* Predecessor (Blocking Node) */}
-              <div className="flex-1 min-w-0 p-2.5 rounded bg-slate-50/80 border border-slate-100">
-                <span className="text-[9px] uppercase font-bold text-slate-400 block mb-0.5">
-                  Predecessor (Prerequisite)
+            <li key={idx} className="flex flex-col items-stretch gap-2 md:flex-row md:items-center">
+              <Node label="First" name={edge.predecessorName} id={edge.predecessorId} status={edge.predecessorStatus} />
+              <div className="flex shrink-0 items-center justify-center gap-1.5 px-1 text-ink-400">
+                <span className="font-mono text-[10px] font-semibold uppercase text-ink-500">
+                  {TYPE_SHORT[edge.type || ""] || edge.type || "FS"}
                 </span>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-900 truncate">
-                    {edge.predecessorName}
-                  </span>
-                  <span
-                    className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded ${
-                      edge.predecessorStatus === "COMPLETED"
-                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {edge.predecessorStatus}
-                  </span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
-                  ID: {edge.predecessorId}
-                </span>
+                <ArrowRight className="h-4 w-4 rotate-90 text-cue-500 md:rotate-0" />
+                {edge.lagMinutes ? <span className="font-mono text-[10px] text-ink-500">+{edge.lagMinutes}m</span> : null}
               </div>
-
-              {/* Edge Relation Indicator */}
-              <div className="flex items-center justify-center gap-1.5 text-slate-400 shrink-0 px-2 py-1">
-                <span className="text-[10px] font-mono font-semibold uppercase text-slate-500">
-                  {edge.type || "FS"}
-                </span>
-                <ArrowRight className="w-4 h-4 text-[#D6003C]" />
-                {edge.lagMinutes ? (
-                  <span className="text-[10px] font-mono text-slate-500">
-                    +{edge.lagMinutes}m
-                  </span>
-                ) : null}
-              </div>
-
-              {/* Successor (Dependent Node) */}
-              <div className="flex-1 min-w-0 p-2.5 rounded bg-slate-50/80 border border-slate-100">
-                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
-                  Successor (Dependent)
-                </span>
-                <div className="flex items-center gap-2">
-                  <span className="font-semibold text-slate-900 truncate">
-                    {edge.successorName}
-                  </span>
-                  <span
-                    className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded ${
-                      edge.successorStatus === "COMPLETED"
-                        ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                        : "bg-slate-100 text-slate-700"
-                    }`}
-                  >
-                    {edge.successorStatus}
-                  </span>
-                </div>
-                <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
-                  ID: {edge.successorId}
-                </span>
-              </div>
-            </div>
+              <Node label="Then" name={edge.successorName} id={edge.successorId} status={edge.successorStatus} />
+            </li>
           ))}
-        </div>
+        </ol>
       ) : (
-        /* Truthful Fallback Table when no graph edges are returned */
-        <div className="p-6">
-          <div className="p-4 rounded-xl border border-amber-200 bg-amber-50/60 text-xs text-amber-900 mb-4">
-            <span className="font-bold block mb-1">
-              Dependency graph unavailable from backend; displaying structured dependency data.
-            </span>
-            <p className="text-[11px] text-amber-800 leading-relaxed">
-              The backend has not exposed explicit predecessor/successor graph edges for this event plan. Showing active tasks and their recorded readiness status.
-            </p>
+        /* Truthful fallback when no graph edges are returned */
+        <div className="px-5 py-5">
+          <div className="mb-4 flex gap-3 rounded-lg border border-standby-200 bg-standby-50 px-3.5 py-3">
+            <GitCommit className="mt-0.5 h-4 w-4 shrink-0 text-standby-700" />
+            <div className="text-[12.5px] text-standby-900">
+              <p className="font-semibold">No dependency links were returned for this plan.</p>
+              <p className="mt-0.5 leading-relaxed text-standby-800">
+                Showing each task with its recorded readiness instead.
+              </p>
+            </div>
           </div>
 
           {tasks.length > 0 ? (
-            <div className="border border-slate-200 rounded-lg overflow-hidden">
-              <table className="w-full text-left text-xs border-collapse">
+            <div className="overflow-x-auto rounded-lg border border-ink-200">
+              <table className="w-full border-collapse text-left text-[12.5px]">
                 <thead>
-                  <tr className="bg-slate-50 text-[10px] uppercase font-bold text-slate-500 border-b border-slate-200">
-                    <th className="p-3">Task ID</th>
-                    <th className="p-3">Task Name</th>
-                    <th className="p-3">Readiness</th>
-                    <th className="p-3">Critical Path</th>
-                    <th className="p-3 text-right">Duration</th>
+                  <tr className="border-b border-ink-200 bg-ink-50 font-mono text-[10px] uppercase tracking-label text-ink-400">
+                    <th className="px-4 py-2.5 font-medium">Task</th>
+                    <th className="px-3 py-2.5 font-medium">Readiness</th>
+                    <th className="px-3 py-2.5 font-medium">Critical</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Duration</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100 font-mono text-slate-700">
+                <tbody className="divide-y divide-dashed divide-ink-200">
                   {tasks.map((t) => (
-                    <tr key={t.task_id} className="hover:bg-slate-50/50">
-                      <td className="p-3 text-slate-400">{t.task_id}</td>
-                      <td className="p-3 font-sans font-medium text-slate-900">{t.task_name}</td>
-                      <td className="p-3">
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-slate-100 text-slate-700">
-                          {t.readiness_state || t.status}
+                    <tr key={t.task_id} className="hover:bg-ink-50/70">
+                      <td className="px-4 py-2.5">
+                        <div className="font-semibold text-ink-900">{t.task_name}</div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={`chip ${STATUS_CHIP[taskStatus(t.readiness_state || t.status).tone]}`}>
+                          {taskStatus(t.readiness_state || t.status).label}
                         </span>
                       </td>
-                      <td className="p-3">
+                      <td className="px-3 py-2.5">
                         {t.is_critical_path ? (
-                          <span className="text-rose-600 font-bold">YES</span>
+                          <span className="inline-flex items-center gap-1.5 font-semibold text-cue-700">
+                            <span className="cue-light bg-cue-500" /> Yes
+                          </span>
                         ) : (
-                          <span className="text-slate-400">NO</span>
+                          <span className="text-ink-400">No</span>
                         )}
                       </td>
-                      <td className="p-3 text-right">{t.duration_minutes}m</td>
+                      <td className="timecode px-4 py-2.5 text-right">{t.duration_minutes}m</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           ) : (
-            <p className="text-center text-xs text-slate-400 py-6">
-              No tasks or dependency data found for this event.
-            </p>
+            <p className="py-6 text-center text-[13px] text-ink-400">No tasks or dependency data found for this event.</p>
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

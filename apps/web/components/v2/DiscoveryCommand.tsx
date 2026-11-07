@@ -5,27 +5,29 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import {
   Search,
-  Filter,
   MapPin,
-  Phone,
-  Mail,
   CheckCircle2,
-  AlertCircle,
   Clock,
   Loader2,
-  RefreshCw,
   Zap,
   ArrowRight,
-  Database,
   Building2,
   Users,
   Star,
-  ExternalLink,
   ChevronDown,
-  Sparkles,
   ShieldAlert,
   AlertTriangle,
   Globe,
+  UtensilsCrossed,
+  Speaker,
+  Camera,
+  Shield,
+  Bus,
+  Flower2,
+  Bookmark,
+  BookmarkCheck,
+  CalendarCheck2,
+  Phone,
 } from "lucide-react";
 
 import { getEvent } from "@/lib/api/events";
@@ -55,8 +57,13 @@ import { DiscoveryIterationStepper } from "./DiscoveryIterationStepper";
 import {
   CandidateEvidenceDrawer,
   CandidateEvidenceData,
+  humanizeCategory,
 } from "./CandidateEvidenceDrawer";
 import { ProvenanceBadge } from "./ProvenanceBadge";
+import { describeQualificationReason, EXCLUSION_FALLBACK } from "./CandidateEvidenceDrawer";
+import { AgentDiscoveryLive } from "@/components/agent/AgentDiscoveryLive";
+import { PopCard, Celebrate, Toast, type ToastTone } from "@/components/ds/motion";
+import { JOURNEY_HELP } from "@/lib/journey";
 
 // Dynamic import for Leaflet map to prevent SSR window reference error
 const DiscoveryMap = dynamic(
@@ -66,10 +73,10 @@ const DiscoveryMap = dynamic(
 
 function MapLoadingPlaceholder() {
   return (
-    <div className="w-full h-full min-h-[350px] bg-slate-100 rounded-xl border border-slate-200 flex items-center justify-center text-slate-400">
-      <div className="flex flex-col items-center gap-2">
-        <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
-        <span className="text-xs">Initializing geospatial radar...</span>
+    <div className="flex h-full min-h-[320px] w-full items-center justify-center bg-ink-100 bg-grid-pattern">
+      <div className="flex flex-col items-center gap-2 text-ink-500">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span className="font-mono text-[11px]">Loading map…</span>
       </div>
     </div>
   );
@@ -80,9 +87,22 @@ interface DiscoveryCommandProps {
   discoveryType: "VENUE" | "VENDOR";
   defaultCategory?: string;
   className?: string;
+  /** show the live agent-run log for this workflow inside the page (one discovery experience) */
+  agentRunKind?: "VENUE" | "PROVIDER";
 }
 
-const VENDOR_CATEGORIES = [
+type QuickFilter = "saved" | "phone" | "rated";
+
+const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  CATERING: UtensilsCrossed,
+  AV_TECH: Speaker,
+  PHOTOGRAPHY: Camera,
+  SECURITY: Shield,
+  TRANSPORT: Bus,
+  DECOR: Flower2,
+};
+
+export const VENDOR_CATEGORIES = [
   "CATERING",
   "AV_TECH",
   "PHOTOGRAPHY",
@@ -91,11 +111,33 @@ const VENDOR_CATEGORIES = [
   "DECOR",
 ];
 
+const CATEGORY_ALIASES: Record<string, string> = {
+  AV: "AV_TECH",
+  AUDIO_VISUAL: "AV_TECH",
+  AUDIO: "AV_TECH",
+  DECORATION: "DECOR",
+  FLORIST: "DECOR",
+  PHOTO: "PHOTOGRAPHY",
+};
+
+/**
+ * Turn a `?category=` value (from deep links such as Plan's "Find a vendor")
+ * into one of the vendor tabs. Case-insensitive; unknown values return null so
+ * the caller keeps its default.
+ */
+export function resolveVendorCategory(value?: string | null): string | null {
+  if (!value) return null;
+  const key = value.trim().toUpperCase().replace(/[\s-]+/g, "_");
+  const resolved = CATEGORY_ALIASES[key] ?? key;
+  return VENDOR_CATEGORIES.includes(resolved) ? resolved : null;
+}
+
 export function DiscoveryCommand({
   eventId,
   discoveryType,
   defaultCategory,
   className = "",
+  agentRunKind,
 }: DiscoveryCommandProps) {
   // Canonical workspace integration
   const { opsStatus, shortlist: workspaceShortlist, sseConnected } = useEventWorkspace(eventId);
@@ -130,6 +172,13 @@ export function DiscoveryCommand({
   const [scouting, setScouting] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+
+  // Journey + list↔map interaction state (presentation only)
+  const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
+  const [celebrateId, setCelebrateId] = useState<string | null>(null);
+  const [hotId, setHotId] = useState<string | null>(null); // card/pin under the cursor
+  const [focusedId, setFocusedId] = useState<string | null>(null); // pin clicked → card pulses
+  const [quickFilters, setQuickFilters] = useState<Set<QuickFilter>>(new Set());
 
   // 1. Fetch Event and Discovery Runs
   // 1. Fetch Event, Discovery Runs, and Authoritative Shortlist
@@ -210,20 +259,21 @@ export function DiscoveryCommand({
               category: "VENUE",
               address: v.address || `${city}, India`,
               city: v.city || city,
-              latitude: (v as any).latitude ?? 28.6139,
-              longitude: (v as any).longitude ?? 77.209,
-              rating: (v as any).rating ?? 4.7,
-              review_count: (v as any).review_count ?? 25,
+              latitude: (v as any).latitude ?? null,
+              longitude: (v as any).longitude ?? null,
+              rating: (v as any).rating ?? null,
+              review_count: (v as any).review_count ?? null,
               capacity: v.capacity,
               hourly_rate: v.hourly_rate,
-              score: Math.max(60, 92 - idx * 3),
+              // Only show a score the backend actually computed; never derive one from list order.
+              score: (v as any).score ?? null,
               score_breakdown: {},
               qualification_status: qualStatus,
               qualification_reason: isVenueRejected
                 ? "Capacity below event requirements"
-                : "Matches guest count and geographic radius",
+                : "Listed venue in the search city",
               tier: tier,
-              matching_reasons: v.amenities || ["Verified Venue Network", "Central Location"],
+              matching_reasons: v.amenities || [],
               provenance: (v as any).source || "VENUE_NETWORK",
               amenities: v.amenities || [],
               raw: v,
@@ -245,21 +295,21 @@ export function DiscoveryCommand({
               category: item.category || category,
               address: item.address,
               city: item.city || city,
-              latitude: item.latitude ?? 28.6139,
-              longitude: item.longitude ?? 77.209,
-              rating: item.rating ?? 4.8,
-              review_count: item.review_count ?? 20,
-              distance_km: item.distance_km ?? 5.0,
+              latitude: item.latitude ?? null,
+              longitude: item.longitude ?? null,
+              rating: item.rating ?? null,
+              review_count: item.review_count ?? null,
+              distance_km: item.distance_km ?? null,
               phone: item.contact_phone,
               email: item.contact_email,
               website: item.website,
               maps_url: item.maps_url,
               provenance: (item as any).source || "PROVIDER_NETWORK",
-              score: Math.max(60, Math.round(94 - idx * 2.5)),
+              score: (item as any).score ?? null,
               qualification_status: isItemRejected ? "rejected" : "qualified",
-              qualification_reason: isItemRejected ? "Provider inactive" : "Verified operational category & geographic match",
+              qualification_reason: isItemRejected ? "Provider inactive" : "Listed in this category within the search city",
               tier: tier,
-              matching_reasons: [item.category, "Verified Provider Network"],
+              matching_reasons: [item.category].filter(Boolean) as string[],
               is_assigned: false,
               raw: item,
             };
@@ -309,11 +359,12 @@ export function DiscoveryCommand({
     }
   }, [opsStatus?.discovery, discoveryType, category]);
 
-  // 4. Live Polling Effect: only active if SSE is disconnected
+  // 4. Live Polling Effect while a run is RUNNING. The workspace live stream doesn't carry
+  // discovery-run progress for this view, so keep polling — slower while it's connected —
+  // instead of stopping (which froze the run at its first state).
   useEffect(() => {
     if (!eventId || !selectedRun?.run_id) return;
     if (selectedRun.status !== "RUNNING") return;
-    if (sseConnected) return; // SSE handles discovery progress in real-time
 
     let isMounted = true;
     const currentRunId = selectedRun.run_id;
@@ -348,7 +399,7 @@ export function DiscoveryCommand({
       } catch (err) {
         console.error("Error polling discovery run:", err);
       }
-    }, 4000);
+    }, sseConnected ? 8000 : 4000);
 
     return () => {
       isMounted = false;
@@ -425,10 +476,10 @@ export function DiscoveryCommand({
           next.delete(candidate.id);
           return next;
         });
-        setStatusMessage(`Removed '${candidate.name}' from shortlist.`);
+        setStatusMessage(`Removed ${candidate.name} from saved.`);
       } catch (err: any) {
         console.error("Failed to remove candidate from shortlist:", err);
-        setStatusMessage("Failed to remove candidate from shortlist.");
+        setStatusMessage("Couldn't remove it from saved. Please try again.");
       }
     } else {
       try {
@@ -450,10 +501,10 @@ export function DiscoveryCommand({
           next.add(candidate.id);
           return next;
         });
-        setStatusMessage(`Added '${candidate.name}' to shortlist.`);
+        setStatusMessage(`Saved ${candidate.name}.`);
       } catch (err: any) {
         console.error("Failed to add candidate to shortlist:", err);
-        setStatusMessage("Failed to persist shortlist entry.");
+        setStatusMessage("Couldn't save it. Please try again.");
       }
     }
   };
@@ -478,7 +529,7 @@ export function DiscoveryCommand({
         return next;
       });
       setStatusMessage(
-        `Manual override persisted: '${overrideCandidateConfirm.name}' shortlisted.`
+        `Saved ${overrideCandidateConfirm.name} as a manual override.`
       );
     } catch (err) {
       console.error("Failed to persist override shortlist:", err);
@@ -492,15 +543,18 @@ export function DiscoveryCommand({
       setActionInProgress(candidate.id);
       if (candidate.entity_type === "VENUE") {
         await selectEventVenue(eventId, candidate.id);
-        setStatusMessage(`Venue '${candidate.name}' selected for event.`);
+        setStatusMessage(`${candidate.name} is now booked as the venue.`);
       } else {
         await createAssignment({
           event_id: eventId,
           vendor_id: candidate.id,
           category: candidate.category,
         });
-        setStatusMessage(`Proposal submitted for '${candidate.name}' — awaiting operator approval.`);
+        setStatusMessage(`Booking requested for ${candidate.name} — it's waiting in Approvals.`);
       }
+      setRequestedIds((prev) => new Set(prev).add(candidate.id));
+      setCelebrateId(candidate.id);
+      setTimeout(() => setCelebrateId((cur) => (cur === candidate.id ? null : cur)), 1800);
       await loadCandidates();
     } catch (err: any) {
       console.error("Failed to select entity:", err);
@@ -520,6 +574,9 @@ export function DiscoveryCommand({
         (c.category && c.category.toLowerCase().includes(searchQuery.toLowerCase()));
 
       if (!matchesSearch) return false;
+      if (quickFilters.has("saved") && !shortlistedIds.has(c.id)) return false;
+      if (quickFilters.has("phone") && !c.phone) return false;
+      if (quickFilters.has("rated") && !(c.rating != null && c.rating >= 4)) return false;
 
       if (funnelStageFilter === "SHORTLISTED") {
         return shortlistedIds.has(c.id);
@@ -529,7 +586,7 @@ export function DiscoveryCommand({
       }
       return true;
     });
-  }, [candidates, searchQuery, funnelStageFilter, shortlistedIds]);
+  }, [candidates, searchQuery, funnelStageFilter, shortlistedIds, quickFilters]);
 
   // Partition candidates into structured tiers (Requirements 2 & 4)
   const { topMatches, otherOptions, backupWaitlist, rejectedOptions } = useMemo(() => {
@@ -558,6 +615,36 @@ export function DiscoveryCommand({
     };
   }, [filteredCandidates]);
 
+  // One number per candidate, shared by its card and its map pin.
+  const positions = useMemo(() => {
+    const ordered =
+      funnelStageFilter === "SHORTLISTED"
+        ? filteredCandidates
+        : [...topMatches, ...otherOptions, ...backupWaitlist, ...rejectedOptions];
+    const out: Record<string, string> = {};
+    ordered.forEach((c, i) => {
+      out[c.id] = String(i + 1);
+    });
+    return out;
+  }, [funnelStageFilter, filteredCandidates, topMatches, otherOptions, backupWaitlist, rejectedOptions]);
+
+  // Pin click → bring its card into view and pulse it (the drawer opens from the card).
+  const focusCard = useCallback((id: string) => {
+    setFocusedId(id);
+    if (typeof document !== "undefined") {
+      document.getElementById(`cand-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+    setTimeout(() => setFocusedId((cur) => (cur === id ? null : cur)), 2400);
+  }, []);
+
+  const toggleQuickFilter = (f: QuickFilter) =>
+    setQuickFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(f)) next.delete(f);
+      else next.add(f);
+      return next;
+    });
+
   // Map entities: Only candidates with valid coordinates
   const mapPlaces: DiscoveryMapEntity[] = useMemo(() => {
     return candidates
@@ -583,221 +670,277 @@ export function DiscoveryCommand({
 
   // Selected place for map
   const selectedMapPlace = useMemo(() => {
-    if (!selectedCandidate || selectedCandidate.latitude == null) return null;
-    return (
-      mapPlaces.find((p) => p.id === selectedCandidate.id) || null
-    );
-  }, [selectedCandidate, mapPlaces]);
+    const id = selectedCandidate?.id ?? focusedId;
+    if (!id) return null;
+    return mapPlaces.find((p) => p.id === id) || null;
+  }, [selectedCandidate, focusedId, mapPlaces]);
 
-  // Helper to render candidate card by tier (Requirement 2 & 4)
+  // ── Presentation helpers ───────────────────────────────────────────
+  const categoryLabel = humanizeCategory(category);
+  const runMeta = runStatusMeta(selectedRun?.status);
+  const isRunActive = scouting || selectedRun?.status === "RUNNING";
+  const unmappedCount = candidates.length - mapPlaces.length;
+  const eventCityLabel = eventData?.location?.split(",")[0]?.trim();
+
+  const briefRows: { label: string; value: string | null; hint?: string }[] = [
+    { label: "Location", value: eventData?.location || null },
+    {
+      label: "Search radius",
+      value: selectedRun ? `${selectedRun.radius_km} km` : "10 km",
+      hint: selectedRun ? undefined : "default",
+    },
+    { label: "Guests", value: eventData?.guest_count ? eventData.guest_count.toLocaleString() : null },
+    { label: "Looking for", value: categoryLabel },
+    { label: "Event type", value: eventData?.event_type ? humanizeCategory(eventData.event_type) : null },
+    {
+      label: "Budget ceiling",
+      value: eventData?.total_budget ? `₹${Number(eventData.total_budget).toLocaleString()}` : null,
+    },
+  ];
+
+  // Helper to render candidate card by tier
   const renderCandidateCard = (
     candidate: CandidateEvidenceData,
-    tierType: "top" | "other" | "backup" | "rejected"
+    tierType: "top" | "other" | "backup" | "rejected",
+    position: number
   ) => {
     const isShort = shortlistedIds.has(candidate.id);
     const isSelected = selectedCandidate?.id === candidate.id;
     const isRejected = tierType === "rejected" || candidate.qualification_status === "rejected";
     const isTop = tierType === "top";
+    const isRequested = candidate.is_assigned || requestedIds.has(candidate.id);
+    const isVenue = candidate.entity_type === "VENUE";
+    const score = candidate.score != null ? Math.round(candidate.score) : null;
+    const isHot = hotId === candidate.id;
+    const number = positions[candidate.id] ?? String(position);
+    const busy = actionInProgress === candidate.id;
 
     return (
-      <div
+      <PopCard
         key={candidate.id}
-        className={`p-4 rounded-xl border transition shadow-xs hover:border-slate-300 ${
-          isRejected
-            ? "border-rose-200 bg-rose-50/25"
-            : isTop
-            ? "border-purple-200/90 bg-gradient-to-r from-purple-50/20 to-white"
-            : "border-slate-200 bg-white"
-        } ${
-          isSelected
-            ? "ring-2 ring-[#D6003C]/40 border-[#D6003C]"
-            : ""
+        id={`cand-${candidate.id}`}
+        index={position - 1}
+        attention={focusedId === candidate.id}
+        onMouseEnter={() => setHotId(candidate.id)}
+        onMouseLeave={() => setHotId((cur) => (cur === candidate.id ? null : cur))}
+        className={`group overflow-hidden rounded-xl border bg-[#FDFCFA] ${
+          isSelected || isHot
+            ? "border-cue-400 shadow-md"
+            : isRejected
+            ? "border-ink-200 bg-ink-50/60"
+            : "border-ink-200 shadow-sm"
         }`}
       >
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
-                {candidate.category}
-              </span>
-              <ProvenanceBadge source={candidate.provenance} size="sm" />
-              {isTop && (
-                <span className="text-[10px] font-bold text-purple-700 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-purple-600" />
-                  Agent Pick
-                </span>
-              )}
-              {isRejected && (
-                <span className="text-[10px] font-bold text-rose-700 bg-rose-100 px-1.5 py-0.5 rounded border border-rose-200 flex items-center gap-1">
-                  <ShieldAlert className="w-3 h-3 text-rose-600" />
-                  Disqualified by Engine
-                </span>
-              )}
-              {candidate.score != null && !isRejected && (
-                <span className="text-[10px] font-mono font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
-                  {Math.round(candidate.score)} pts
-                </span>
-              )}
-            </div>
+        {/* left rule communicates state at a glance */}
+        <span
+          className={`absolute inset-y-0 left-0 w-[3px] transition-colors ${
+            isRejected ? "bg-cue-400" : isRequested ? "bg-go-500" : isShort ? "bg-ink-900" : isTop ? "bg-agent-500" : "bg-transparent"
+          }`}
+          aria-hidden
+        />
 
-            <h3 className={`text-sm font-bold tracking-tight truncate ${
-              isRejected ? "text-slate-700 line-through decoration-rose-400" : "text-slate-900"
-            }`}>
-              {candidate.name}
-            </h3>
+        <button
+          type="button"
+          onClick={() => setSelectedCandidate(candidate)}
+          className="flex w-full items-start gap-3.5 px-4 pb-3 pt-3.5 text-left"
+          aria-label={`View evidence for ${candidate.name}`}
+        >
+          <span
+            className={`mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full font-mono text-[11px] font-bold transition-colors ${
+              isHot ? "bg-cue-600 text-white" : isTop ? "bg-ink-900 text-ink-50" : "border border-ink-200 bg-paper text-ink-500"
+            }`}
+            title="Matches the number on the map"
+          >
+            {number}
+          </span>
 
-            <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
-              <MapPin className="w-3 h-3 text-slate-400 flex-shrink-0" />
-              <span className="truncate">{candidate.address || candidate.city || "Location unknown"}</span>
-            </p>
-
-            {/* Rejection / Disqualification Reason Box */}
-            {isRejected && (
-              <div className="mt-2.5 p-2 rounded-lg bg-rose-50 border border-rose-200 text-[11px] text-rose-900">
-                <div className="font-semibold flex items-center gap-1.5 text-rose-700 mb-0.5">
-                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-                  Disqualification Reason:
-                </div>
-                <div className="text-rose-800">
-                  {candidate.qualification_reason ||
-                    candidate.matching_reasons?.[0] ||
-                    "Institution/PSU — excluded by default"}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Rating block */}
-          <div className="text-right flex-shrink-0">
-            {candidate.rating != null ? (
-              <div className="flex items-center gap-1 text-xs font-semibold text-slate-800">
-                <Star className="w-3.5 h-3.5 text-amber-500 fill-amber-500" />
-                <span>{candidate.rating.toFixed(1)}</span>
-                {candidate.review_count != null && (
-                  <span className="text-[10px] text-slate-400 font-normal">
-                    ({candidate.review_count})
-                  </span>
-                )}
-              </div>
-            ) : (
-              <span className="text-[10px] text-slate-400 italic">No public rating</span>
-            )}
-
-            {candidate.capacity != null && (
-              <div className="text-[10px] font-medium text-slate-600 mt-1">
-                {candidate.capacity} capacity
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Bottom action row */}
-        <div className="mt-3 pt-2.5 border-t border-slate-100 flex items-center justify-between text-xs">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setSelectedCandidate(candidate)}
-              className="font-semibold text-blue-600 hover:text-blue-800 hover:underline inline-flex items-center gap-1"
-            >
-              View Evidence <ArrowRight className="w-3 h-3" />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => handleToggleShortlist(candidate)}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition ${
-                isRejected
-                  ? isShort
-                    ? "bg-amber-700 text-white border-amber-800 shadow-xs hover:bg-amber-800"
-                    : "bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100"
-                  : isShort
-                  ? isTop
-                    ? "bg-purple-900 text-white border-purple-900 hover:bg-purple-800"
-                    : "bg-slate-900 text-white border-slate-900 hover:bg-slate-800"
-                  : isTop
-                  ? "bg-purple-50 text-purple-700 border-purple-300 hover:bg-purple-100"
-                  : "bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100"
+          <span className="min-w-0 flex-1">
+            <span
+              className={`block truncate text-[14.5px] font-semibold tracking-[-0.01em] ${
+                isRejected ? "text-ink-500 line-through decoration-cue-400/70" : "text-ink-900"
               }`}
             >
-              {isRejected
-                ? isShort
-                  ? "⚠️ Overridden (Shortlisted)"
-                  : "Force Shortlist (Override)"
-                : isShort
-                ? isTop
-                  ? "✓ In Agent Shortlist"
-                  : "✓ Shortlisted"
-                : isTop
-                ? "+ Add to Shortlist"
-                : "+ Promote to Shortlist"}
-            </button>
+              {candidate.name}
+            </span>
+            <span className="mt-0.5 flex items-center gap-1 text-[12px] text-ink-500">
+              <MapPin className="h-3 w-3 shrink-0 text-ink-400" />
+              <span className="truncate">{candidate.address || candidate.city || "Location unknown"}</span>
+            </span>
+            <span className="mt-2 flex flex-wrap items-center gap-1.5">
+              <ProvenanceBadge source={candidate.provenance} size="sm" />
+              {isTop && !isRejected && (
+                <span className="chip border-agent-200 bg-agent-50 px-1.5 py-px text-[10px] text-agent-700">
+                  <span aria-hidden>✦</span> Agent pick
+                </span>
+              )}
+              {candidate.rating != null ? (
+                <span className="inline-flex items-center gap-1 text-[11.5px] font-semibold text-ink-700">
+                  <Star className="h-3 w-3 fill-standby-400 text-standby-400" />
+                  {candidate.rating.toFixed(1)}
+                  {candidate.review_count != null && (
+                    <span className="font-normal text-ink-400">({candidate.review_count.toLocaleString()})</span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-[11px] italic text-ink-400">No public rating</span>
+              )}
+              {candidate.phone && (
+                <span className="inline-flex items-center gap-1 text-[11.5px] text-ink-600">
+                  <Phone className="h-3 w-3 text-ink-400" /> Phone listed
+                </span>
+              )}
+              {candidate.capacity != null && (
+                <span className="inline-flex items-center gap-1 text-[11.5px] text-ink-600">
+                  <Users className="h-3 w-3 text-ink-400" />
+                  {candidate.capacity.toLocaleString()}
+                </span>
+              )}
+              {candidate.distance_km != null && (
+                <span className="font-mono text-[11px] text-ink-500">{candidate.distance_km.toFixed(1)} km</span>
+              )}
+            </span>
+          </span>
 
-            <button
-              onClick={() => handleSelectPrimary(candidate)}
-              disabled={actionInProgress === candidate.id || candidate.is_assigned}
-              className="px-2.5 py-1 rounded-md text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-xs transition disabled:opacity-50"
-            >
-              {candidate.is_assigned
-                ? "Assigned"
-                : actionInProgress === candidate.id
-                ? "Locking..."
-                : discoveryType === "VENUE"
-                ? "Select Venue"
-                : "Contract"}
-            </button>
+          {/* Only show a score when the engine actually returned one */}
+          {!isRejected && score != null && (
+            <span className="shrink-0 text-right">
+              <span className="font-mono text-[9.5px] uppercase tracking-label text-ink-400">Score</span>
+              <span
+                className="block font-display text-[24px] font-extrabold leading-none tabular-nums text-ink-900"
+                style={{ fontStretch: "85%" }}
+              >
+                {score}
+              </span>
+              <span className="mt-1.5 block h-1 w-12 overflow-hidden rounded-full bg-ink-200/70" aria-hidden>
+                <span
+                  className={`block h-full rounded-full ${isTop ? "bg-agent-500" : "bg-ink-700"}`}
+                  style={{ width: `${Math.max(0, Math.min(100, score))}%` }}
+                />
+              </span>
+            </span>
+          )}
+        </button>
+
+        {isRejected && (
+          <div className="mx-4 mb-3 flex items-start gap-2 rounded-lg border border-cue-200 bg-cue-50/70 px-3 py-2 text-[12px] text-cue-900">
+            <ShieldAlert className="mt-px h-3.5 w-3.5 shrink-0 text-cue-600" />
+            <span>
+              <span className="font-semibold">Excluded by engine: </span>
+              {describeQualificationReason(candidate.qualification_reason || candidate.matching_reasons?.[0]) ||
+                EXCLUSION_FALLBACK}
+            </span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-2 border-t border-dashed border-ink-200 px-4 py-2">
+          <button
+            onClick={() => setSelectedCandidate(candidate)}
+            className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink-600 transition hover:text-ink-900"
+          >
+            Evidence <ArrowRight className="h-3 w-3 transition-transform group-hover:translate-x-0.5" />
+          </button>
+
+          {/* One primary action: the vendor's next step on the journey */}
+          <div className="relative flex items-center gap-1.5">
+            <span className="pointer-events-none absolute -top-9 right-0">
+              <Celebrate show={celebrateId === candidate.id} label={isVenue ? "Booked" : "Requested"} />
+            </span>
+
+            {isRejected ? (
+              <button
+                onClick={() => handleToggleShortlist(candidate)}
+                className={`btn h-7 px-2.5 text-[12px] ${
+                  isShort
+                    ? "bg-standby-600 text-white hover:bg-standby-700"
+                    : "border border-cue-200 bg-[#FDFCFA] text-cue-700 hover:bg-cue-50"
+                }`}
+              >
+                {isShort ? <BookmarkCheck className="h-3.5 w-3.5" /> : <Bookmark className="h-3.5 w-3.5" />}
+                {isShort ? "Saved (override)" : "Save anyway"}
+              </button>
+            ) : isRequested ? (
+              isVenue ? (
+                <span className="chip border-go-200 bg-go-50 text-go-700">
+                  <CalendarCheck2 className="h-3 w-3" /> Venue booked
+                </span>
+              ) : (
+                <Link
+                  href={`/events/${eventId}/approvals`}
+                  className="chip border-go-200 bg-go-50 text-go-700 transition hover:bg-go-100"
+                  title="Open Approvals"
+                >
+                  <CalendarCheck2 className="h-3 w-3" /> Booking requested <ArrowRight className="h-3 w-3" />
+                </Link>
+              )
+            ) : isShort ? (
+              <>
+                <button
+                  onClick={() => handleToggleShortlist(candidate)}
+                  className="btn-ghost h-7 px-2 text-[12px] text-ink-700"
+                  title="Saved — click to remove"
+                  aria-pressed
+                >
+                  <BookmarkCheck className="h-3.5 w-3.5 text-ink-900" /> Saved
+                </button>
+                <button
+                  onClick={() => handleSelectPrimary(candidate)}
+                  disabled={busy}
+                  className="btn-primary h-7 px-2.5 text-[12px]"
+                  title={isVenue ? "Locks this venue to the event right away." : JOURNEY_HELP.book}
+                >
+                  {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CalendarCheck2 className="h-3.5 w-3.5" />}
+                  {busy ? "Sending…" : isVenue ? "Book venue" : "Request booking"}
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => handleToggleShortlist(candidate)}
+                className="btn-primary h-7 px-2.5 text-[12px]"
+                title={JOURNEY_HELP.save}
+              >
+                <Bookmark className="h-3.5 w-3.5" /> Save
+              </button>
+            )}
           </div>
         </div>
-      </div>
+      </PopCard>
     );
   };
 
+  let positionCounter = 0;
+  const nextPos = () => ++positionCounter;
+
   return (
     <div className={`space-y-6 ${className}`}>
-      {/* 1. Header & Controls */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                {discoveryType === "VENUE" ? "Venue Discovery" : "Vendor Sourcing"}
-              </span>
-
+      {/* 1. Brief & controls */}
+      <section className="surface overflow-hidden">
+        <div className="flex flex-col gap-5 px-5 pb-4 pt-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="eyebrow">{discoveryType === "VENUE" ? "Discover · Venues" : "Discover · Vendors"}</span>
               {selectedRun && (
-                <span
-                  className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full border inline-flex items-center gap-1.5 ${
-                    selectedRun.status === "COMPLETED" || selectedRun.status === "TARGET_REACHED"
-                      ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                      : selectedRun.status === "RUNNING"
-                      ? "bg-amber-50 text-amber-700 border-amber-200 animate-pulse"
-                      : selectedRun.status === "EXHAUSTED"
-                      ? "bg-amber-50 text-amber-800 border-amber-300"
-                      : selectedRun.status === "FAILED"
-                      ? "bg-rose-50 text-rose-700 border-rose-200"
-                      : "bg-blue-50 text-blue-700 border-blue-200"
-                  }`}
-                >
-                  {selectedRun.status === "RUNNING" && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping inline-block" />
-                  )}
-                  Run: {selectedRun.status}
+                <span className={`chip ${runMeta.chip}`}>
+                  <span className={`cue-light ${runMeta.dot}`} />
+                  {runMeta.label}
                 </span>
               )}
             </div>
-
-            <h2 className="text-lg font-bold text-slate-900 tracking-tight mt-1">
-              {discoveryType === "VENUE"
-                ? "Geospatial Venue Scouting & Suitability"
-                : `Autonomous Provider Discovery — ${category}`}
+            <h2
+              className="mt-2 font-display text-[26px] font-extrabold leading-[1.05] tracking-[-0.025em] text-ink-900 sm:text-[30px]"
+              style={{ fontStretch: "88%" }}
+            >
+              {discoveryType === "VENUE" ? "Find the right venue" : `Find ${categoryLabel.toLowerCase()} vendors`}
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Live Google Maps & geospatial radar scouring verified candidates against event requirements.
+            <p className="mt-1.5 max-w-[62ch] text-[13.5px] leading-relaxed text-ink-600">
+              The agent searches live map data, removes duplicates and checks every result against this event&apos;s
+              requirements before anything reaches your shortlist.
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5 flex-wrap">
-            {/* Run Selector Dropdown */}
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
             {runs.length > 0 && (
-              <div className="relative">
+              <label className="relative">
+                <span className="sr-only">Discovery run</span>
                 <select
                   value={selectedRun?.run_id || ""}
                   onChange={(e) => {
@@ -807,103 +950,102 @@ export function DiscoveryCommand({
                       loadRunEvents(r.run_id);
                     }
                   }}
-                  className="text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-2 font-medium text-slate-700 hover:border-slate-300 transition"
+                  className="h-9 appearance-none rounded-lg border border-ink-200 bg-[#FDFCFA] pl-3 pr-8 font-mono text-[12px] text-ink-700 shadow-sm transition hover:border-ink-300 focus:outline-none focus:ring-2 focus:ring-cue-500/20"
                 >
                   {runs.map((r, i) => (
                     <option key={r.run_id} value={r.run_id}>
-                      Run #{runs.length - i} • {r.status} ({r.discovered} found)
+                      Run {runs.length - i} · {runStatusMeta(r.status).label} · {r.discovered} found
                     </option>
                   ))}
                 </select>
-              </div>
+                <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
+              </label>
             )}
 
-            {/* Autonomous Browser Agent Button */}
             <Link
               href={`/browser-runtime?eventId=${encodeURIComponent(eventId)}&category=${encodeURIComponent(category)}`}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-sm transition border border-slate-700"
-              title="Launch autonomous headed browser on Windows Companion for live web scouring"
+              className="btn-secondary"
+              title="Launch the browser agent on your Windows companion to search the web live"
             >
-              <Globe className="w-3.5 h-3.5 text-rose-400" />
-              <span>Browser Agent</span>
+              <Globe className="h-3.5 w-3.5 text-ink-500" />
+              Browser agent
             </Link>
 
-            {/* Start Discovery Button */}
-            <button
-              onClick={handleTriggerDiscovery}
-              disabled={scouting}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-sm transition disabled:opacity-50"
-            >
+            <button onClick={handleTriggerDiscovery} disabled={scouting} className="btn-cue" data-guide-step="start_discovery">
               {scouting ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Scouring Live Web...</span>
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Searching…
                 </>
               ) : (
                 <>
-                  <Zap className="w-3.5 h-3.5 fill-white" />
-                  <span>Start Live Discovery</span>
+                  <Zap className="h-3.5 w-3.5 fill-white" />
+                  {runs.length > 0 ? "Run discovery again" : "Start discovery"}
                 </>
               )}
             </button>
           </div>
         </div>
 
-        {/* Constraint Summary Bar */}
-        <div className="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
-          <div className="p-2 rounded-md bg-slate-50 border border-slate-200/60">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold block">Target City</span>
-            <span className="font-semibold text-slate-800 truncate block">
-              {eventData?.location || "UNKNOWN"}
-            </span>
-          </div>
-          <div className="p-2 rounded-md bg-slate-50 border border-slate-200/60">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold block">Search Radius</span>
-            <span className="font-semibold text-slate-800 truncate block">
-              {selectedRun ? `${selectedRun.radius_km} km` : "15 km"}
-            </span>
-          </div>
-          <div className="p-2 rounded-md bg-slate-50 border border-slate-200/60">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold block">Capacity Target</span>
-            <span className="font-semibold text-slate-800 truncate block">
-              {eventData?.guest_count ? `${eventData.guest_count} attendees` : "UNSET"}
-            </span>
-          </div>
-          <div className="p-2 rounded-md bg-slate-50 border border-slate-200/60">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold block">Category</span>
-            <span className="font-semibold text-slate-800 truncate block">{category}</span>
-          </div>
-          <div className="p-2 rounded-md bg-slate-50 border border-slate-200/60">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold block">Event Type</span>
-            <span className="font-semibold text-slate-800 truncate block">
-              {eventData?.event_type || "UNKNOWN"}
-            </span>
-          </div>
-          <div className="p-2 rounded-md bg-slate-50 border border-slate-200/60">
-            <span className="text-[10px] text-slate-400 uppercase font-semibold block">Budget Ceiling</span>
-            <span className="font-semibold text-slate-800 truncate block">
-              {eventData?.total_budget ? `₹${Number(eventData.total_budget).toLocaleString()}` : "UNSET"}
-            </span>
-          </div>
-        </div>
-
-        {statusMessage && (
-          <div className="mt-3 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-800 flex items-center justify-between">
-            <span className="flex items-center gap-1.5">
-              <Zap className="w-3.5 h-3.5 text-blue-600" />
-              {statusMessage}
-            </span>
-            <button
-              onClick={() => setStatusMessage(null)}
-              className="text-[10px] font-semibold text-blue-600 hover:underline"
-            >
-              Dismiss
-            </button>
+        {/* Category tabs (vendor mode) */}
+        {discoveryType === "VENDOR" && (
+          <div className="border-t border-ink-200 px-3">
+            <div role="tablist" aria-label="Vendor category" className="-mb-px flex gap-1 overflow-x-auto">
+              {VENDOR_CATEGORIES.map((cat) => {
+                const active = category === cat;
+                const Icon = CATEGORY_ICONS[cat] || Building2;
+                return (
+                  <button
+                    key={cat}
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setCategory(cat)}
+                    className={`relative inline-flex shrink-0 items-center gap-2 px-3 py-3 text-[13px] font-semibold transition ${
+                      active ? "text-ink-900" : "text-ink-500 hover:text-ink-800"
+                    }`}
+                  >
+                    <Icon className={`h-4 w-4 ${active ? "text-cue-600" : "text-ink-400"}`} />
+                    {humanizeCategory(cat)}
+                    <span
+                      className={`absolute inset-x-2 bottom-0 h-[2px] rounded-full transition ${
+                        active ? "bg-cue-600" : "bg-transparent"
+                      }`}
+                      aria-hidden
+                    />
+                  </button>
+                );
+              })}
+            </div>
           </div>
         )}
-      </div>
 
-      {/* 2. Dynamic Funnel Display */}
+        {/* Search brief — what the agent is working from */}
+        <dl className="grid grid-cols-2 gap-px border-t border-ink-200 bg-ink-200 sm:grid-cols-3 lg:grid-cols-6">
+          {briefRows.map((row) => (
+            <div key={row.label} className="min-w-0 bg-ink-50 px-5 py-3">
+              <dt className="font-mono text-[9.5px] uppercase tracking-label text-ink-400">{row.label}</dt>
+              <dd className="mt-1 truncate text-[13.5px]">
+                {row.value ? (
+                  <span className="font-semibold text-ink-900">
+                    {row.value}
+                    {row.hint && <span className="ml-1 font-normal text-ink-400">({row.hint})</span>}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 italic text-ink-400">
+                    <span className="grid h-4 w-4 place-items-center rounded-full border border-dashed border-ink-300 font-mono text-[9px] not-italic">
+                      ?
+                    </span>
+                    Not set
+                  </span>
+                )}
+              </dd>
+            </div>
+          ))}
+        </dl>
+
+      </section>
+
+      {/* 2. Funnel */}
       {selectedRun ? (
         <DiscoveryFunnel
           discovered={selectedRun.discovered}
@@ -912,25 +1054,61 @@ export function DiscoveryCommand({
           matching={selectedRun.matching}
           shortlisted={selectedRun.shortlisted}
           activeStage={funnelStageFilter}
-          onStageClick={(stage) =>
-            setFunnelStageFilter((prev) => (prev === stage ? null : stage))
-          }
+          onStageClick={(stage) => setFunnelStageFilter((prev) => (prev === stage ? null : stage))}
         />
       ) : (
-        <div className="bg-white rounded-xl border border-slate-200 p-4 text-center text-xs text-slate-500 shadow-sm">
-          No discovery run selected yet. Click 'Start Live Discovery' to dispatch autonomous sourcing.
-        </div>
+        !loading && (
+          <section className="relative overflow-hidden rounded-xl border border-dashed border-ink-300 bg-[#FDFCFA]/70 px-5 py-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3">
+                <span className="cue-light mt-1.5 bg-standby-500" />
+                <div>
+                  <div className="text-[14px] font-semibold text-ink-900">No discovery run yet</div>
+                  <p className="mt-0.5 max-w-[60ch] text-[13px] text-ink-500">
+                    Start a run and the funnel fills in live — discovered, unique, relevant, matching and shortlisted —
+                    with every count coming from the engine.
+                  </p>
+                </div>
+              </div>
+              <ol className="flex shrink-0 items-center gap-1.5 font-mono text-[10px] uppercase tracking-label text-ink-400">
+                {["Search", "Dedupe", "Qualify", "Match", "Rank"].map((s, i) => (
+                  <React.Fragment key={s}>
+                    {i > 0 && (
+                      <li aria-hidden className="text-ink-300">
+                        →
+                      </li>
+                    )}
+                    <li>{s}</li>
+                  </React.Fragment>
+                ))}
+              </ol>
+            </div>
+          </section>
+        )
       )}
 
-      {/* 3. Adaptive Iterations Toggle & Stepper */}
+      {/* 3. Agent discovery log */}
       {selectedRun && (
-        <div className="space-y-2">
+        <div className="space-y-3">
           <button
             onClick={() => setShowIterations(!showIterations)}
-            className="text-xs font-semibold text-slate-600 hover:text-slate-900 inline-flex items-center gap-1.5"
+            aria-expanded={showIterations}
+            className="flex w-full items-center justify-between gap-3 rounded-xl border border-ink-200 bg-[#FDFCFA] px-4 py-2.5 text-left shadow-sm transition hover:border-ink-300"
           >
-            <span>{showIterations ? "Hide" : "Show"} Adaptive Search Iterations ({runEvents.length} events logged)</span>
-            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showIterations ? "rotate-180" : ""}`} />
+            <span className="flex min-w-0 items-center gap-2.5">
+              <span className="text-agent-500" aria-hidden>
+                ✦
+              </span>
+              <span className="text-[13px] font-semibold text-ink-900">Agent discovery log</span>
+              <span className="truncate font-mono text-[11px] text-ink-400">
+                {runEvents.length} {runEvents.length === 1 ? "entry" : "entries"} · iteration{" "}
+                {selectedRun.current_iteration ?? 1} of {selectedRun.max_iterations ?? "?"}
+              </span>
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-ink-500">
+              {showIterations ? "Hide" : "Show"}
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showIterations ? "rotate-180" : ""}`} />
+            </span>
           </button>
 
           {showIterations && (
@@ -940,208 +1118,267 @@ export function DiscoveryCommand({
               maxIterations={selectedRun.max_iterations}
               radiusKm={selectedRun.radius_km}
               status={selectedRun.status}
+              className="animate-rise-in"
             />
           )}
         </div>
       )}
 
-      {/* 4. Split Workspace (Candidate List + Leaflet Map) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 min-h-[550px]">
-        {/* Left Column: Candidate Cards & Filters (7 cols) */}
-        <div className="lg:col-span-7 flex flex-col space-y-3">
-          {/* Controls Bar */}
-          <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
-            {/* Search Input */}
-            <div className="relative w-full sm:w-64">
-              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+      {agentRunKind && (
+        <AgentDiscoveryLive eventId={eventId} kind={agentRunKind} activeCategory={category} embedded />
+      )}
+
+      {/* 4. Candidates + map */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
+        <div className="flex min-w-0 flex-col gap-3 lg:col-span-7">
+          {/* Search + summary */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:max-w-xs">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
               <input
                 type="text"
-                placeholder="Search candidates by name..."
+                placeholder="Search by name, area or category"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-slate-400 transition"
+                aria-label="Search candidates"
+                className="h-9 w-full rounded-lg border border-ink-200 bg-[#FDFCFA] pl-9 pr-3 text-[13px] text-ink-900 shadow-sm transition placeholder:text-ink-400 focus:border-ink-400 focus:outline-none focus:ring-2 focus:ring-cue-500/15"
               />
             </div>
+            <div className="font-mono text-[11px] text-ink-500">
+              {filteredCandidates.length} of {candidates.length} candidates
+              {shortlistedIds.size > 0 && <span className="text-ink-900"> · {shortlistedIds.size} saved</span>}
+            </div>
+          </div>
 
-            {/* Vendor Category Pills (only in vendor mode) */}
-            {discoveryType === "VENDOR" && (
-              <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto no-scrollbar">
-                {VENDOR_CATEGORIES.map((cat) => (
-                  <button
-                    key={cat}
-                    onClick={() => setCategory(cat)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-semibold transition whitespace-nowrap ${
-                      category === cat
-                        ? "bg-slate-900 text-white"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Quick filters">
+            {(
+              [
+                ["saved", "Saved only", BookmarkCheck],
+                ["phone", "Has phone", Phone],
+                ["rated", "Rating 4+", Star],
+              ] as Array<[QuickFilter, string, React.ComponentType<{ className?: string }>]>
+            ).map(([key, label, Icon]) => {
+              const on = quickFilters.has(key);
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggleQuickFilter(key)}
+                  aria-pressed={on}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-semibold transition active:scale-95 ${
+                    on
+                      ? "border-ink-900 bg-ink-900 text-ink-50 shadow-sm"
+                      : "border-ink-200 bg-[#FDFCFA] text-ink-600 hover:border-ink-300 hover:text-ink-900"
+                  }`}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </button>
+              );
+            })}
+            {quickFilters.size > 0 && (
+              <button
+                type="button"
+                onClick={() => setQuickFilters(new Set())}
+                className="px-1.5 text-[12px] font-semibold text-ink-500 hover:text-ink-900"
+              >
+                Clear
+              </button>
             )}
           </div>
 
-          {/* Filter Status Badge if Funnel Stage Selected */}
           {funnelStageFilter && (
-            <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 text-xs border border-slate-200">
-              <span>Filtering by stage: <strong>{funnelStageFilter}</strong></span>
+            <div className="flex items-center justify-between rounded-lg bg-ink-900 px-3 py-2 text-[12.5px] text-ink-100">
+              <span>
+                Showing stage <span className="font-semibold text-white">{funnelStageFilter.toLowerCase()}</span>
+              </span>
               <button
                 onClick={() => setFunnelStageFilter(null)}
-                className="text-[11px] text-[#D6003C] hover:underline font-semibold"
+                className="text-[12px] font-semibold text-cue-300 hover:text-cue-200"
               >
                 Clear filter
               </button>
             </div>
           )}
 
-          {/* Candidate Cards Scrollable Feed */}
-          <div className="flex-1 overflow-y-auto max-h-[600px] space-y-2.5 pr-1">
+          <div className="space-y-6">
             {scouting && candidates.length === 0 ? (
-              <div className="py-16 text-center text-slate-400 text-xs bg-white rounded-xl border border-slate-200">
-                <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-[#D6003C]" />
-                Scouring external sources and normalizing candidate models...
+              <div className="space-y-2.5" aria-busy="true" aria-label="Loading candidates">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="rounded-xl border border-ink-200 bg-[#FDFCFA] p-4">
+                    <div className="flex gap-3">
+                      <div className="workspace-shimmer h-7 w-7 rounded-md" />
+                      <div className="flex-1 space-y-2">
+                        <div className="workspace-shimmer h-3.5 w-1/2 rounded" />
+                        <div className="workspace-shimmer h-3 w-3/4 rounded" />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-center font-mono text-[11px] text-ink-400">Normalising candidates from sources…</p>
               </div>
             ) : filteredCandidates.length === 0 ? (
-              <div className="py-16 text-center text-slate-400 text-xs bg-white rounded-xl border border-slate-200">
-                No candidates found matching current criteria.
+              <div className="flex flex-col items-center rounded-xl border border-dashed border-ink-300 bg-[#FDFCFA]/60 px-6 py-14 text-center">
+                <div className="mb-4 grid h-11 w-11 place-items-center rounded-xl border border-ink-200 bg-[#FDFCFA] text-ink-400 shadow-sm">
+                  <Search className="h-5 w-5" />
+                </div>
+                <div className="text-[15px] font-semibold text-ink-900">
+                  {candidates.length === 0 ? "No candidates yet" : "Nothing matches this filter"}
+                </div>
+                <p className="mt-1.5 max-w-[44ch] text-[13px] leading-relaxed text-ink-500">
+                  {candidates.length === 0
+                    ? `Run discovery to search for ${
+                        discoveryType === "VENUE" ? "venues" : categoryLabel.toLowerCase() + " vendors"
+                      } near ${eventCityLabel || "the event"}. Results appear here and on the map.`
+                    : "Try a different search, or clear the filters."}
+                </p>
+                {candidates.length === 0 && (
+                  <button onClick={handleTriggerDiscovery} disabled={scouting} className="btn-primary mt-5">
+                    <Zap className="h-3.5 w-3.5" /> Start discovery
+                  </button>
+                )}
               </div>
             ) : funnelStageFilter === "SHORTLISTED" ? (
               <div className="space-y-2.5">
-                <div className="flex items-center justify-between px-1 pb-1">
-                  <div className="flex items-center gap-1.5">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span className="text-xs font-bold text-slate-900 tracking-tight">
-                      Active Event Shortlist ({filteredCandidates.length})
-                    </span>
-                  </div>
-                  <span className="text-[10px] text-slate-400">Agent picks & confirmed overrides</span>
-                </div>
+                <TierHeading
+                  icon={<CheckCircle2 className="h-4 w-4 text-go-600" />}
+                  title="Saved"
+                  count={filteredCandidates.length}
+                  caption="Your saved options, including overrides"
+                />
                 {filteredCandidates.map((candidate) =>
                   renderCandidateCard(
                     candidate,
-                    candidate.tier === "top_matches" ? "top" : candidate.qualification_status === "rejected" ? "rejected" : "other"
+                    candidate.tier === "top_matches"
+                      ? "top"
+                      : candidate.qualification_status === "rejected"
+                      ? "rejected"
+                      : "other",
+                    nextPos()
                   )
                 )}
               </div>
             ) : (
-              <div className="space-y-4">
-                {/* Tier 1: Agent Shortlist (Pre-selected Top Matches) */}
+              <>
                 {topMatches.length > 0 && (
                   <div className="space-y-2.5">
-                    <div className="flex items-center justify-between px-1 pb-1">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-4 h-4 text-purple-600" />
-                        <span className="text-xs font-bold text-slate-900 tracking-tight">
-                          Agent Shortlist ({topMatches.length} Top Recommendations)
-                        </span>
-                        <span className="text-[10px] bg-purple-50 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded-full font-semibold">
-                          Pre-selected
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-400 font-mono">Autonomous Engine Picks</span>
-                    </div>
-                    {topMatches.map((candidate) => renderCandidateCard(candidate, "top"))}
+                    <TierHeading
+                      icon={<span className="text-[15px] leading-none text-agent-500">✦</span>}
+                      title="Agent recommendations"
+                      count={topMatches.length}
+                      caption="Pre-selected top matches"
+                    />
+                    {topMatches.map((c) => renderCandidateCard(c, "top", nextPos()))}
                   </div>
                 )}
 
-                {/* Tier 2: Other Available Options (Secondary) */}
                 {otherOptions.length > 0 && (
-                  <div className="space-y-2.5 pt-2 border-t border-slate-100">
-                    <div className="flex items-center justify-between px-1 pb-1">
-                      <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 text-slate-500" />
-                        <span className="text-xs font-bold text-slate-800 tracking-tight">
-                          Other Available Options ({otherOptions.length})
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-400">Promote to shortlist as desired</span>
-                    </div>
-                    {otherOptions.map((candidate) => renderCandidateCard(candidate, "other"))}
+                  <div className="space-y-2.5">
+                    <TierHeading
+                      icon={<Users className="h-4 w-4 text-ink-400" />}
+                      title="Other qualified options"
+                      count={otherOptions.length}
+                      caption="Save the ones you like"
+                    />
+                    {otherOptions.map((c) => renderCandidateCard(c, "other", nextPos()))}
                   </div>
                 )}
 
-                {/* Tier 3: Backup & Waitlist (Secondary) */}
                 {backupWaitlist.length > 0 && (
-                  <div className="space-y-2.5 pt-2 border-t border-slate-100">
-                    <div className="flex items-center justify-between px-1 pb-1">
-                      <div className="flex items-center gap-2">
-                        <Clock className="w-4 h-4 text-amber-500" />
-                        <span className="text-xs font-bold text-slate-800 tracking-tight">
-                          Backup & Waitlist Candidates ({backupWaitlist.length})
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-slate-400">Secondary availability</span>
-                    </div>
-                    {backupWaitlist.map((candidate) => renderCandidateCard(candidate, "backup"))}
+                  <div className="space-y-2.5">
+                    <TierHeading
+                      icon={<Clock className="h-4 w-4 text-standby-500" />}
+                      title="Backup & waitlist"
+                      count={backupWaitlist.length}
+                      caption="Secondary availability"
+                    />
+                    {backupWaitlist.map((c) => renderCandidateCard(c, "backup", nextPos()))}
                   </div>
                 )}
 
-                {/* Tier 4: Excluded / Disqualified Candidates (Behind Toggle) */}
                 {rejectedOptions.length > 0 && (
-                  <div className="mt-4 pt-3 border-t border-slate-200">
+                  <div>
                     <button
                       type="button"
                       onClick={() => setShowRejected(!showRejected)}
-                      className="w-full flex items-center justify-between p-2.5 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 text-xs font-semibold text-slate-700 transition"
+                      aria-expanded={showRejected}
+                      className="flex w-full items-center justify-between rounded-xl border border-dashed border-ink-300 px-4 py-3 text-left transition hover:bg-[#FDFCFA]"
                     >
-                      <div className="flex items-center gap-2">
-                        <ShieldAlert className="w-4 h-4 text-rose-500" />
-                        <span>Excluded Candidates ({rejectedOptions.length} rejected by engine)</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                        <span>{showRejected ? "Hide rejected" : "Review rejected candidates"}</span>
-                        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${showRejected ? "rotate-180" : ""}`} />
-                      </div>
+                      <span className="flex items-center gap-2 text-[13px] font-semibold text-ink-700">
+                        <ShieldAlert className="h-4 w-4 text-cue-500" />
+                        Excluded by the engine
+                        <span className="font-mono text-[11px] font-normal text-ink-400">{rejectedOptions.length}</span>
+                      </span>
+                      <span className="flex items-center gap-1.5 text-[12px] text-ink-500">
+                        {showRejected ? "Hide" : "Review"}
+                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showRejected ? "rotate-180" : ""}`} />
+                      </span>
                     </button>
 
                     {showRejected && (
-                      <div className="mt-3 space-y-2.5 animate-in fade-in duration-150">
-                        <div className="text-[11px] text-slate-600 bg-rose-50/50 p-2.5 rounded-lg border border-rose-200 leading-relaxed">
-                          These entities were automatically disqualified by the qualification engine (e.g. Non-commercial, PSU/institutional, or failed event constraints). Shortlisting any of these requires explicit manual confirmation.
-                        </div>
-                        {rejectedOptions.map((candidate) => renderCandidateCard(candidate, "rejected"))}
+                      <div className="mt-3 space-y-2.5 animate-rise-in">
+                        <p className="rounded-lg bg-ink-100/70 px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-600">
+                          These were automatically excluded (for example non-commercial, PSU/institutional, or failing
+                          event constraints). Saving one anyway needs an explicit manual confirmation.
+                        </p>
+                        {rejectedOptions.map((c) => renderCandidateCard(c, "rejected", nextPos()))}
                       </div>
                     )}
                   </div>
                 )}
-              </div>
+              </>
             )}
           </div>
         </div>
 
-        {/* Right Column: Interactive Leaflet Map (5 cols) */}
-        <div className="lg:col-span-5 h-[400px] lg:h-auto min-h-[400px] flex flex-col">
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm h-full flex flex-col overflow-hidden p-1.5">
-            <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between text-xs">
-              <span className="font-semibold text-slate-700 flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-[#D6003C]" />
-                <span>Geospatial Radar ({mapPlaces.length} mapped)</span>
+        {/* Map */}
+        <div className="lg:col-span-5">
+          <section className="surface flex h-[420px] flex-col overflow-hidden lg:sticky lg:top-4 lg:h-[calc(100dvh-140px)] lg:max-h-[720px]">
+            <header className="flex items-center justify-between gap-2 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <MapPin className="h-4 w-4 text-cue-600" />
+                <span className="text-[13px] font-semibold text-ink-900">Map</span>
+                <span className="font-mono text-[11px] text-ink-400">{mapPlaces.length} plotted</span>
+              </div>
+              <span className="truncate font-mono text-[11px] text-ink-500">
+                {eventData?.location || "Location not set"}
               </span>
-              <span className="text-[10px] text-slate-400 font-mono">
-                {eventData?.location || "Delhi"}
-              </span>
-            </div>
-
-            <div className="flex-1 w-full relative min-h-[350px]">
+            </header>
+            <div className="relative min-h-[320px] flex-1 border-y border-ink-200">
               <DiscoveryMap
                 places={mapPlaces}
                 selectedPlace={selectedMapPlace}
                 onSelectPlace={(place) => {
                   const match = candidates.find((c) => c.id === place.id);
                   if (match) {
-                    setSelectedCandidate(match);
+                    focusCard(match.id);
                   }
                 }}
+                highlightedId={hotId}
+                onHoverPlace={(place) => setHotId(place ? place.id : null)}
+                labels={positions}
                 eventCity={eventData?.location?.split(",")[0] || "Delhi"}
               />
             </div>
-          </div>
+            <footer className="flex items-center justify-between gap-2 px-4 py-2 text-[11.5px] text-ink-500">
+              <span>Pin numbers match the list. Markers use each source&apos;s real coordinates.</span>
+              {unmappedCount > 0 && (
+                <span className="font-mono text-standby-700">{unmappedCount} without coordinates</span>
+              )}
+            </footer>
+          </section>
         </div>
       </div>
 
-      {/* 5. Evidence Drawer */}
+      {/* Friendly, auto-dismissing feedback for every action */}
+      <Toast
+        message={statusMessage}
+        tone={toastTone(statusMessage, isRunActive)}
+        onDone={() => setStatusMessage(null)}
+        ms={isRunActive ? 5000 : 3600}
+      />
+
+      {/* 5. Evidence drawer */}
       <CandidateEvidenceDrawer
         candidate={selectedCandidate}
         onClose={() => setSelectedCandidate(null)}
@@ -1149,58 +1386,52 @@ export function DiscoveryCommand({
         onToggleShortlist={handleToggleShortlist}
         onSelectPrimary={handleSelectPrimary}
         isSelecting={actionInProgress === selectedCandidate?.id}
+        isRequested={selectedCandidate ? requestedIds.has(selectedCandidate.id) : false}
+        approvalsHref={`/events/${eventId}/approvals`}
       />
 
-      {/* 6. Manual Override Confirmation Modal (Requirement 4) */}
+      {/* 6. Manual override confirmation */}
       {overrideCandidateConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl max-w-md w-full p-5 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-full bg-rose-100 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5 text-rose-600" />
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-ink-950/55 p-4 backdrop-blur-[2px]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm saving an excluded option"
+        >
+          <div className="w-full max-w-md animate-rise-in overflow-hidden rounded-2xl bg-paper shadow-2xl">
+            <div className="flex items-start gap-3 px-6 pb-4 pt-6">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-cue-50 ring-1 ring-cue-200">
+                <AlertTriangle className="h-5 w-5 text-cue-600" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  Confirm Manual Shortlist Override
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  This entity was disqualified by the agent's automated qualification engine.
+                <h3 className="text-[16px] font-bold text-ink-900">Override the engine?</h3>
+                <p className="mt-0.5 text-[13px] text-ink-500">
+                  {overrideCandidateConfirm.name} was excluded by automated qualification.
                 </p>
               </div>
             </div>
 
-            <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-xs text-rose-900 space-y-1.5">
-              <div className="font-semibold text-rose-800">
-                Candidate: {overrideCandidateConfirm.name}
+            <div className="mx-6 rounded-xl border border-cue-200 bg-cue-50 px-4 py-3">
+              <div className="flex items-center gap-2 text-[12px] font-semibold text-cue-800">
+                <ProvenanceBadge provenance="ENGINE" size="sm" /> Reason for exclusion
               </div>
-              <div>
-                <span className="font-bold">Reason for Rejection:</span>{" "}
-                <span className="font-mono text-[11px] block mt-0.5">
-                  {overrideCandidateConfirm.qualification_reason ||
-                    overrideCandidateConfirm.matching_reasons?.[0] ||
-                    "Institution/PSU — excluded by default"}
-                </span>
-              </div>
+              <p className="mt-1.5 font-mono text-[12px] text-cue-900">
+                {describeQualificationReason(
+                  overrideCandidateConfirm.qualification_reason || overrideCandidateConfirm.matching_reasons?.[0]
+                ) || EXCLUSION_FALLBACK}
+              </p>
             </div>
 
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Are you sure you want to force this candidate into your shortlist? This will bypass the agent's automated suitability and legitimacy gates.
+            <p className="px-6 pt-4 text-[13px] leading-relaxed text-ink-600">
+              Saving it skips the suitability and legitimacy checks and is recorded as a manual override.
             </p>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-              <button
-                type="button"
-                onClick={() => setOverrideCandidateConfirm(null)}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 transition"
-              >
+            <div className="mt-5 flex items-center justify-end gap-2 border-t border-ink-200 bg-[#FDFCFA] px-6 py-4">
+              <button type="button" onClick={() => setOverrideCandidateConfirm(null)} className="btn-ghost">
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={handleConfirmOverride}
-                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-600 hover:bg-rose-700 text-white shadow-sm transition"
-              >
-                Yes, Force Shortlist (Override)
+              <button type="button" onClick={handleConfirmOverride} className="btn bg-cue-600 text-white hover:bg-cue-700">
+                Yes, save anyway
               </button>
             </div>
           </div>
@@ -1208,4 +1439,61 @@ export function DiscoveryCommand({
       )}
     </div>
   );
+}
+
+function TierHeading({
+  icon,
+  title,
+  count,
+  caption,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  count: number;
+  caption?: string;
+}) {
+  return (
+    <div className="flex items-end justify-between gap-2 px-0.5 pb-1">
+      <div className="flex items-center gap-2">
+        {icon}
+        <span className="text-[13px] font-semibold text-ink-900">{title}</span>
+        <span className="font-mono text-[11px] text-ink-400">{count}</span>
+      </div>
+      {caption && <span className="hidden text-[11.5px] text-ink-400 sm:inline">{caption}</span>}
+    </div>
+  );
+}
+
+function runStatusMeta(status?: string | null): { label: string; chip: string; dot: string } {
+  switch (status) {
+    case "RUNNING":
+      return {
+        label: "Searching",
+        chip: "border-standby-200 bg-standby-50 text-standby-800",
+        dot: "bg-standby-500 animate-cue-blink",
+      };
+    case "COMPLETED":
+      return { label: "Completed", chip: "border-go-200 bg-go-50 text-go-700", dot: "bg-go-500" };
+    case "TARGET_REACHED":
+      return { label: "Target reached", chip: "border-go-200 bg-go-50 text-go-700", dot: "bg-go-500" };
+    case "EXHAUSTED":
+      return { label: "Search exhausted", chip: "border-standby-200 bg-standby-50 text-standby-800", dot: "bg-standby-500" };
+    case "FAILED":
+      return { label: "Failed", chip: "border-cue-200 bg-cue-50 text-cue-700", dot: "bg-cue-600" };
+    default:
+      return {
+        label: status ? humanizeCategory(status) : "No run",
+        chip: "border-ink-200 bg-ink-100/70 text-ink-600",
+        dot: "bg-ink-400",
+      };
+  }
+}
+
+/** Pick a toast colour from the message: errors red, successes green, progress ink. */
+function toastTone(message: string | null, running: boolean): ToastTone {
+  if (!message) return "ink";
+  if (/fail|couldn|error|did not/i.test(message)) return "cue";
+  if (running) return "ink";
+  if (/saved|booked|requested|finished|completed/i.test(message)) return "go";
+  return "ink";
 }

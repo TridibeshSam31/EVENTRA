@@ -219,3 +219,16 @@ def update_task_verification_endpoint(
     )
     return TaskResponse.model_validate(task)
 
+
+
+@router.get("/{event_id}/operations/summary")
+def get_operational_summary(
+    event_id: str,
+    db: Session = Depends(get_db_session),
+    current_user_id: str = Depends(get_current_user_id),
+):
+    """Organizer view of the event right now: status with reasons, issues, vendors, approvals, next action."""
+    from app.services.operational_summary_service import OperationalSummaryService
+
+    event = verify_event_access(db, event_id, current_user_id)
+    return OperationalSummaryService(db).build(event)

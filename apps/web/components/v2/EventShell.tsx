@@ -53,7 +53,7 @@ export function EventShell({
   }, [eventId, initialEvent]);
 
   return (
-    <div className={`min-h-full flex flex-col bg-slate-50 ${className}`}>
+    <div className={`min-h-full flex flex-col bg-paper ${className}`}>
       <EventHeader
         eventId={eventId}
         name={event?.name}
@@ -67,7 +67,7 @@ export function EventShell({
         currentStage={currentStage}
       />
 
-      <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <div className="workspace-enter max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         <OfflineBanner lastDataTimestamp={event?.updated_at || event?.created_at || null} />
         {children}
       </div>

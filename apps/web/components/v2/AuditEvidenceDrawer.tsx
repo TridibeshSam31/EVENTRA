@@ -81,7 +81,7 @@ export function AuditEvidenceDrawer({
       : "UNKNOWN";
 
   return (
-    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-white border-l border-slate-200 shadow-2xl flex flex-col transform transition-transform duration-200 ease-in-out">
+    <div className="fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-[#FDFCFA] border-l border-slate-200 shadow-2xl flex flex-col transform transition-transform duration-200 ease-in-out">
       {/* Header */}
       <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
         <div className="flex items-center gap-2">
@@ -126,10 +126,10 @@ export function AuditEvidenceDrawer({
 
         {/* Action & Category */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Action & Classification
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA]">
             <div className="text-sm font-semibold text-slate-900">
               {record.action || "UNKNOWN ACTION"}
             </div>
@@ -149,10 +149,10 @@ export function AuditEvidenceDrawer({
 
         {/* Actor Attribution */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Actor Attribution
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white grid grid-cols-2 gap-3 text-xs">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA] grid grid-cols-2 gap-3 text-xs">
             <div>
               <span className="text-slate-400 text-[11px] block">Actor Identity:</span>
               <div className="flex items-center gap-1.5 font-medium text-slate-900 mt-1">
@@ -171,10 +171,10 @@ export function AuditEvidenceDrawer({
 
         {/* Timestamp */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Authoritative Timestamp
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white space-y-1 text-xs">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA] space-y-1 text-xs">
             <div className="flex items-center gap-2 text-slate-800">
               <Clock className="w-3.5 h-3.5 text-slate-400" />
               <span className="font-mono text-slate-900">
@@ -189,10 +189,10 @@ export function AuditEvidenceDrawer({
 
         {/* Target Entity Navigation */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Target Entity
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white flex items-center justify-between">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA] flex items-center justify-between">
             <div>
               <span className="text-[11px] text-slate-500 uppercase tracking-wider block">
                 {record.target_type || "UNKNOWN TARGET"}
@@ -204,7 +204,7 @@ export function AuditEvidenceDrawer({
             {targetLink ? (
               <Link
                 href={targetLink}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#D6003C] hover:underline"
+                className="inline-flex items-center gap-1 text-xs font-semibold text-cue-600 hover:underline"
               >
                 <span>Navigate</span>
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -219,10 +219,10 @@ export function AuditEvidenceDrawer({
 
         {/* Correlation IDs */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             Correlation Identifiers
           </label>
-          <div className="p-3 rounded-xl border border-slate-200 bg-white space-y-2 text-xs">
+          <div className="p-3 rounded-xl border border-slate-200 bg-[#FDFCFA] space-y-2 text-xs">
             <div className="flex items-center justify-between">
               <span className="text-slate-500">Approval ID:</span>
               <span className="font-mono text-slate-800 font-medium">
@@ -246,7 +246,7 @@ export function AuditEvidenceDrawer({
 
         {/* State Transition (Before / After) */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <label className="eyebrow">
             State Transition Diff
           </label>
           <div className="grid grid-cols-2 gap-2 text-xs">

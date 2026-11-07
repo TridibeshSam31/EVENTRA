@@ -120,7 +120,7 @@ export function TimelineCard({ tasks = [] }: { tasks?: any[] }) {
     <div className="bg-white/[0.03] border border-white/5 rounded-3xl p-6 lg:col-span-2 relative overflow-hidden flex flex-col min-h-[400px] hover:border-white/10 hover:-translate-y-1 hover:shadow-[0_8px_30px_rgb(214,0,60,0.05)] transition-all duration-300 group">
       <div className="flex justify-between items-center mb-8 relative z-10">
         <div className="flex items-center gap-2">
-           <Zap size={18} className="text-[#D6003C]" />
+           <Zap size={18} className="text-cue-600" />
            <h3 className="text-lg font-medium text-white">Event Timeline</h3>
         </div>
         <div className="flex gap-4 text-sm font-medium bg-black/40 border border-white/10 rounded-full px-4 py-1.5">

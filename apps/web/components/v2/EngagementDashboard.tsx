@@ -29,6 +29,8 @@ import type { VendorAssignmentResponse } from "@/types/api";
 import type { Conversation } from "@/types/communication";
 import { ProvenanceBadge } from "./ProvenanceBadge";
 import { WhatsAppDeliveryStatus } from "./WhatsAppDeliveryStatus";
+import { motion, useReducedMotion } from "framer-motion";
+import { humanizeCategory } from "@/lib/humanize";
 import { CallExecutionCard, CallExecutionData } from "./CallExecutionCard";
 
 interface EngagementDashboardProps {
@@ -42,6 +44,7 @@ export function EngagementDashboard({
   className = "",
   onSelectConversation,
 }: EngagementDashboardProps) {
+  const reduceMotion = useReducedMotion();
   const [assignments, setAssignments] = useState<VendorAssignmentResponse[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,345 +166,310 @@ export function EngagementDashboard({
     return true;
   });
 
+  // The engagement funnel (V2 spec §12): every count comes from backend assignment state.
+  const stages: Array<{
+    key: string;
+    label: string;
+    hint: string;
+    value: number;
+    tone: "ink" | "standby" | "info" | "go";
+  }> = [
+    { key: "SHORTLISTED", label: "Shortlisted", hint: "Not contacted yet", value: stats.shortlisted, tone: "ink" },
+    { key: "AWAITING", label: "Awaiting reply", hint: "Message or call sent", value: stats.awaiting, tone: "standby" },
+    { key: "RESPONDED", label: "Responded", hint: "Quote or terms received", value: stats.responded, tone: "info" },
+    { key: "CONFIRMED", label: "Confirmed", hint: "Booked for the event", value: stats.confirmed, tone: "go" },
+  ];
+  const maxStage = Math.max(1, ...stages.map((s) => s.value));
+  const toneBar: Record<string, string> = {
+    ink: "bg-ink-800",
+    standby: "bg-standby-500",
+    info: "bg-info-500",
+    go: "bg-go-500",
+  };
+  const toneText: Record<string, string> = {
+    ink: "text-ink-900",
+    standby: "text-standby-700",
+    info: "text-info-700",
+    go: "text-go-700",
+  };
+
   return (
-    <div className={`space-y-6 ${className}`}>
-      {/* 1. Header & Live Telemetry Summary */}
-      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div className={`space-y-5 ${className}`}>
+      {/* ── Funnel ───────────────────────────────────────── */}
+      <section className="surface overflow-hidden">
+        <header className="flex flex-col gap-3 px-5 pt-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                Engagement & Outreach Command
-              </span>
-              <span className="text-[10px] font-mono text-slate-400">
-                {assignments.length} contracted/shortlisted
-              </span>
-            </div>
-            <h2 className="text-lg font-bold text-slate-900 tracking-tight mt-1">
-              Multi-Channel Provider Communications
-            </h2>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Live WhatsApp and Twilio telephony state synchronized with backend negotiation state machines.
+            <div className="eyebrow">Outreach funnel · {assignments.length} providers</div>
+            <h3 className="mt-1 text-[15px] font-semibold text-ink-900">From shortlist to booked</h3>
+            <p className="mt-0.5 text-[12.5px] text-ink-500">
+              WhatsApp and call progress as reported by the backend. Click a stage to filter the list below.
             </p>
           </div>
-
           <div className="flex items-center gap-2">
-            <button
-              onClick={loadData}
-              disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-              <span>Refresh Telemetry</span>
+            <button onClick={loadData} disabled={loading} className="btn-secondary h-8">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              Refresh
             </button>
-            <Link
-              href={`/events/${eventId}/conversations`}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold shadow-xs transition"
-            >
-              <MessageSquare className="w-3.5 h-3.5" />
-              <span>Open Thread Console</span>
-            </Link>
           </div>
-        </div>
+        </header>
 
-        {/* Status Message Alert */}
         {statusMessage && (
-          <div className="mt-4 p-2.5 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-800 flex items-center justify-between">
+          <div className="mx-5 mt-3 flex items-center justify-between gap-3 rounded-lg border border-info-200 bg-info-50 px-3 py-2 text-[12.5px] text-info-900">
             <span>{statusMessage}</span>
-            <button
-              onClick={() => setStatusMessage(null)}
-              className="text-[10px] font-semibold text-blue-600 hover:underline"
-            >
+            <button onClick={() => setStatusMessage(null)} className="text-[11.5px] font-semibold text-info-700 hover:underline">
               Dismiss
             </button>
           </div>
         )}
 
-        {/* 2. Authoritative State Counters */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 mt-5">
-          <button
-            onClick={() => setFilterStatus(filterStatus === "SHORTLISTED" ? null : "SHORTLISTED")}
-            className={`p-3 rounded-lg border text-left transition ${
-              filterStatus === "SHORTLISTED"
-                ? "border-[#D6003C] bg-rose-50/30"
-                : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
-            }`}
-          >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-              Shortlisted
-            </span>
-            <span className="text-xl font-bold font-mono text-slate-900 mt-0.5 block">
-              {stats.shortlisted}
-            </span>
-            <span className="text-[10px] text-slate-500">Awaiting dispatch</span>
-          </button>
+        <div className="mt-4 grid grid-cols-2 border-t border-ink-200 md:grid-cols-4">
+          {stages.map((s, i) => {
+            const active = filterStatus === s.key;
+            return (
+              <button
+                key={s.key}
+                onClick={() => setFilterStatus(active ? null : s.key)}
+                aria-pressed={active}
+                className={`group relative flex flex-col gap-2 px-5 py-4 text-left transition ${
+                  i > 0 ? "md:border-l md:border-ink-200" : ""
+                } ${i % 2 === 1 ? "border-l border-ink-200 md:border-l" : ""} ${i >= 2 ? "border-t border-ink-200 md:border-t-0" : ""} ${
+                  active ? "bg-ink-100/80" : "hover:bg-ink-50"
+                }`}
+              >
+                {active && <span className="absolute inset-x-0 top-0 h-[3px] bg-cue-600" />}
+                <span className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] text-ink-400">{String(i + 1).padStart(2, "0")}</span>
+                  {i < stages.length - 1 && (
+                    <ChevronRight className="hidden h-3.5 w-3.5 text-ink-300 md:block" aria-hidden />
+                  )}
+                </span>
+                <span
+                  className={`font-display text-[34px] font-bold leading-none tabular-nums ${s.value ? toneText[s.tone] : "text-ink-300"}`}
+                  style={{ fontStretch: "88%" }}
+                >
+                  {s.value}
+                </span>
+                <span>
+                  <span className="block text-[13px] font-semibold text-ink-900">{s.label}</span>
+                  <span className="block text-[11.5px] text-ink-500">{s.hint}</span>
+                </span>
+                <span className="h-1 w-full overflow-hidden rounded-full bg-ink-200/70">
+                  <span
+                    className={`block h-full rounded-full transition-[width] duration-700 ${toneBar[s.tone]}`}
+                    style={{ width: `${(s.value / maxStage) * 100}%` }}
+                  />
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
-          <button
-            onClick={() => setFilterStatus(filterStatus === "AWAITING" ? null : "AWAITING")}
-            className={`p-3 rounded-lg border text-left transition ${
-              filterStatus === "AWAITING"
-                ? "border-[#D6003C] bg-rose-50/30"
-                : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
-            }`}
-          >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 block">
-              Awaiting Reply
-            </span>
-            <span className="text-xl font-bold font-mono text-amber-700 mt-0.5 block">
-              {stats.awaiting}
-            </span>
-            <span className="text-[10px] text-slate-500">Outreach dispatched</span>
-          </button>
-
-          <button
-            onClick={() => setFilterStatus(filterStatus === "RESPONDED" ? null : "RESPONDED")}
-            className={`p-3 rounded-lg border text-left transition ${
-              filterStatus === "RESPONDED"
-                ? "border-[#D6003C] bg-rose-50/30"
-                : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
-            }`}
-          >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 block">
-              Responded
-            </span>
-            <span className="text-xl font-bold font-mono text-blue-700 mt-0.5 block">
-              {stats.responded}
-            </span>
-            <span className="text-[10px] text-slate-500">Quotes & terms ready</span>
-          </button>
-
-          <button
-            onClick={() => setFilterStatus(filterStatus === "CONFIRMED" ? null : "CONFIRMED")}
-            className={`p-3 rounded-lg border text-left transition ${
-              filterStatus === "CONFIRMED"
-                ? "border-[#D6003C] bg-rose-50/30"
-                : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
-            }`}
-          >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block">
-              Confirmed
-            </span>
-            <span className="text-xl font-bold font-mono text-emerald-700 mt-0.5 block">
-              {stats.confirmed}
-            </span>
-            <span className="text-[10px] text-slate-500">Locked to schedule</span>
-          </button>
-
+        <footer className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-ink-200 bg-ink-50/70 px-5 py-2.5 text-[12px] text-ink-500">
           <button
             onClick={() => setFilterStatus(filterStatus === "DECLINED" ? null : "DECLINED")}
-            className={`p-3 rounded-lg border text-left transition ${
-              filterStatus === "DECLINED"
-                ? "border-[#D6003C] bg-rose-50/30"
-                : "border-slate-200 bg-slate-50/50 hover:bg-slate-100/50"
+            className={`inline-flex items-center gap-1.5 font-semibold transition ${
+              filterStatus === "DECLINED" ? "text-cue-700" : "hover:text-ink-900"
             }`}
           >
-            <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 block">
-              Declined
-            </span>
-            <span className="text-xl font-bold font-mono text-rose-700 mt-0.5 block">
-              {stats.declined}
-            </span>
-            <span className="text-[10px] text-slate-500">Unavailable / rejected</span>
+            <span className="cue-light bg-cue-500" />
+            {stats.declined} declined
           </button>
-
-          <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 text-left">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
-              Active Threads
+          {stats.contacting > 0 && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="cue-light bg-standby-400 animate-cue-blink" />
+              {stats.contacting} being contacted now
             </span>
-            <span className="text-xl font-bold font-mono text-slate-900 mt-0.5 block">
-              {conversations.length}
+          )}
+          {stats.failed > 0 && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="cue-light bg-cue-700" />
+              {stats.failed} failed to reach
             </span>
-            <span className="text-[10px] text-slate-500">Synchronized sessions</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Active Call Execution Live Card if Triggered */}
-      {activeCall && (
-        <CallExecutionCard
-          call={activeCall}
-        />
-      )}
-
-
-      {/* 3. Shortlist to Engagement Bridge Table */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900 flex items-center gap-2">
-              <Users className="w-4 h-4 text-[#D6003C]" />
-              <span>Provider Engagement Registry</span>
-            </h3>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Authoritative review and dispatch console for event candidates and contracted suppliers.
-            </p>
-          </div>
-
+          )}
+          <span className="inline-flex items-center gap-1.5">
+            <MessageSquare className="h-3.5 w-3.5" />
+            {conversations.length} conversation {conversations.length === 1 ? "thread" : "threads"}
+          </span>
           {filterStatus && (
-            <button
-              onClick={() => setFilterStatus(null)}
-              className="text-[11px] font-semibold text-[#D6003C] hover:underline"
-            >
-              Clear filter ({filterStatus})
+            <button onClick={() => setFilterStatus(null)} className="ml-auto font-semibold text-ink-700 hover:underline">
+              Clear filter
             </button>
           )}
-        </div>
+        </footer>
+      </section>
+
+      {activeCall && <CallExecutionCard call={activeCall} />}
+
+      {/* ── Provider list ────────────────────────────────── */}
+      <section className="surface overflow-hidden">
+        <header className="flex items-center justify-between gap-3 border-b border-ink-200 px-5 py-3.5">
+          <div>
+            <h3 className="text-[14px] font-semibold text-ink-900">Providers</h3>
+            <p className="text-[12px] text-ink-500">
+              {filterStatus ? `Filtered: ${filterStatus.toLowerCase()}` : "Everyone on the shortlist or under contract"}
+            </p>
+          </div>
+          <span className="font-mono text-[11px] text-ink-400">{filteredAssignments.length} shown</span>
+        </header>
 
         {loading && assignments.length === 0 ? (
-          <div className="py-16 text-center text-xs text-slate-400">
-            <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2 text-[#D6003C]" />
-            Loading provider engagement states...
+          <div className="space-y-2 p-4">
+            {[0, 1, 2].map((i) => (
+              <div key={i} className="workspace-shimmer h-14 rounded-lg" />
+            ))}
           </div>
         ) : filteredAssignments.length === 0 ? (
-          <div className="py-16 text-center text-xs text-slate-400">
-            No provider engagements found matching current filter.
+          <div className="px-6 py-14 text-center">
+            <Users className="mx-auto mb-3 h-6 w-6 text-ink-300" />
+            <p className="text-[13.5px] font-semibold text-ink-800">
+              {assignments.length === 0 ? "No providers shortlisted yet" : "No providers in this stage"}
+            </p>
+            <p className="mx-auto mt-1 max-w-[44ch] text-[12.5px] text-ink-500">
+              {assignments.length === 0
+                ? "Run discovery on the Vendors page; shortlisted providers show up here ready to contact."
+                : "Pick another stage above or clear the filter."}
+            </p>
+            {assignments.length === 0 && (
+              <Link href={`/events/${eventId}/vendors`} className="btn-secondary mt-4">
+                Go to vendors
+              </Link>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-[10px] uppercase font-bold text-slate-400 border-b border-slate-200 tracking-wider">
-                <tr>
-                  <th className="px-4 py-3">Provider</th>
-                  <th className="px-4 py-3">Category</th>
-                  <th className="px-4 py-3">Contact Channels</th>
-                  <th className="px-4 py-3">Engagement Status</th>
-                  <th className="px-4 py-3">Terms / Quote</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+            <table className="w-full min-w-[760px] text-left">
+              <thead>
+                <tr className="border-b border-ink-200 font-mono text-[10px] uppercase tracking-label text-ink-400">
+                  <th className="px-5 py-2.5 font-medium">Provider</th>
+                  <th className="px-4 py-2.5 font-medium">Contact</th>
+                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Quote</th>
+                  <th className="px-5 py-2.5 text-right font-medium">
+                    <span className="sr-only">Actions</span>
+                  </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredAssignments.map((assignment) => {
+              <tbody className="divide-y divide-ink-100">
+                {filteredAssignments.map((assignment, rowIdx) => {
                   const vendor = assignment.vendor;
                   const hasPhone = Boolean(vendor?.phone && vendor.phone.trim() !== "");
                   const matchingConv = conversations.find(
                     (c) => c.vendor_id === assignment.vendor_id || c.vendor_name === vendor?.name
                   );
-
-                  const isCallInProgress =
-                    activeCall?.recipient_phone === vendor?.phone &&
-                    (activeCall?.status === "RINGING" || activeCall?.status === "CONNECTED");
-
-                  const isBusy = actionInProgress === assignment.id;
+                  const s = (assignment.status || "SHORTLISTED").toUpperCase();
+                  const tone =
+                    s === "CONFIRMED"
+                      ? "go"
+                      : s === "DECLINED" || s === "CANCELLED" || s === "FAILED"
+                      ? "cue"
+                      : s === "ENGAGED" || s === "CONTACTED"
+                      ? "standby"
+                      : "idle";
+                  const chipCls: Record<string, string> = {
+                    go: "border-go-200 bg-go-50 text-go-700",
+                    cue: "border-cue-200 bg-cue-50 text-cue-700",
+                    standby: "border-standby-200 bg-standby-50 text-standby-800",
+                    idle: "border-ink-200 bg-ink-100/70 text-ink-600",
+                  };
+                  const dot: Record<string, string> = {
+                    go: "bg-go-500",
+                    cue: "bg-cue-600",
+                    standby: "bg-standby-500",
+                    idle: "bg-ink-400",
+                  };
+                  const sym = assignment.currency === "INR" || !assignment.currency ? "₹" : `${assignment.currency} `;
 
                   return (
-                    <tr key={assignment.id} className="hover:bg-slate-50/70 transition">
-                      {/* Provider Name & Provenance */}
-                      <td className="px-4 py-3">
-                        <div className="font-bold text-slate-900">{vendor?.name || "Provider"}</div>
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          <ProvenanceBadge source={(vendor as any)?.source_tag || "LIVE_SCRAPE"} size="sm" />
-                          <span className="text-[10px] text-slate-400 font-mono">
-                            {vendor?.city || "UNKNOWN"}
-                          </span>
+                    <motion.tr
+                      key={assignment.id}
+                      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ type: "spring", stiffness: 380, damping: 30, delay: reduceMotion ? 0 : Math.min(rowIdx, 12) * 0.035 }}
+                      className="align-top transition-colors hover:bg-ink-50/80"
+                    >
+                      <td className="px-5 py-3.5">
+                        <div className="text-[13.5px] font-semibold text-ink-900">{vendor?.name || "Provider"}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11.5px] font-semibold text-ink-600">{humanizeCategory(assignment.category)}</span>
+                          <span className="text-ink-300">·</span>
+                          <span className="text-[11.5px] text-ink-500">{vendor?.city || "City unknown"}</span>
+                          <ProvenanceBadge source={(vendor as any)?.source_tag || "UNKNOWN"} size="sm" />
                         </div>
                       </td>
-
-                      {/* Category */}
-                      <td className="px-4 py-3 font-semibold text-slate-600 uppercase text-[11px]">
-                        {assignment.category}
-                      </td>
-
-                      {/* Contact Channels */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3.5">
                         {hasPhone ? (
-                          <div className="space-y-0.5">
-                            <span className="font-mono text-[11px] text-slate-700 block">
-                              {vendor?.phone}
-                            </span>
-                            <span className="text-[10px] text-emerald-600 font-medium">
-                              WhatsApp & Voice Enabled
-                            </span>
-                          </div>
+                          <>
+                            <div className="font-mono text-[12px] text-ink-800">{vendor?.phone}</div>
+                            <div className="mt-0.5 flex items-center gap-2 text-[11px] text-ink-500">
+                              <span className="inline-flex items-center gap-1">
+                                <MessageSquare className="h-3 w-3" /> WhatsApp
+                              </span>
+                              <span className="inline-flex items-center gap-1">
+                                <PhoneCall className="h-3 w-3" /> Call
+                              </span>
+                            </div>
+                          </>
                         ) : (
-                          <span className="text-[10px] text-slate-400 italic">
-                            No supported contact channel
-                          </span>
+                          <span className="text-[12px] italic text-ink-400">No phone on record</span>
                         )}
                       </td>
-
-                      {/* Engagement Status */}
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border ${
-                              assignment.status === "CONFIRMED"
-                                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                : assignment.status === "DECLINED" || assignment.status === "CANCELLED"
-                                ? "bg-rose-50 text-rose-700 border-rose-200"
-                                : assignment.status === "ENGAGED" || assignment.status === "CONTACTED"
-                                ? "bg-blue-50 text-blue-700 border-blue-200"
-                                : "bg-slate-100 text-slate-700 border-slate-200"
-                            }`}
-                          >
-                            {assignment.status || "SHORTLISTED"}
-                          </span>
-                          {assignment.negotiation_status && (
-                            <span className="text-[10px] font-mono text-slate-500">
-                              ({assignment.negotiation_status})
-                            </span>
-                          )}
-                        </div>
-
+                      <td className="px-4 py-3.5">
+                        <span className={`chip ${chipCls[tone]}`}>
+                          <span className={`cue-light ${dot[tone]}`} />
+                          {s.replace(/_/g, " ").toLowerCase().replace(/^\w/, (c) => c.toUpperCase())}
+                        </span>
+                        {assignment.negotiation_status && (
+                          <div className="mt-1 font-mono text-[10.5px] text-ink-500">
+                            {assignment.negotiation_status.replace(/_/g, " ").toLowerCase()}
+                          </div>
+                        )}
                         {matchingConv?.latest_message && (
-                          <div className="text-[10px] text-slate-400 truncate max-w-[180px] mt-1">
-                            Latest: "{matchingConv.latest_message.raw_text}"
-                          </div>
+                          <p className="mt-1 max-w-[220px] truncate text-[11.5px] text-ink-500">
+                            &ldquo;{matchingConv.latest_message.raw_text}&rdquo;
+                          </p>
                         )}
                       </td>
-
-                      {/* Terms / Quote */}
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3.5 text-right">
                         {assignment.quoted_amount != null ? (
-                          <div>
-                            <span className="font-mono font-bold text-slate-900 text-xs">
-                              {assignment.currency === "INR" || !assignment.currency ? "₹" : `${assignment.currency} `}
+                          <>
+                            <div className="font-display text-[17px] font-bold tabular-nums text-ink-900" style={{ fontStretch: "90%" }}>
+                              {sym}
                               {Number(assignment.quoted_amount).toLocaleString()}
-                            </span>
-                            <span className="text-[10px] text-slate-400 block font-mono">
-                              Target: ₹{Number(assignment.target_amount || 0).toLocaleString()}
-                            </span>
-                          </div>
+                            </div>
+                            {assignment.target_amount != null && (
+                              <div className="font-mono text-[10.5px] text-ink-400">
+                                target {sym}
+                                {Number(assignment.target_amount).toLocaleString()}
+                              </div>
+                            )}
+                          </>
                         ) : (
-                          <span className="text-slate-400 font-mono text-[11px]">UNKNOWN</span>
+                          <span className="text-[12px] text-ink-400">No quote yet</span>
                         )}
                       </td>
-
-                      {/* Actions */}
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                          {/* Communication Status */}
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold border border-slate-200 bg-slate-100 text-slate-700">
-                            {assignment.status === "CONFIRMED" ? "Confirmed" : "Assigned"}
-                          </span>
-
-
-                          {/* View Conversation */}
-                          {matchingConv ? (
-                            <Link
-                              href={`/events/${eventId}/conversations`}
-                              className="px-2.5 py-1 rounded-md text-[11px] font-semibold border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 transition inline-flex items-center gap-1"
-                            >
-                              <span>Thread</span>
-                              <ChevronRight className="w-3 h-3 text-slate-400" />
-                            </Link>
-                          ) : (
-                            <button
-                              disabled
-                              className="px-2.5 py-1 rounded-md text-[11px] text-slate-400 border border-slate-100 bg-slate-50/50 cursor-not-allowed"
-                            >
-                              No Thread
+                      <td className="px-5 py-3.5 text-right">
+                        {matchingConv ? (
+                          onSelectConversation ? (
+                            <button onClick={() => onSelectConversation(matchingConv.id)} className="btn-secondary h-8">
+                              Open thread <ChevronRight className="h-3.5 w-3.5" />
                             </button>
-                          )}
-                        </div>
+                          ) : (
+                            <Link href={`/events/${eventId}/conversations`} className="btn-secondary h-8">
+                              Open thread <ChevronRight className="h-3.5 w-3.5" />
+                            </Link>
+                          )
+                        ) : (
+                          <span className="text-[12px] text-ink-400">No thread yet</span>
+                        )}
                       </td>
-                    </tr>
+                    </motion.tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }

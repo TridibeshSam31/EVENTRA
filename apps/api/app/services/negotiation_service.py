@@ -29,6 +29,8 @@ from app.services.approval_service import ApprovalService
 from app.schemas.approval import ApprovalRequestCreate
 from app.observability.audit import AuditRecorder
 from app.services.negotiation_broker import negotiation_broker
+from app.services.quotes_service import apply_quote
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +66,12 @@ class NegotiationService:
 
     def _validate_budget(self, event: Event, amount: float) -> Dict[str, Any]:
         """Deterministic budget validation using existing budget data."""
-        budget_items = self.db.query(BudgetItem).filter(BudgetItem.event_id == event.id).all()
+        # "Committed" = agreed cost of CONFIRMED assignments (one definition everywhere —
+        # see app/services/budget_commitments.py). Estimates are plans, not commitments.
+        from app.services.budget_commitments import committed_total
+
         total_budget = float(event.total_budget or 0)
-        total_committed = sum(float(b.estimated_amount or 0) for b in budget_items)
+        total_committed = float(committed_total(self.db, event.id))
 
         return {
             "total_budget": total_budget,
@@ -223,7 +228,7 @@ class NegotiationService:
         """Convenience wrapper to process incoming provider quote."""
         assignment = self._get_assignment(assignment_id)
         assignment.agreed_cost = quoted_amount
-        assignment.quoted_amount = quoted_amount
+        apply_quote(self.db, assignment, quoted_amount, source="ORGANIZER_REPORTED")
         self.db.commit()
         return self.process_provider_response(
             assignment_id=assignment_id,
@@ -264,6 +269,7 @@ class NegotiationService:
 
         # Parse structured offer (from simulation or LLM parsing)
         offer = structured_offer or self._parse_response(response_text)
+        prior_summary = assignment.provider_response_summary if isinstance(assignment.provider_response_summary, dict) else None
         assignment.provider_response_summary = offer
 
         # Handle availability
@@ -292,8 +298,14 @@ class NegotiationService:
 
         # Provider is available
         quoted = offer.get("quoted_price") or offer.get("quoted_amount") or offer.get("amount")
-        if quoted is not None:
-            assignment.quoted_amount = float(quoted)
+        # Single write path for quotes: tracks previous_amount and re-asks approval on a price change.
+        apply_quote(
+            self.db,
+            assignment,
+            float(quoted) if quoted is not None else None,
+            source="SIMULATION" if is_simulation else "PROVIDER",
+            prior_summary=prior_summary,
+        )
         if offer.get("coverage_start"):
             assignment.coverage_start = offer["coverage_start"]
         if offer.get("coverage_end"):
@@ -489,6 +501,11 @@ class NegotiationService:
         currency = assignment.currency or "INR"
         round_num = int(assignment.negotiation_round or "0") + 1
 
+        # CHOKE POINT GUARD 0: Round cap - stop countering and hand the decision to the organizer.
+        max_rounds = int(settings.NEGOTIATION_MAX_ROUNDS)
+        if round_num > max_rounds:
+            return self._hand_back_after_round_limit(assignment, vendor, max_rounds)
+
         # Calculate counter-offer: move toward target, never exceed ceiling
         if round_num == 1:
             counter = target  # First counter: offer the target
@@ -620,6 +637,80 @@ class NegotiationService:
             "message_sent": message,
             "target": target,
             "ceiling": ceiling,
+            "provider_quoted": quoted,
+        }
+
+    def _hand_back_after_round_limit(self, assignment: VendorAssignment, vendor: Vendor, max_rounds: int) -> Dict[str, Any]:
+        """Negotiation reached NEGOTIATION_MAX_ROUNDS: stop the agent and give control to the organizer.
+
+        Never accepts on the organizer's behalf. The organizer can keep negotiating
+        manually, approve the current quote, or cancel.
+        """
+        currency = assignment.currency or "INR"
+        quoted = assignment.quoted_amount
+        assignment.negotiation_control = "HUMAN"
+        assignment.control_changed_by = None
+        assignment.control_changed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        assignment.negotiation_status = NegotiationStatus.QUOTATION_RECEIVED.value
+        quoted_str = f"{currency} {quoted:,.0f}" if quoted is not None else "no final price"
+        message = (
+            f"Negotiation with {vendor.name} reached the {max_rounds}-round limit without agreement "
+            f"(latest quote: {quoted_str}). The agent has stopped - you decide what happens next."
+        )
+
+        self._audit.record(
+            event_id=assignment.event_id,
+            actor_id="system",
+            actor_type="AGENT",
+            action="NEGOTIATION_ROUND_LIMIT_REACHED",
+            action_type="NEGOTIATION",
+            target_type="VENDOR_ASSIGNMENT",
+            target_id=assignment.id,
+            after_state={
+                "rounds": int(assignment.negotiation_round or "0"),
+                "max_rounds": max_rounds,
+                "quoted_amount": quoted,
+                "negotiation_control": "HUMAN",
+            },
+        )
+        self.db.commit()
+        self.db.refresh(assignment)
+
+        negotiation_broker.publish_sync(
+            event_id=assignment.event_id,
+            assignment_id=assignment.id,
+            event_type="round_limit_reached",
+            data={
+                "max_rounds": max_rounds,
+                "quoted_amount": quoted,
+                "status": assignment.negotiation_status,
+                "control": "HUMAN",
+                "message": message,
+                "timestamp": time.time(),
+            },
+        )
+        from app.services.organizer_alerts import alert_organizers
+
+        alert_payload = {"assignment_id": assignment.id, "kind": "NEGOTIATION_ROUND_LIMIT", "quoted_amount": quoted}
+        alert_title = f"Negotiation with {vendor.name} needs you"
+        alert_organizers(self.db, assignment.event_id, title=alert_title, message=message, payload=alert_payload)
+        try:  # web push for organizers with push subscriptions
+            from app.services.approval_notification_dispatcher import ApprovalNotificationDispatcher
+
+            ApprovalNotificationDispatcher(self.db).notify_organizers(
+                event_id=assignment.event_id, title=alert_title, message=message, payload=alert_payload
+            )
+        except Exception as notify_err:
+            logger.warning("Failed to push negotiation round-limit alert: %s", notify_err)
+
+        return {
+            "assignment_id": assignment.id,
+            "negotiation_status": assignment.negotiation_status,
+            "negotiation_control": "HUMAN",
+            "action": "ROUND_LIMIT_REACHED",
+            "message": message,
+            "round": int(assignment.negotiation_round or "0"),
+            "max_rounds": max_rounds,
             "provider_quoted": quoted,
         }
 

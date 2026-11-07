@@ -121,14 +121,15 @@ export default function ExecutionPauseControl({
 
   if (loading) {
     return (
-      <div className={`p-4 rounded-xl border border-border/40 bg-card/40 flex items-center gap-2 text-xs text-muted-foreground ${className}`}>
-        <Loader2 className="w-4 h-4 animate-spin text-primary" />
+      <div className={`p-4 rounded-xl border border-white/10 bg-white/[0.03] flex items-center gap-2 text-xs text-ink-400 ${className}`}>
+        <Loader2 className="w-4 h-4 animate-spin text-cue-500" />
         <span>Loading execution state...</span>
       </div>
     );
   }
 
-  const state = execState?.execution_state || "RUNNING";
+  // Never claim RUNNING when the state could not be loaded.
+  const state = execState?.execution_state || (error && !execState ? "UNKNOWN" : "RUNNING");
   const isPaused = state === "PAUSED";
   const isPausing = state === "PAUSING";
   const isResuming = state === "RESUMING";
@@ -162,8 +163,8 @@ export default function ExecutionPauseControl({
         };
       default:
         return {
-          bg: "bg-secondary border-border/40 text-muted-foreground",
-          dot: "bg-muted-foreground",
+          bg: "bg-white/5 border-white/10 text-ink-400",
+          dot: "bg-ink-500",
           text: state,
         };
     }
@@ -181,7 +182,7 @@ export default function ExecutionPauseControl({
             ? "border-rose-500/50 bg-rose-950/30 shadow-[0_0_24px_rgba(244,63,94,0.12)]"
             : isPausing || isResuming
             ? "border-amber-500/40 bg-amber-950/20"
-            : "border-border/60 bg-card/60"
+            : "border-white/10 bg-white/[0.04]"
         }`}
       >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -191,8 +192,8 @@ export default function ExecutionPauseControl({
                 <span className={`w-2 h-2 rounded-full ${badge.dot}`} />
                 {badge.text}
               </span>
-              <span className="text-xs text-muted-foreground font-mono">
-                Plan v{execState?.plan_version ?? 1}
+              <span className="text-xs text-ink-400 font-mono">
+                Plan v{execState?.plan_version ?? "—"}
               </span>
               {execState?.active_incidents_count ? (
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-rose-500/10 text-rose-400 border border-rose-500/20 font-medium">
@@ -212,18 +213,18 @@ export default function ExecutionPauseControl({
                   Consequential agent mutations and recovery actions are blocked. Task assignments, vendor bindings, and execution plan are strictly preserved.
                 </p>
                 {lastRecord && (
-                  <div className="mt-2 pt-2 border-t border-rose-500/20 text-xs text-muted-foreground grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="mt-2 pt-2 border-t border-rose-500/20 text-xs text-ink-400 grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <div>
                       <span className="text-rose-400/90 font-medium">Reason: </span>
-                      <span className="text-foreground/90">{String(lastRecord.reason || "Operational pause")}</span>
+                      <span className="text-ink-100">{String(lastRecord.reason || "Operational pause")}</span>
                     </div>
                     <div>
                       <span className="text-rose-400/90 font-medium">Requested By: </span>
-                      <span className="text-foreground/90">{String(lastRecord.requested_by || "Unknown")}</span>
+                      <span className="text-ink-100">{String(lastRecord.requested_by || "Unknown")}</span>
                     </div>
                     <div>
                       <span className="text-rose-400/90 font-medium">Time: </span>
-                      <span className="text-foreground/90">
+                      <span className="text-ink-100">
                         {lastRecord.requested_at ? new Date(String(lastRecord.requested_at)).toLocaleTimeString() : "N/A"}
                       </span>
                     </div>
@@ -231,8 +232,8 @@ export default function ExecutionPauseControl({
                 )}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground">
-                Authoritative execution is active. Automated task scheduling, agent telemetry, and recovery engines are operational.
+              <p className="text-xs text-ink-400">
+                {state === "UNKNOWN" ? "Execution state could not be loaded." : "Execution is active. Scheduling, agent work and recovery are running."}
               </p>
             )}
           </div>
@@ -271,7 +272,7 @@ export default function ExecutionPauseControl({
                 loadHistory();
                 setShowHistoryModal(true);
               }}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-border/60 hover:bg-card text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border border-white/10 hover:bg-white/[0.06] text-ink-400 hover:text-ink-50 transition-colors"
             >
               <History className="w-3.5 h-3.5" />
               History
@@ -295,22 +296,22 @@ export default function ExecutionPauseControl({
       {/* Pause Confirmation Modal */}
       {showPauseModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-card border border-border rounded-xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+          <div className="w-full max-w-md bg-ink-900 border border-white/10 rounded-xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
             <div className="flex items-center gap-3 text-amber-400">
               <div className="p-2 rounded-lg bg-amber-500/20 border border-amber-500/30">
                 <Pause className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-foreground">Pause Event Execution</h3>
-                <p className="text-xs text-muted-foreground">Freeze consequential actions and recovery mutations</p>
+                <h3 className="text-base font-bold text-ink-50">Pause Event Execution</h3>
+                <p className="text-xs text-ink-400">Freeze consequential actions and recovery mutations</p>
               </div>
             </div>
 
-            <div className="space-y-2 text-xs text-muted-foreground">
+            <div className="space-y-2 text-xs text-ink-400">
               <p>
                 Pausing halts all scheduled task dispatching and agent recovery mutations. Task assignments, vendor bindings, and budget commitments remain intact.
               </p>
-              <label className="block font-medium text-foreground text-xs pt-1">
+              <label className="block font-medium text-ink-50 text-xs pt-1">
                 Reason for Pause <span className="text-rose-400">*</span>
               </label>
               <textarea
@@ -318,15 +319,15 @@ export default function ExecutionPauseControl({
                 onChange={(e) => setReasonInput(e.target.value)}
                 placeholder="e.g., Severe thunderstorm protocol triggered, pausing sound/stage tasks."
                 rows={3}
-                className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 bg-background text-ink-50 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none"
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
               <button
                 onClick={() => setShowPauseModal(false)}
                 disabled={submitting}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border/60 text-muted-foreground hover:bg-secondary/40"
+                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-ink-400 hover:bg-white/5/40"
               >
                 Cancel
               </button>
@@ -346,22 +347,22 @@ export default function ExecutionPauseControl({
       {/* Resume Confirmation Modal */}
       {showResumeModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-md bg-card border border-border rounded-xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
+          <div className="w-full max-w-md bg-ink-900 border border-white/10 rounded-xl p-5 shadow-2xl space-y-4 animate-in fade-in zoom-in-95">
             <div className="flex items-center gap-3 text-emerald-400">
               <div className="p-2 rounded-lg bg-emerald-500/20 border border-emerald-500/30">
                 <Play className="w-5 h-5" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-foreground">Resume Event Execution</h3>
-                <p className="text-xs text-muted-foreground">Restore operational dispatch and agent recovery</p>
+                <h3 className="text-base font-bold text-ink-50">Resume Event Execution</h3>
+                <p className="text-xs text-ink-400">Restore operational dispatch and agent recovery</p>
               </div>
             </div>
 
-            <div className="space-y-2 text-xs text-muted-foreground">
+            <div className="space-y-2 text-xs text-ink-400">
               <p>
                 The system will validate state integrity before restoring execution to RUNNING. Any active incidents will require fresh validation before actions can execute.
               </p>
-              <label className="block font-medium text-foreground text-xs pt-1">
+              <label className="block font-medium text-ink-50 text-xs pt-1">
                 Optional Resume Note
               </label>
               <input
@@ -369,15 +370,15 @@ export default function ExecutionPauseControl({
                 value={reasonInput}
                 onChange={(e) => setReasonInput(e.target.value)}
                 placeholder="e.g., Weather cleared, operations resumed."
-                className="w-full px-3 py-2 text-xs rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                className="w-full px-3 py-2 text-xs rounded-lg border border-white/10 bg-background text-ink-50 focus:outline-none focus:ring-1 focus:ring-emerald-500"
               />
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-border/40">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/10">
               <button
                 onClick={() => setShowResumeModal(false)}
                 disabled={submitting}
-                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-border/60 text-muted-foreground hover:bg-secondary/40"
+                className="px-3 py-1.5 text-xs font-medium rounded-lg border border-white/10 text-ink-400 hover:bg-white/5/40"
               >
                 Cancel
               </button>
@@ -397,15 +398,15 @@ export default function ExecutionPauseControl({
       {/* Audit History Modal */}
       {showHistoryModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-          <div className="w-full max-w-2xl bg-card border border-border rounded-xl p-5 shadow-2xl space-y-4 max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between pb-3 border-b border-border/40">
+          <div className="w-full max-w-2xl bg-ink-900 border border-white/10 rounded-xl p-5 shadow-2xl space-y-4 max-h-[80vh] flex flex-col">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <div className="flex items-center gap-2">
-                <History className="w-4 h-4 text-primary" />
-                <h3 className="text-sm font-bold text-foreground">Execution Pause & Resume Audit Log</h3>
+                <History className="w-4 h-4 text-cue-500" />
+                <h3 className="text-sm font-bold text-ink-50">Execution Pause & Resume Audit Log</h3>
               </div>
               <button
                 onClick={() => setShowHistoryModal(false)}
-                className="text-xs text-muted-foreground hover:text-foreground"
+                className="text-xs text-ink-400 hover:text-ink-50"
               >
                 Close
               </button>
@@ -413,14 +414,14 @@ export default function ExecutionPauseControl({
 
             <div className="flex-1 overflow-y-auto space-y-2 pr-1">
               {history.length === 0 ? (
-                <div className="text-center py-8 text-xs text-muted-foreground">
+                <div className="text-center py-8 text-xs text-ink-400">
                   No pause or resume records logged for this event.
                 </div>
               ) : (
                 history.map((rec) => (
                   <div
                     key={rec.id}
-                    className="p-3 rounded-lg border border-border/50 bg-secondary/20 space-y-1 text-xs"
+                    className="p-3 rounded-lg border border-border/50 bg-white/5/20 space-y-1 text-xs"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -433,22 +434,22 @@ export default function ExecutionPauseControl({
                         >
                           {rec.operation_type}
                         </span>
-                        <span className="font-mono text-muted-foreground text-[11px]">
+                        <span className="font-mono text-ink-400 text-[11px]">
                           {rec.previous_state} → {rec.target_state}
                         </span>
                       </div>
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-[11px] text-ink-400">
                         {rec.requested_at ? new Date(rec.requested_at).toLocaleString() : "N/A"}
                       </span>
                     </div>
 
-                    <div className="text-foreground/90 font-medium pt-1">
+                    <div className="text-ink-100 font-medium pt-1">
                       {rec.reason || "No operational reason provided."}
                     </div>
 
-                    <div className="flex items-center gap-4 text-[11px] text-muted-foreground pt-1 border-t border-border/20">
-                      <span>Requester: <strong className="text-foreground">{rec.requested_by}</strong></span>
-                      <span>Plan: <strong className="text-foreground">v{rec.plan_version}</strong></span>
+                    <div className="flex items-center gap-4 text-[11px] text-ink-400 pt-1 border-t border-border/20">
+                      <span>Requester: <strong className="text-ink-50">{rec.requested_by}</strong></span>
+                      <span>Plan: <strong className="text-ink-50">v{rec.plan_version}</strong></span>
                       <span>Status: <strong className="text-emerald-400">{rec.status}</strong></span>
                     </div>
                   </div>

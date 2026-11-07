@@ -1,7 +1,6 @@
 "use client";
 
 import React from "react";
-import { ShieldCheck, Database, Radio, MapPin, AlertCircle, Mic, Sparkles, SlidersHorizontal } from "lucide-react";
 
 export type ProvenanceType =
   | "AGENT"
@@ -29,145 +28,83 @@ interface ProvenanceBadgeProps {
   className?: string;
 }
 
-export function ProvenanceBadge({
-  source,
-  provenance,
-  size = "md",
-  showLabel = true,
-  className = "",
-}: ProvenanceBadgeProps) {
+type Config = {
+  label: string;
+  detail: string;
+  glyph: string;
+  cls: string;
+};
+
+/*
+ * Provenance is EVENTRA's core trust signal. Each origin has one glyph and one
+ * colour family, used identically everywhere:
+ *   ✦ agent   — AI proposal / interpretation        (agent / iris)
+ *   ✓ engine  — deterministic calculation/verify    (engine / teal)
+ *   ◎ source  — external data (maps, scrape, DB)    (info / cobalt)
+ *   ● human   — organizer statement / authorization (ink)
+ *   ▲ executed— action confirmed by backend         (go / green)
+ *   ? unknown — not provided / simulated            (ink, dashed)
+ */
+const STYLES = {
+  agent: "border-agent-200 bg-agent-50 text-agent-700",
+  engine: "border-engine-200 bg-engine-50 text-engine-700",
+  source: "border-info-200 bg-info-50 text-info-700",
+  human: "border-ink-300 bg-ink-100 text-ink-800",
+  executed: "border-go-200 bg-go-50 text-go-700",
+  unknown: "border-dashed border-ink-300 bg-transparent text-ink-500",
+  standby: "border-standby-200 bg-standby-50 text-standby-800",
+};
+
+function resolve(normSource: string): Config {
+  if (normSource === "STATED")
+    return { label: "Stated", detail: "Directly stated by the organizer", glyph: "●", cls: STYLES.human };
+  if (normSource === "INFERRED")
+    return { label: "Inferred", detail: "Inferred by the agent from context", glyph: "✦", cls: STYLES.agent };
+  if (normSource === "DEFAULT")
+    return { label: "Default", detail: "Standard platform default", glyph: "○", cls: STYLES.unknown };
+  if (normSource.includes("AGENT"))
+    return { label: "Agent", detail: "Proposed or carried out by the EVENTRA agent", glyph: "✦", cls: STYLES.agent };
+  if (normSource.includes("ENGINE"))
+    return { label: "Engine", detail: "Deterministic calculation / verification engine", glyph: "✓", cls: STYLES.engine };
+  if (normSource.includes("SOURCE"))
+    return { label: "Source", detail: "From the intake specification or an external data source", glyph: "◎", cls: STYLES.source };
+  if (normSource.includes("HUMAN") || normSource.includes("OPERATOR") || normSource.includes("ORGANIZER"))
+    return { label: "Human", detail: "Human operator action or authorization", glyph: "●", cls: STYLES.human };
+  if (normSource.includes("EXECUTED"))
+    return { label: "Executed", detail: "Action confirmed by the backend", glyph: "▲", cls: STYLES.executed };
+  if (normSource.includes("UNKNOWN"))
+    return { label: "Unknown", detail: "Provenance not provided by the backend record", glyph: "?", cls: STYLES.unknown };
+  if (normSource.includes("VERIFIED") || normSource.includes("OUTREACH"))
+    return { label: "Verified outreach", detail: "Confirmed directly via WhatsApp / voice call", glyph: "✓", cls: STYLES.executed };
+  if (normSource.includes("CACHE") || normSource.includes("DB"))
+    return { label: "Directory", detail: "Known provider from the local directory within the search radius", glyph: "◎", cls: STYLES.source };
+  if (normSource.includes("OSM") || normSource.includes("OPENSTREETMAP"))
+    return { label: "OpenStreetMap", detail: "Discovered via OpenStreetMap", glyph: "◎", cls: STYLES.standby };
+  if (normSource.includes("SIMULATED") || normSource.includes("DEMO") || normSource.includes("MOCK"))
+    return { label: "Simulated", detail: "Synthetic sandbox data used for demonstration", glyph: "?", cls: STYLES.unknown };
+  return { label: "Live scrape", detail: "Fetched live from Google Maps", glyph: "◎", cls: STYLES.source };
+}
+
+export function ProvenanceBadge({ source, provenance, size = "md", showLabel = true, className = "" }: ProvenanceBadgeProps) {
   const normSource = (provenance || source || "UNKNOWN").toUpperCase();
+  const config = resolve(normSource);
 
-  let config = {
-    label: "Live Scrape",
-    detail: "Fetched via live Google Maps scraper",
-    icon: Radio,
-    bg: "bg-emerald-50 text-emerald-700 border-emerald-200",
-    dot: "bg-emerald-500",
-  };
-
-  if (normSource === "STATED") {
-    config = {
-      label: "Stated",
-      detail: "Directly spoken by organizer",
-      icon: Mic,
-      bg: "bg-emerald-50 text-emerald-700 border-emerald-200",
-      dot: "bg-emerald-500",
-    };
-  } else if (normSource === "INFERRED") {
-    config = {
-      label: "Inferred",
-      detail: "Inferred by AI from context",
-      icon: Sparkles,
-      bg: "bg-violet-50 text-violet-700 border-violet-200",
-      dot: "bg-violet-500",
-    };
-  } else if (normSource === "DEFAULT") {
-    config = {
-      label: "Default",
-      detail: "Standard platform default",
-      icon: SlidersHorizontal,
-      bg: "bg-slate-100 text-slate-700 border-slate-200",
-      dot: "bg-slate-400",
-    };
-  } else if (normSource === "AGENT" || normSource.includes("AGENT")) {
-    config = {
-      label: "Agent",
-      detail: "Autonomous agent execution record",
-      icon: ShieldCheck,
-      bg: "bg-blue-50 text-blue-700 border-blue-200",
-      dot: "bg-blue-500",
-    };
-  } else if (normSource === "ENGINE" || normSource.includes("ENGINE")) {
-    config = {
-      label: "Engine",
-      detail: "Deterministic calculation / verification engine",
-      icon: Database,
-      bg: "bg-indigo-50 text-indigo-700 border-indigo-200",
-      dot: "bg-indigo-500",
-    };
-  } else if (normSource === "SOURCE" || normSource.includes("SOURCE")) {
-    config = {
-      label: "Source",
-      detail: "Origin intake specification or external data source",
-      icon: Database,
-      bg: "bg-cyan-50 text-cyan-700 border-cyan-200",
-      dot: "bg-cyan-500",
-    };
-  } else if (normSource === "HUMAN" || normSource.includes("HUMAN") || normSource.includes("OPERATOR") || normSource.includes("ORGANIZER")) {
-    config = {
-      label: "Human",
-      detail: "Human operator action or authorization",
-      icon: ShieldCheck,
-      bg: "bg-emerald-50 text-emerald-700 border-emerald-200",
-      dot: "bg-emerald-500",
-    };
-  } else if (normSource === "EXECUTED" || normSource.includes("EXECUTED")) {
-    config = {
-      label: "Executed",
-      detail: "Executed operational action confirmed by backend",
-      icon: ShieldCheck,
-      bg: "bg-teal-50 text-teal-700 border-teal-200",
-      dot: "bg-teal-500",
-    };
-  } else if (normSource === "UNKNOWN" || normSource.includes("UNKNOWN")) {
-    config = {
-      label: "Unknown",
-      detail: "Provenance not provided by backend record",
-      icon: AlertCircle,
-      bg: "bg-slate-100 text-slate-600 border-slate-200",
-      dot: "bg-slate-400",
-    };
-  } else if (normSource.includes("VERIFIED") || normSource.includes("OUTREACH")) {
-    config = {
-      label: "Verified Outreach",
-      detail: "Directly confirmed via WhatsApp / Voice Call",
-      icon: ShieldCheck,
-      bg: "bg-purple-50 text-purple-700 border-purple-200",
-      dot: "bg-purple-500",
-    };
-  } else if (normSource.includes("CACHE") || normSource.includes("DB")) {
-    config = {
-      label: "Cached DB",
-      detail: "Verified provider from local directory within search radius",
-      icon: Database,
-      bg: "bg-blue-50 text-blue-700 border-blue-200",
-      dot: "bg-blue-500",
-    };
-  } else if (normSource.includes("OSM") || normSource.includes("OPENSTREETMAP")) {
-    config = {
-      label: "OSM Network",
-      detail: "Discovered via OpenStreetMap live geospatial radar",
-      icon: MapPin,
-      bg: "bg-amber-50 text-amber-700 border-amber-200",
-      dot: "bg-amber-500",
-    };
-  } else if (normSource.includes("SIMULATED") || normSource.includes("DEMO") || normSource.includes("MOCK")) {
-    config = {
-      label: "Simulated",
-      detail: "Synthetic sandbox fixture for fallback demonstration",
-      icon: AlertCircle,
-      bg: "bg-slate-100 text-slate-600 border-slate-200",
-      dot: "bg-slate-400",
-    };
-  }
-
-  const Icon = config.icon;
   const sizeClasses =
     size === "sm"
-      ? "text-[10px] px-1.5 py-0.5 gap-1"
+      ? "text-[10px] px-1.5 py-px gap-1"
       : size === "lg"
-      ? "text-xs px-2.5 py-1 gap-1.5"
-      : "text-[11px] px-2 py-0.5 gap-1.5";
+      ? "text-[12px] px-2.5 py-1 gap-1.5"
+      : "text-[11px] px-2 py-0.5 gap-1";
 
   return (
     <span
       title={config.detail}
-      className={`inline-flex items-center font-medium rounded-full border transition-all duration-150 ${config.bg} ${sizeClasses} ${className}`}
+      className={`inline-flex items-center whitespace-nowrap rounded-full border font-semibold leading-4 ${config.cls} ${sizeClasses} ${className}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
-      <Icon className="w-3 h-3" />
-      {showLabel && <span>{config.label}</span>}
+      <span aria-hidden className="text-[0.95em] leading-none">
+        {config.glyph}
+      </span>
+      {showLabel ? <span>{config.label}</span> : <span className="sr-only">{config.label}</span>}
     </span>
   );
 }

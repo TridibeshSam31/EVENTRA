@@ -13,7 +13,28 @@ import { TabInfo } from "../../lib/api/browserRuntime";
 import { useSearchParams } from "next/navigation";
 import { CompanionPairingModal } from "@/components/browser/CompanionPairingModal";
 import { browserCompanionApi, CompanionStatusResponse } from "@/lib/api/browserCompanion";
-import { Laptop } from "lucide-react";
+import Link from "next/link";
+import {
+  Laptop,
+  ArrowLeft,
+  ExternalLink,
+  Square,
+  Play,
+  AlertTriangle,
+  X,
+  Loader2,
+  Search,
+  Globe,
+  Plus,
+  RotateCw,
+  Star,
+  MapPin,
+  Phone,
+  PhoneCall,
+  ChevronDown,
+} from "lucide-react";
+import { BrandMark } from "@/components/shell/BrandMark";
+import { ProvenanceBadge } from "@/components/v2/ProvenanceBadge";
 import {
   addShortlistEntry,
   selectShortlistCandidate,
@@ -391,206 +412,198 @@ function BrowserRuntimeContent() {
   const viewerUrl =
     execution?.viewer_url || "http://localhost:6080/vnc.html?autoconnect=true&resize=scale";
 
+  const sessionMeta =
+    execution?.status === "running"
+      ? { label: "Running", chip: "border-go-400/30 bg-go-500/15 text-go-300", dot: "bg-go-400 animate-cue-blink" }
+      : execution?.status === "starting"
+      ? { label: "Starting", chip: "border-standby-400/30 bg-standby-500/15 text-standby-300", dot: "bg-standby-400 animate-cue-blink" }
+      : execution
+      ? { label: humanizeStatus(execution.status), chip: "border-white/10 bg-white/5 text-ink-300", dot: "bg-ink-500" }
+      : { label: "Idle", chip: "border-white/10 bg-white/5 text-ink-400", dot: "bg-ink-600" };
+
+  const companionView = !!companionStatus?.is_connected && !showVncFallback;
+  const field =
+    "w-full rounded-lg border border-ink-200 bg-[#FDFCFA] px-3 py-2 text-[13px] text-ink-900 shadow-sm transition placeholder:text-ink-400 focus:border-ink-400 focus:outline-none focus:ring-2 focus:ring-cue-500/15 disabled:opacity-50";
+  const label = "mb-1.5 block font-mono text-[10px] font-medium uppercase tracking-label text-ink-500";
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Top Header */}
-      <header className="border-b border-slate-800 bg-slate-900/90 backdrop-blur px-6 py-4 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center font-bold text-white shadow-lg shadow-indigo-500/20 text-lg">
-            BA
+    <div className="flex min-h-screen flex-col bg-paper font-sans text-ink-900">
+      {/* Header */}
+      <header className="relative overflow-hidden bg-ink-950 text-ink-100">
+        <div className="pointer-events-none absolute inset-0 bg-dots-dark opacity-60" aria-hidden />
+        <div
+          className="pointer-events-none absolute -left-20 -top-24 h-64 w-64 rounded-full opacity-40 blur-3xl"
+          style={{ background: "radial-gradient(circle, rgba(214,0,60,0.35), transparent 70%)" }}
+          aria-hidden
+        />
+        <div className="relative mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-4 px-4 py-4 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <Link href={effectiveEventId ? `/events/${effectiveEventId}/vendors` : "/dashboard"} aria-label="Back">
+              <BrandMark className="h-9 w-9" />
+            </Link>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="font-display text-[20px] font-extrabold tracking-[-0.01em] text-white" style={{ fontStretch: "88%" }}>
+                  Browser agent
+                </h1>
+                <span className={`chip ${sessionMeta.chip}`}>
+                  <span className={`cue-light ${sessionMeta.dot}`} />
+                  {sessionMeta.label}
+                </span>
+                <span
+                  className={`chip ${
+                    wsConnected ? "border-go-400/30 bg-go-500/10 text-go-300" : "border-white/10 bg-white/5 text-ink-500"
+                  }`}
+                  title="Live event stream from the browser session"
+                >
+                  {wsConnected ? "Stream live" : "Stream off"}
+                </span>
+              </div>
+              <p className="mt-0.5 truncate text-[12.5px] text-ink-400">
+                A real, visible browser that searches Google Maps for this event and saves what it finds as evidence.
+              </p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
-              EVENTRA Real Browser Agent
-              <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Phase 3: Real Discovery
-              </span>
-            </h1>
-            <p className="text-xs text-slate-400">
-              Headed Chromium Virtual Desktop &bull; Live Google Search & Maps &bull; Evidence-Backed Persistence
-            </p>
-          </div>
-        </div>
 
-        <div className="flex items-center gap-3">
-          {/* Status badge */}
-          <span
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold ${
-              execution?.status === "running"
-                ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
-                : execution?.status === "starting"
-                ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
-                : "bg-slate-800 text-slate-400 border border-slate-700"
-            }`}
-          >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                execution?.status === "running"
-                  ? "bg-emerald-400 animate-pulse"
-                  : execution?.status === "starting"
-                  ? "bg-amber-400 animate-pulse"
-                  : "bg-slate-500"
-              }`}
-            />
-            {execution ? execution.status.toUpperCase() : "IDLE"}
-          </span>
-
-          {/* WebSocket stream status indicator */}
-          <span
-            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-mono border ${
-              wsConnected
-                ? "bg-emerald-950/60 text-emerald-400 border-emerald-800"
-                : "bg-slate-900 text-slate-500 border-slate-800"
-            }`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-emerald-400" : "bg-slate-600"}`} />
-            WS {wsConnected ? "STREAM LIVE" : "OFFLINE"}
-          </span>
-
-          {execution?.status === "running" ? (
-            <button
-              onClick={handleStop}
-              disabled={loading || isDiscovering}
-              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50 shadow-md shadow-rose-600/20"
-            >
-              Stop Session
-            </button>
-          ) : (
-            <button
-              onClick={handleStart}
-              disabled={loading}
-              className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white rounded-lg text-xs font-semibold transition disabled:opacity-50 shadow-md shadow-indigo-600/20"
-            >
-              {loading ? "Starting..." : "Start Browser"}
-            </button>
-          )}
-
-          <button
-            onClick={() => setIsPairingOpen(true)}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium border border-slate-700 transition flex items-center gap-1.5"
-            title="Manage Option A: Windows Visible Browser Companion"
-          >
-            {companionStatus?.is_connected ? (
-              <>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <Laptop className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Desktop Browser Ready</span>
-              </>
-            ) : (
-              <>
-                <span className="w-2 h-2 rounded-full bg-amber-500" />
-                <Laptop className="w-3.5 h-3.5 text-amber-400" />
-                <span>Pair Windows Browser</span>
-              </>
+          <div className="flex flex-wrap items-center gap-2">
+            {effectiveEventId && (
+              <Link
+                href={`/events/${effectiveEventId}/vendors`}
+                className="btn h-8 border border-white/10 bg-white/5 px-3 text-[12px] text-ink-200 hover:bg-white/10"
+              >
+                <ArrowLeft className="h-3.5 w-3.5" /> Vendors
+              </Link>
             )}
-          </button>
-
-          <a
-            href={viewerUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-medium border border-slate-700 transition"
-          >
-            Standalone Viewer ↗
-          </a>
+            <button
+              onClick={() => setIsPairingOpen(true)}
+              className="btn h-8 border border-white/10 bg-white/5 px-3 text-[12px] text-ink-200 hover:bg-white/10"
+              title="Pair or manage the Windows browser companion"
+            >
+              <span className={`cue-light ${companionStatus?.is_connected ? "bg-go-400" : "bg-standby-400"}`} />
+              <Laptop className="h-3.5 w-3.5" />
+              {companionStatus?.is_connected ? "Desktop browser ready" : "Pair Windows browser"}
+            </button>
+            <a
+              href={viewerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn h-8 border border-white/10 bg-white/5 px-3 text-[12px] text-ink-200 hover:bg-white/10"
+            >
+              Viewer <ExternalLink className="h-3 w-3" />
+            </a>
+            {execution?.status === "running" ? (
+              <button onClick={handleStop} disabled={loading || isDiscovering} className="btn-cue h-8 px-3 text-[12px]">
+                <Square className="h-3 w-3 fill-white" /> Stop session
+              </button>
+            ) : (
+              <button
+                onClick={handleStart}
+                disabled={loading}
+                className="btn h-8 bg-ink-50 px-3 text-[12px] text-ink-900 hover:bg-white"
+              >
+                <Play className="h-3 w-3 fill-ink-900" /> {loading ? "Starting…" : "Start browser"}
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
-      {/* Error Alert */}
       {error && (
-        <div className="bg-rose-950/80 border-b border-rose-800 px-6 py-2.5 flex items-center justify-between text-xs text-rose-200">
-          <div className="flex items-center gap-2">
-            <span className="font-bold">Notice:</span>
-            <span>{error}</span>
+        <div className="border-b border-cue-200 bg-cue-50" role="alert">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 px-4 py-2.5 text-[13px] text-cue-900 sm:px-6">
+            <span className="flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4 shrink-0 text-cue-600" />
+              {error}
+            </span>
+            <button onClick={() => setError(null)} className="rounded p-1 text-cue-500 hover:bg-cue-100 hover:text-cue-800" aria-label="Dismiss">
+              <X className="h-4 w-4" />
+            </button>
           </div>
-          <button onClick={() => setError(null)} className="text-rose-400 hover:text-white font-bold text-sm px-2">
-            &times;
-          </button>
         </div>
       )}
 
-      {/* Main Workspace */}
-      <main className="flex-1 flex flex-col p-6 gap-6 max-w-7xl w-full mx-auto">
-        {/* Navigation Tabs */}
-        <div className="flex items-center border-b border-slate-800 gap-4">
-          <button
-            onClick={() => setActiveTab("discovery")}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition ${
-              activeTab === "discovery"
-                ? "border-indigo-500 text-indigo-400"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <span className="w-2 h-2 rounded-full bg-indigo-500" />
-            Venue & Vendor Discovery (Phase 3)
-          </button>
-          <button
-            onClick={() => setActiveTab("manual")}
-            className={`pb-3 text-sm font-semibold flex items-center gap-2 border-b-2 transition ${
-              activeTab === "manual"
-                ? "border-indigo-500 text-indigo-400"
-                : "border-transparent text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            Manual Navigation & Tabs (Phase 2)
-          </button>
+      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-6 px-4 py-6 sm:px-6">
+        {/* Mode switch */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div role="tablist" className="inline-flex rounded-lg border border-ink-200 bg-ink-100/70 p-0.5">
+            {(
+              [
+                { id: "discovery", label: "Discover vendors" },
+                { id: "manual", label: "Manual control" },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={activeTab === t.id}
+                onClick={() => setActiveTab(t.id)}
+                className={`rounded-md px-3.5 py-1.5 text-[13px] font-semibold transition ${
+                  activeTab === t.id ? "bg-[#FDFCFA] text-ink-900 shadow-sm" : "text-ink-500 hover:text-ink-800"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {execution?.execution_id && (
+            <span className="font-mono text-[11px] text-ink-500">
+              Session <span className="text-ink-800">{execution.execution_id}</span>
+            </span>
+          )}
         </div>
 
-        {/* Tab 1: Discovery Controls Panel */}
+        {/* Discovery controls */}
         {activeTab === "discovery" && (
-          <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-              <div>
-                <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                  Real Browser-Based Venue & Vendor Discovery
-                </h2>
-                <p className="text-xs text-slate-400">
-                  Select an authorized event to extract its actual requirements and command the browser to research candidates on Google Maps.
-                </p>
-              </div>
-              {execution?.execution_id && (
-                <div className="text-xs font-mono text-slate-400">
-                  Execution: <span className="text-indigo-400 font-semibold">{execution.execution_id}</span>
-                </div>
-              )}
+          <section className="surface overflow-hidden">
+            <div className="px-5 pb-1 pt-5">
+              <div className="eyebrow">Discovery brief</div>
+              <h2 className="mt-1 text-[16px] font-semibold text-ink-900">What should the browser look for?</h2>
+              <p className="mt-0.5 text-[13px] text-ink-500">
+                The agent reads the event&apos;s real requirements, then searches Google Maps and inspects each listing.
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
-              {/* Event Selector */}
+            <div className="grid grid-cols-1 gap-5 px-5 py-5 md:grid-cols-2 lg:grid-cols-4">
               <div>
-                <label className="text-slate-400 font-medium block mb-1.5">Target EVENTRA Event</label>
+                <label className={label} htmlFor="br-event">
+                  Event
+                </label>
                 <select
+                  id="br-event"
                   value={eventId}
                   onChange={(e) => setEventId(e.target.value)}
                   disabled={isDiscovering}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
+                  className={field}
                 >
                   {PRESET_EVENTS.map((pe) => (
                     <option key={pe.id} value={pe.id}>
                       {pe.label}
                     </option>
                   ))}
-                  <option value="custom">Custom Event ID...</option>
+                  <option value="custom">Custom event ID…</option>
                 </select>
                 {eventId === "custom" && (
                   <input
                     type="text"
                     value={customEventId}
                     onChange={(e) => setCustomEventId(e.target.value)}
-                    placeholder="Enter event ID (e.g. evt_...)"
-                    className="mt-2 w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+                    placeholder="Event ID, e.g. evt_…"
+                    aria-label="Custom event ID"
+                    className={`${field} mt-2 font-mono text-[12px]`}
                   />
                 )}
               </div>
 
-              {/* Vendor Category */}
               <div>
-                <label className="text-slate-400 font-medium block mb-1.5">Discovery Category</label>
+                <label className={label} htmlFor="br-category">
+                  Category
+                </label>
                 <select
+                  id="br-category"
                   value={discoveryCategory}
                   onChange={(e) => setDiscoveryCategory(e.target.value)}
                   disabled={isDiscovering}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500 disabled:opacity-50 font-medium"
+                  className={field}
                 >
                   {CATEGORIES.map((c) => (
                     <option key={c.id} value={c.id}>
@@ -600,145 +613,148 @@ function BrowserRuntimeContent() {
                 </select>
               </div>
 
-              {/* Max Results */}
               <div>
-                <label className="text-slate-400 font-medium block mb-1.5">
-                  Inspection Depth: <span className="text-indigo-400 font-bold">{discoveryMaxResults} Listings</span>
+                <label className={label} htmlFor="br-depth">
+                  Depth · <span className="text-ink-900">{discoveryMaxResults} listings</span>
                 </label>
                 <input
+                  id="br-depth"
                   type="range"
                   min={1}
                   max={10}
                   value={discoveryMaxResults}
                   onChange={(e) => setDiscoveryMaxResults(Number(e.target.value))}
                   disabled={isDiscovering}
-                  className="w-full accent-indigo-500 mt-2 cursor-pointer"
+                  className="mt-2.5 w-full cursor-pointer accent-cue-600"
                 />
-                <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-                  <span>Fast (1)</span>
-                  <span>Standard (5)</span>
-                  <span>Deep (10)</span>
+                <div className="mt-1 flex justify-between font-mono text-[10px] text-ink-400">
+                  <span>Fast · 1</span>
+                  <span>5</span>
+                  <span>Deep · 10</span>
                 </div>
               </div>
 
-              {/* Launch & Persistence */}
-              <div className="flex flex-col justify-end gap-2">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col justify-end gap-2.5">
+                <label htmlFor="persist-check" className="flex cursor-pointer items-center gap-2 text-[13px] text-ink-700">
                   <input
                     type="checkbox"
                     id="persist-check"
                     checked={persistDiscovery}
                     onChange={(e) => setPersistDiscovery(e.target.checked)}
                     disabled={isDiscovering}
-                    className="accent-indigo-500 rounded cursor-pointer"
+                    className="h-4 w-4 cursor-pointer rounded accent-cue-600"
                   />
-                  <label htmlFor="persist-check" className="text-slate-300 font-medium cursor-pointer">
-                    Persist qualified vendors to DB
-                  </label>
-                </div>
-
-                <button
-                  onClick={handleStartDiscovery}
-                  disabled={isDiscovering || loading}
-                  className="w-full py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 active:from-indigo-700 active:to-violet-700 text-white font-bold rounded-lg shadow-lg shadow-indigo-600/30 transition disabled:opacity-50 flex items-center justify-center gap-2"
-                >
+                  Save qualified vendors to the event
+                </label>
+                <button onClick={handleStartDiscovery} disabled={isDiscovering || loading} className="btn-cue w-full">
                   {isDiscovering ? (
                     <>
-                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                      Researching in Browser...
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Researching…
                     </>
                   ) : (
-                    "Launch Browser Discovery"
+                    <>
+                      <Search className="h-3.5 w-3.5" /> Launch discovery
+                    </>
                   )}
                 </button>
               </div>
             </div>
 
-            {/* Custom query override toggle */}
-            <div className="pt-2 border-t border-slate-800/80">
-              <label className="text-[11px] text-slate-400 font-medium block mb-1">
-                Custom Search Query (Optional override):
+            <div className="border-t border-ink-200 bg-ink-50/60 px-5 py-4">
+              <label className={label} htmlFor="br-query">
+                Custom search query <span className="normal-case tracking-normal text-ink-400">(optional)</span>
               </label>
               <input
+                id="br-query"
                 type="text"
                 value={customQuery}
                 onChange={(e) => setCustomQuery(e.target.value)}
-                placeholder="Leave blank to use event-derived query template (e.g. Catering in San Francisco)..."
+                placeholder="Leave blank to use the query built from the event, e.g. “Catering in San Francisco”"
                 disabled={isDiscovering}
-                className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-indigo-500"
+                className={field}
               />
             </div>
 
-            {/* Live Progress Banner */}
             {discoveryStatus && (
-              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-2.5">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      isDiscovering ? "bg-amber-400 animate-ping" : "bg-emerald-400"
-                    }`}
-                  />
-                  <span className="text-slate-300 font-medium">{discoveryStatus}</span>
-                </div>
+              <div
+                className="flex flex-wrap items-center justify-between gap-3 border-t border-ink-200 bg-ink-900 px-5 py-3 text-[12.5px] text-ink-100"
+                role="status"
+                aria-live="polite"
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className={`cue-light ${isDiscovering ? "bg-standby-400 animate-cue-blink" : "bg-go-400"}`} />
+                  {discoveryStatus}
+                </span>
                 {discoverySummary && (
-                  <div className="flex items-center gap-3 text-slate-400 font-mono text-[11px]">
-                    <span className="text-emerald-400 font-semibold">{discoverySummary.total_found} Found</span>
-                    <span>&bull;</span>
-                    <span className="text-indigo-400 font-semibold">{discoverySummary.total_qualified} Qualified</span>
-                    <span>&bull;</span>
-                    <span className="text-violet-400 font-semibold">{discoverySummary.total_persisted} Persisted</span>
-                  </div>
+                  <span className="flex items-center gap-4 font-mono text-[11.5px]">
+                    <span>
+                      <span className="text-white">{discoverySummary.total_found}</span> <span className="text-ink-400">found</span>
+                    </span>
+                    <span>
+                      <span className="text-go-300">{discoverySummary.total_qualified}</span>{" "}
+                      <span className="text-ink-400">qualified</span>
+                    </span>
+                    <span>
+                      <span className="text-engine-300">{discoverySummary.total_persisted}</span>{" "}
+                      <span className="text-ink-400">saved</span>
+                    </span>
+                  </span>
                 )}
               </div>
             )}
           </section>
         )}
 
-        {/* Tab 2: Manual Navigation Controls */}
+        {/* Manual control */}
         {activeTab === "manual" && (
-          <section className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-3 shadow-xl">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400">Manual Browser Control</h2>
+          <section className="surface px-5 py-5">
+            <div className="eyebrow mb-3">Manual browser control</div>
             <div className="flex flex-wrap items-center gap-2">
-              <input
-                type="text"
-                value={targetUrl}
-                onChange={(e) => setTargetUrl(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleNavigate()}
-                placeholder="https://..."
-                disabled={execution?.status !== "running" || loading}
-                className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5 text-xs font-mono text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-50"
-              />
+              <div className="relative min-w-[240px] flex-1">
+                <Globe className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400" />
+                <input
+                  type="text"
+                  value={targetUrl}
+                  onChange={(e) => setTargetUrl(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleNavigate()}
+                  placeholder="https://…"
+                  aria-label="URL"
+                  disabled={execution?.status !== "running" || loading}
+                  className={`${field} pl-9 font-mono text-[12.5px]`}
+                />
+              </div>
               <button
                 onClick={() => handleNavigate()}
                 disabled={execution?.status !== "running" || loading}
-                className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50"
+                className="btn-primary"
               >
-                Navigate
+                Go
               </button>
               <button
                 onClick={handleCreateTab}
                 disabled={execution?.status !== "running" || loading}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg border border-slate-700 transition"
+                className="btn-secondary"
               >
-                + New Tab
+                <Plus className="h-3.5 w-3.5" /> New tab
               </button>
             </div>
+            {execution?.status !== "running" && (
+              <p className="mt-2 text-[12px] text-ink-500">Start the browser to navigate manually.</p>
+            )}
 
-            {/* Tab list */}
             {execution?.tabs && execution.tabs.length > 0 && (
-              <div className="flex items-center gap-2 overflow-x-auto pt-2 border-t border-slate-800/80">
-                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Tabs:</span>
+              <div className="mt-4 flex items-center gap-1.5 overflow-x-auto border-t border-dashed border-ink-200 pt-3">
+                <span className="mr-1 font-mono text-[10px] uppercase tracking-label text-ink-400">Tabs</span>
                 {execution.tabs.map((tab: TabInfo) => (
                   <button
                     key={tab.tab_id}
                     onClick={() => handleActivateTab(tab.tab_id)}
-                    className={`px-3 py-1 rounded-lg text-xs font-medium transition ${
-                      tab.is_active
-                        ? "bg-indigo-600 text-white"
-                        : "bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700"
+                    className={`max-w-[220px] shrink-0 truncate rounded-md px-3 py-1 text-[12px] font-medium transition ${
+                      tab.is_active ? "bg-ink-900 text-ink-50" : "border border-ink-200 bg-[#FDFCFA] text-ink-600 hover:border-ink-300"
                     }`}
+                    title={`${tab.title || "Untitled"} [${tab.tab_id}]`}
                   >
-                    {tab.title || "Untitled"} [{tab.tab_id}]
+                    {tab.title || "Untitled"}
                   </button>
                 ))}
               </div>
@@ -746,426 +762,416 @@ function BrowserRuntimeContent() {
           </section>
         )}
 
-        {/* Real Live Graphical Desktop Canvas (Windows Companion or noVNC Container) */}
-        <section className="flex flex-col bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl relative min-h-[460px]">
-          <div className="bg-slate-950/90 border-b border-slate-800 px-4 py-2 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2 font-mono text-slate-400">
-              <span className="w-2.5 h-2.5 rounded-full bg-rose-500/80 inline-block" />
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80 inline-block" />
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80 inline-block" />
-              <span className="ml-2 text-slate-300 font-semibold">
-                {companionStatus?.is_connected && !showVncFallback
-                  ? "Windows Companion Headed Browser (Active on Desktop)"
-                  : "Live Chromium Graphical Desktop (noVNC)"}
+        {/* Viewer */}
+        <section className="overflow-hidden rounded-2xl bg-ink-950 shadow-xl ring-1 ring-black/20">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/[0.06] px-4 py-2.5">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex gap-1.5" aria-hidden>
+                <span className="h-2.5 w-2.5 rounded-full bg-cue-500/80" />
+                <span className="h-2.5 w-2.5 rounded-full bg-standby-400/80" />
+                <span className="h-2.5 w-2.5 rounded-full bg-go-500/80" />
               </span>
-              <span className="text-slate-600">|</span>
-              <span className="text-slate-500">
-                {companionStatus?.is_connected && !showVncFallback
-                  ? "Real visible browser running on host Windows desktop"
-                  : "Virtual Display :99 • Real-Time Playwright Navigation"}
+              <span className="truncate text-[12.5px] font-semibold text-ink-100">
+                {companionView ? "Windows desktop browser" : "Container browser (noVNC)"}
+              </span>
+              <span className="hidden truncate font-mono text-[11px] text-ink-500 md:inline">
+                {companionView ? "Visible on your desktop" : "Virtual display · Playwright"}
               </span>
             </div>
-            {companionStatus?.is_connected && !showVncFallback ? (
-              <button
-                onClick={() => setShowVncFallback(true)}
-                className="text-xs text-indigo-400 hover:text-indigo-300 underline font-mono"
-              >
-                Switch to Container noVNC View
-              </button>
-            ) : (
-              <div className="flex items-center gap-3">
-                {companionStatus?.is_connected && (
-                  <button
-                    onClick={() => setShowVncFallback(false)}
-                    className="text-xs text-emerald-400 hover:text-emerald-300 underline font-mono"
-                  >
-                    Switch to Windows Desktop View
-                  </button>
-                )}
-                <button
-                  onClick={() => setViewerKey((k) => k + 1)}
-                  className="text-xs text-slate-400 hover:text-white underline font-mono"
-                >
-                  Reload Frame
+            <div className="flex items-center gap-3 font-mono text-[11px]">
+              {companionView ? (
+                <button onClick={() => setShowVncFallback(true)} className="text-ink-400 transition hover:text-white">
+                  Switch to container view
                 </button>
-              </div>
-            )}
+              ) : (
+                <>
+                  {companionStatus?.is_connected && (
+                    <button onClick={() => setShowVncFallback(false)} className="text-go-300 transition hover:text-go-200">
+                      Switch to desktop view
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setViewerKey((k) => k + 1)}
+                    className="inline-flex items-center gap-1 text-ink-400 transition hover:text-white"
+                  >
+                    <RotateCw className="h-3 w-3" /> Reload
+                  </button>
+                </>
+              )}
+            </div>
           </div>
 
-          {companionStatus?.is_connected && !showVncFallback ? (
-            <div className="flex-1 w-full bg-slate-950 p-6 flex flex-col justify-between relative min-h-[420px]">
-              <div className="flex flex-col gap-4">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
+          {companionView ? (
+            <div className="flex min-h-[420px] flex-col justify-between gap-5 p-5 sm:p-6">
+              <div className="space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
-                      <Laptop className="w-5 h-5" />
+                    <div className="grid h-10 w-10 place-items-center rounded-xl bg-go-500/10 text-go-300 ring-1 ring-go-400/30">
+                      <Laptop className="h-5 w-5" />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-white">Headed Windows Desktop Browser</span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          Live on User Monitor
-                        </span>
+                      <div className="flex items-center gap-2 text-[14px] font-semibold text-white">
+                        Browser is running on your desktop
+                        <span className="cue-light bg-go-400 animate-cue-blink" />
                       </div>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Connected to Companion ({companionStatus.device_name || "Windows Desktop"}) &bull; Operating real browser window
+                      <p className="mt-0.5 text-[12px] text-ink-400">
+                        Connected to {companionStatus?.device_name || "Windows desktop"} · watch it work in the real window
                       </p>
                     </div>
                   </div>
                   {execution?.execution_id && (
-                    <div className="text-xs font-mono text-slate-400">
-                      Session ID: <span className="text-indigo-400 font-semibold">{execution.session_id || execution.execution_id}</span>
-                    </div>
+                    <span className="font-mono text-[11px] text-ink-500">
+                      Session <span className="text-ink-300">{execution.session_id || execution.execution_id}</span>
+                    </span>
                   )}
                 </div>
 
-                {/* Active Session & Tab Overview */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">
-                      Active URL
-                    </span>
-                    <a
-                      href={execution?.current_url || "#"}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs font-mono text-indigo-400 hover:underline truncate block"
-                      title={execution?.current_url || "Waiting for navigation..."}
-                    >
-                      {execution?.current_url || "Waiting for navigation..."}
-                    </a>
+                <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-xl bg-white/[0.06] md:grid-cols-3">
+                  <div className="bg-ink-950 px-4 py-3">
+                    <dt className="font-mono text-[10px] uppercase tracking-label text-ink-500">Current page</dt>
+                    <dd className="mt-1 truncate">
+                      {execution?.current_url ? (
+                        <a
+                          href={execution.current_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-[12px] text-ink-200 hover:text-white hover:underline"
+                          title={execution.current_url}
+                        >
+                          {execution.current_url}
+                        </a>
+                      ) : (
+                        <span className="text-[12px] italic text-ink-500">Waiting for navigation…</span>
+                      )}
+                    </dd>
                   </div>
-                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">
-                      Active Tab / Page Title
-                    </span>
-                    <span className="text-xs font-medium text-slate-200 truncate block">
-                      {execution?.current_title || "Untitled Tab"}
-                    </span>
+                  <div className="bg-ink-950 px-4 py-3">
+                    <dt className="font-mono text-[10px] uppercase tracking-label text-ink-500">Page title</dt>
+                    <dd className="mt-1 truncate text-[12.5px] text-ink-200">{execution?.current_title || "Untitled tab"}</dd>
                   </div>
-                  <div className="bg-slate-900/80 border border-slate-800 rounded-lg p-3">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 block mb-1">
-                      Browser Profile & State
-                    </span>
-                    <div className="flex items-center gap-2 text-xs">
-                      <span className="text-slate-300">
-                        {execution?.tabs?.length ?? 1} Tab(s) Open
-                      </span>
-                      <span className="text-slate-600">&bull;</span>
-                      <span className="capitalize text-slate-400">
-                        Status: <strong className="text-indigo-400">{execution?.status || "Idle"}</strong>
-                      </span>
-                    </div>
+                  <div className="bg-ink-950 px-4 py-3">
+                    <dt className="font-mono text-[10px] uppercase tracking-label text-ink-500">Browser</dt>
+                    <dd className="mt-1 text-[12.5px] text-ink-200">
+                      {execution?.tabs?.length ?? 1} tab(s) · {execution?.status ? humanizeStatus(execution.status) : "Idle"}
+                    </dd>
                   </div>
-                </div>
+                </dl>
 
-                {/* Real-time Browser Navigation Telemetry */}
-                <div className="bg-slate-900/50 border border-slate-800/80 rounded-lg p-3">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-2">
-                    Live Autonomous Browser Telemetry
-                  </span>
-                  <div className="space-y-1.5 max-h-36 overflow-y-auto font-mono text-[11px]">
+                <div className="rounded-xl bg-black/30 px-4 py-3 ring-1 ring-white/[0.05]">
+                  <div className="mb-2 font-mono text-[10px] uppercase tracking-label text-ink-500">Latest activity</div>
+                  <ul className="max-h-36 space-y-1 overflow-y-auto font-mono text-[11.5px]">
                     {events.slice(0, 5).map((evt) => (
-                      <div key={evt.seq} className="flex items-start gap-2 text-slate-300">
-                        <span className="text-slate-500">[{new Date(evt.timestamp).toLocaleTimeString()}]</span>
-                        <span className="text-indigo-400 font-semibold">{evt.event_type}:</span>
-                        <span className="text-slate-300 truncate">{evt.message}</span>
-                      </div>
+                      <li key={evt.seq} className="flex gap-3">
+                        <span className="shrink-0 tabular-nums text-ink-500">{timecode(evt.timestamp)}</span>
+                        <span className="shrink-0 text-agent-300">{evt.event_type}</span>
+                        <span className="truncate text-ink-200">{evt.message}</span>
+                      </li>
                     ))}
                     {events.length === 0 && (
-                      <span className="text-slate-500 text-xs italic">
-                        Companion connected and ready. A real visible browser window will navigate on your desktop when a task starts.
-                      </span>
+                      <li className="text-[12px] italic text-ink-500">
+                        Ready. The browser window on your desktop will start moving when a task begins.
+                      </li>
                     )}
-                  </div>
+                  </ul>
                 </div>
               </div>
 
-              {/* Action Toolbar */}
-              <div className="flex items-center justify-between pt-4 border-t border-slate-800/80 text-xs text-slate-400">
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
-                  <span>Chromium/Edge PID Active &bull; Managed by Playwright</span>
-                </div>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-4 text-[12px] text-ink-400">
+                <span className="flex items-center gap-2">
+                  <span className="cue-light bg-go-400" /> Managed by Playwright
+                </span>
                 {execution?.status === "running" && (
                   <button
                     onClick={handleStop}
-                    className="px-3 py-1 bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 rounded border border-rose-500/30 transition font-semibold"
+                    className="btn h-8 border border-cue-400/30 bg-cue-500/10 px-3 text-[12px] text-cue-200 hover:bg-cue-500/20"
                   >
-                    Halt Browser Execution
+                    <Square className="h-3 w-3" /> Stop the browser
                   </button>
                 )}
               </div>
             </div>
           ) : (
-            <div className="flex-1 w-full bg-black relative min-h-[500px]">
+            <div className="relative min-h-[500px] w-full bg-black">
               <iframe
                 key={viewerKey}
                 src={viewerUrl}
-                title="EVENTRA Live Chromium Desktop (noVNC)"
-                className="w-full h-full min-h-[500px] border-0"
+                title="EVENTRA live browser (noVNC)"
+                className="h-full min-h-[500px] w-full border-0"
                 allow="clipboard-read; clipboard-write; fullscreen"
               />
+              {!execution && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-ink-950 bg-dots-dark text-center">
+                  <div className="grid h-12 w-12 place-items-center rounded-xl bg-white/5 text-ink-400 ring-1 ring-white/10">
+                    <Globe className="h-5 w-5" />
+                  </div>
+                  <div className="text-[14px] font-semibold text-ink-100">No browser session running</div>
+                  <p className="max-w-[40ch] text-[12.5px] text-ink-500">
+                    Start the browser, or launch discovery and a session will start for you.
+                  </p>
+                  <button
+                    onClick={handleStart}
+                    disabled={loading}
+                    className="btn mt-1 h-8 bg-ink-50 px-3 text-[12px] text-ink-900 hover:bg-white"
+                  >
+                    <Play className="h-3 w-3 fill-ink-900" /> {loading ? "Starting…" : "Start browser"}
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </section>
 
-        {/* Discovered Candidates Grid */}
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xl flex flex-col gap-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold text-white uppercase tracking-wider">
-                Discovered Candidates & Qualification Results
+        {/* Candidates */}
+        <section>
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <div className="eyebrow">Results</div>
+              <h2 className="mt-1 text-[16px] font-semibold text-ink-900">
+                Candidates found{" "}
+                <span className="font-mono text-[12px] font-normal text-ink-400">{candidates.length}</span>
               </h2>
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-500/30">
-                {candidates.length} Verified
-              </span>
             </div>
             {candidates.length > 0 && (
-              <span className="text-xs text-slate-400 font-mono">
-                {candidates.filter((c) => c.is_persisted).length} Persisted to Database
+              <span className="font-mono text-[11.5px] text-ink-500">
+                {candidates.filter((c) => c.is_persisted).length} saved to the event
               </span>
             )}
           </div>
 
           {candidates.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 flex flex-col items-center justify-center gap-2">
-              <span className="text-3xl">🔍</span>
-              <p className="text-sm font-medium">No candidates discovered yet.</p>
-              <p className="text-xs text-slate-600 max-w-md">
-                Launch Browser Discovery above to instruct the real browser to search Google Maps and inspect businesses.
+            <div className="flex flex-col items-center rounded-xl border border-dashed border-ink-300 bg-[#FDFCFA]/60 px-6 py-12 text-center">
+              <div className="mb-3 grid h-11 w-11 place-items-center rounded-xl border border-ink-200 bg-[#FDFCFA] text-ink-400 shadow-sm">
+                <Search className="h-5 w-5" />
+              </div>
+              <p className="text-[15px] font-semibold text-ink-900">No candidates yet</p>
+              <p className="mt-1 max-w-[46ch] text-[13px] text-ink-500">
+                Launch discovery and the browser will search Google Maps, inspect each business and list it here with
+                its evidence.
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {[...activeCandidates, ...(showRejected ? rejectedCandidates : [])].map((cand) => (
-                <div
-                  key={cand.id}
-                  className="bg-slate-950 border border-slate-800/90 rounded-xl p-4 flex flex-col justify-between gap-3 hover:border-slate-700 transition shadow-lg relative group"
-                >
-                  <div className="space-y-2">
-                    {/* Header: Name and Status */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <h3 className="text-sm font-bold text-white group-hover:text-indigo-300 transition">
-                          {cand.name}
-                        </h3>
-                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                          {cand.category} &bull; {cand.city}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {[...activeCandidates, ...(showRejected ? rejectedCandidates : [])].map((cand) => {
+                const q = cand.qualification_status;
+                const qMeta =
+                  q === "qualified"
+                    ? { label: "Qualified", cls: "border-go-200 bg-go-50 text-go-700", dot: "bg-go-500" }
+                    : q === "uncertain"
+                    ? { label: "Uncertain", cls: "border-standby-200 bg-standby-50 text-standby-800", dot: "bg-standby-500" }
+                    : { label: "Excluded", cls: "border-cue-200 bg-cue-50 text-cue-700", dot: "bg-cue-600" };
+                const call = callStates[cand.id];
+                return (
+                  <article
+                    key={cand.id}
+                    className={`flex flex-col overflow-hidden rounded-xl border bg-[#FDFCFA] shadow-sm transition hover:shadow-md ${
+                      q === "rejected" ? "border-ink-200 opacity-80" : "border-ink-200 hover:border-ink-300"
+                    }`}
+                  >
+                    <div className="flex-1 space-y-3 px-4 pb-3 pt-4">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <h3 className="text-[14.5px] font-semibold leading-snug text-ink-900">{cand.name}</h3>
+                          <p className="mt-0.5 text-[12px] text-ink-500">
+                            {humanizeStatus(cand.category)}
+                            {cand.city ? ` · ${cand.city}` : ""}
+                          </p>
+                        </div>
+                        <span className={`chip shrink-0 ${qMeta.cls}`}>
+                          <span className={`cue-light ${qMeta.dot}`} />
+                          {qMeta.label}
                         </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
                         {cand.recommended && (
-                          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                            ★ Recommended{typeof cand.score === "number" ? ` · ${Math.round(cand.score * 100)}%` : ""}
+                          <span className="chip border-agent-200 bg-agent-50 text-agent-700">
+                            <span aria-hidden>✦</span> Recommended
+                            {typeof cand.score === "number" ? ` · ${Math.round(cand.score * 100)}%` : ""}
                           </span>
                         )}
-                      </div>
-                      <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0 border ${
-                          cand.qualification_status === "qualified"
-                            ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
-                            : cand.qualification_status === "uncertain"
-                            ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
-                            : "bg-rose-500/20 text-rose-300 border-rose-500/30"
-                        }`}
-                      >
-                        {cand.qualification_status.toUpperCase()}
-                      </span>
-                    </div>
-
-                    {/* Rating & Reviews */}
-                    <div className="flex items-center gap-2 text-xs">
-                      {cand.rating ? (
-                        <span className="text-amber-400 font-bold flex items-center gap-1">
-                          ★ {cand.rating}
-                          <span className="text-slate-500 font-normal">
-                            ({cand.review_count ? `${cand.review_count} reviews` : "reviews verified"})
+                        {cand.rating ? (
+                          <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-ink-800">
+                            <Star className="h-3 w-3 fill-standby-400 text-standby-400" />
+                            {cand.rating}
+                            {cand.review_count ? (
+                              <span className="font-normal text-ink-400">({cand.review_count})</span>
+                            ) : null}
                           </span>
-                        </span>
-                      ) : (
-                        <span className="text-slate-500 italic text-[11px]">Rating: Not listed</span>
-                      )}
-                    </div>
+                        ) : (
+                          <span className="text-[11.5px] italic text-ink-400">No rating listed</span>
+                        )}
+                      </div>
 
-                    {/* Address & Phone */}
-                    <div className="space-y-1 text-xs text-slate-300 font-sans">
-                      {cand.address && (
-                        <div className="flex items-start gap-1.5 text-slate-400 text-[11px]">
-                          <span className="shrink-0 text-slate-500">📍</span>
-                          <span className="line-clamp-2">{cand.address}</span>
-                        </div>
-                      )}
-                      {cand.phone ? (
-                        <div className="flex items-center gap-1.5 text-slate-300 font-mono text-[11px]">
-                          <span className="shrink-0 text-slate-500">📞</span>
-                          <a href={`tel:${cand.phone}`} className="hover:text-indigo-400 underline">
-                            {cand.phone}
-                          </a>
-                        </div>
-                      ) : (
-                        <div className="text-[11px] text-slate-500 italic">📞 Phone: Unknown</div>
-                      )}
-                    </div>
-
-                    {/* Links */}
-                    <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
-                      {cand.website ? (
-                        <a
-                          href={cand.website}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-indigo-400 hover:text-indigo-300 underline font-medium flex items-center gap-0.5"
-                        >
-                          Official Website ↗
-                        </a>
-                      ) : (
-                        <span className="text-slate-600 italic">No website listed</span>
-                      )}
-
-                      {cand.maps_url && (
-                        <a
-                          href={cand.maps_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-slate-400 hover:text-slate-200 underline"
-                        >
-                          Google Maps Link
-                        </a>
-                      )}
-                    </div>
-
-                    {/* Evidence & Qualification Explanations */}
-                    <div className="pt-2 border-t border-slate-900 text-[11px] text-slate-400 space-y-1">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block">
-                        Qualification Notes:
-                      </span>
-                      <ul className="list-disc list-inside space-y-0.5 text-slate-400">
-                        {cand.qualification_reasons.slice(0, 2).map((reason, idx) => (
-                          <li key={idx} className="line-clamp-1">
-                            {reason}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-
-                  {/* Call action (human-in-the-loop) */}
-                  {cand.qualification_status !== "rejected" && cand.vendor_id && cand.phone && (
-                    <div className="pt-2 border-t border-slate-900/80 text-[11px] space-y-1.5">
-                      {!callStates[cand.id] && (
-                        <button
-                          onClick={() => setCallStates((prev) => ({ ...prev, [cand.id]: { phase: "confirm" } }))}
-                          className="w-full rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-1.5 transition"
-                        >
-                          📞 Call this {cand.category.toLowerCase() === "venue" ? "venue" : "vendor"}
-                        </button>
-                      )}
-                      {callStates[cand.id]?.phase === "confirm" && (
-                        <div className="space-y-1.5">
-                          <p className="text-slate-300">
-                            Agent will call <span className="font-mono">{cand.phone}</span> ({cand.name}) and message them on WhatsApp.
-                          </p>
-                          <div className="flex gap-2">
-                            <button
-                              onClick={() => handleCallCandidate(cand)}
-                              className="flex-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-1.5"
-                            >
-                              Confirm call
-                            </button>
-                            <button
-                              onClick={() =>
-                                setCallStates((prev) => {
-                                  const next = { ...prev };
-                                  delete next[cand.id];
-                                  return next;
-                                })
-                              }
-                              className="flex-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 py-1.5"
-                            >
-                              Cancel
-                            </button>
+                      <dl className="space-y-1.5 text-[12px]">
+                        {cand.address && (
+                          <div className="flex items-start gap-2 text-ink-600">
+                            <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-400" />
+                            <span className="line-clamp-2">{cand.address}</span>
                           </div>
+                        )}
+                        <div className="flex items-center gap-2">
+                          <Phone className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                          {cand.phone ? (
+                            <a href={`tel:${cand.phone}`} className="font-mono text-[12px] text-ink-800 hover:underline">
+                              {cand.phone}
+                            </a>
+                          ) : (
+                            <span className="italic text-ink-400">Phone unknown</span>
+                          )}
+                        </div>
+                      </dl>
+
+                      <div className="flex flex-wrap gap-3 text-[12px]">
+                        {cand.website ? (
+                          <a
+                            href={cand.website}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-semibold text-ink-700 hover:text-ink-900 hover:underline"
+                          >
+                            Website <ExternalLink className="h-3 w-3" />
+                          </a>
+                        ) : (
+                          <span className="italic text-ink-400">No website</span>
+                        )}
+                        {cand.maps_url && (
+                          <a
+                            href={cand.maps_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 font-semibold text-ink-700 hover:text-ink-900 hover:underline"
+                          >
+                            Google Maps <ExternalLink className="h-3 w-3" />
+                          </a>
+                        )}
+                      </div>
+
+                      {cand.qualification_reasons.length > 0 && (
+                        <div className="rounded-lg bg-ink-100/60 px-3 py-2">
+                          <div className="mb-1 flex items-center gap-1.5 font-mono text-[9.5px] uppercase tracking-label text-ink-500">
+                            <span className="text-engine-600">✓</span> Qualification notes
+                          </div>
+                          <ul className="space-y-0.5 text-[12px] text-ink-700">
+                            {cand.qualification_reasons.slice(0, 2).map((reason, idx) => (
+                              <li key={idx} className="line-clamp-1">
+                                {reason}
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                       )}
-                      {callStates[cand.id]?.phase === "running" && <p className="text-indigo-300">Starting call…</p>}
-                      {callStates[cand.id]?.phase === "done" && <p className="text-emerald-400">{callStates[cand.id]?.message}</p>}
-                      {callStates[cand.id]?.phase === "error" && <p className="text-rose-400">{callStates[cand.id]?.message}</p>}
                     </div>
-                  )}
 
-                  {/* Persistence Badge */}
-                  <div className="pt-2 border-t border-slate-900/80 flex items-center justify-between text-[11px]">
-                    {cand.is_persisted ? (
-                      <span className="inline-flex items-center gap-1.5 text-emerald-400 font-semibold">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                        Persisted in DB {cand.vendor_id ? `(${cand.vendor_id.slice(0, 8)}...)` : ""}
-                      </span>
-                    ) : (
-                      <span className="text-slate-500 italic">Not Persisted</span>
+                    {/* Human-in-the-loop call */}
+                    {q !== "rejected" && cand.vendor_id && cand.phone && (
+                      <div className="border-t border-dashed border-ink-200 px-4 py-3 text-[12px]">
+                        {!call && (
+                          <button
+                            onClick={() => setCallStates((prev) => ({ ...prev, [cand.id]: { phase: "confirm" } }))}
+                            className="btn-primary h-8 w-full text-[12px]"
+                          >
+                            <PhoneCall className="h-3.5 w-3.5" /> Call this {cand.category.toLowerCase() === "venue" ? "venue" : "vendor"}
+                          </button>
+                        )}
+                        {call?.phase === "confirm" && (
+                          <div className="space-y-2">
+                            <p className="text-ink-700">
+                              The agent will call <span className="font-mono">{cand.phone}</span> and message {cand.name} on
+                              WhatsApp.
+                            </p>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleCallCandidate(cand)} className="btn-cue h-8 flex-1 text-[12px]">
+                                Confirm call
+                              </button>
+                              <button
+                                onClick={() =>
+                                  setCallStates((prev) => {
+                                    const next = { ...prev };
+                                    delete next[cand.id];
+                                    return next;
+                                  })
+                                }
+                                className="btn-secondary h-8 flex-1 text-[12px]"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {call?.phase === "running" && (
+                          <p className="flex items-center gap-2 text-standby-800">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Starting call…
+                          </p>
+                        )}
+                        {call?.phase === "done" && <p className="text-go-700">{call.message}</p>}
+                        {call?.phase === "error" && <p className="text-cue-700">{call.message}</p>}
+                      </div>
                     )}
 
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-slate-900 font-mono text-slate-400 border border-slate-800">
-                      {cand.source}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                    <div className="flex items-center justify-between gap-2 border-t border-ink-200 bg-ink-50/70 px-4 py-2 text-[11.5px]">
+                      {cand.is_persisted ? (
+                        <span className="inline-flex items-center gap-1.5 font-semibold text-go-700">
+                          <span className="cue-light bg-go-500" />
+                          Saved{cand.vendor_id ? <span className="font-mono font-normal text-ink-400"> {cand.vendor_id.slice(0, 8)}</span> : null}
+                        </span>
+                      ) : (
+                        <span className="italic text-ink-400">Not saved</span>
+                      )}
+                      <ProvenanceBadge source={cand.source} size="sm" />
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
           {rejectedCandidates.length > 0 && (
             <button
               onClick={() => setShowRejected((v) => !v)}
-              className="mt-3 text-[11px] text-slate-400 hover:text-slate-200 underline"
+              className="mt-3 inline-flex items-center gap-1.5 text-[12.5px] font-semibold text-ink-500 hover:text-ink-900"
             >
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showRejected ? "rotate-180" : ""}`} />
               {showRejected
                 ? "Hide excluded candidates"
-                : `${rejectedCandidates.length} excluded (government / institutions / non-hireable) — review`}
+                : `${rejectedCandidates.length} excluded (government, institutions, not hireable) — review`}
             </button>
           )}
         </section>
 
-        {/* Live Activity Telemetry Event Stream */}
-        <section className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xl">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                Live Activity Event Stream (WebSocket Telemetry)
-              </h2>
-              <span className="text-[11px] font-mono text-indigo-400 px-2 py-0.5 rounded bg-indigo-500/10 border border-indigo-500/20">
-                {events.length} Events Received
-              </span>
+        {/* Event stream */}
+        <section className="overflow-hidden rounded-xl bg-ink-950 ring-1 ring-black/20">
+          <div className="flex items-center justify-between gap-3 border-b border-white/[0.06] px-4 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <span className="font-mono text-[10.5px] uppercase tracking-label text-ink-400">Event stream</span>
+              <span className="font-mono text-[11px] text-ink-500">{events.length} received</span>
             </div>
-            <button onClick={() => setEvents([])} className="text-[11px] text-slate-500 hover:text-slate-300 font-medium">
-              Clear Events
+            <button onClick={() => setEvents([])} className="font-mono text-[11px] text-ink-500 transition hover:text-ink-200">
+              Clear
             </button>
           </div>
-
-          <div className="bg-slate-950 border border-slate-800/80 rounded-lg p-3 font-mono text-xs max-h-48 overflow-y-auto space-y-1.5">
+          <ul className="max-h-60 space-y-1 overflow-y-auto px-4 py-3 font-mono text-[11.5px] leading-relaxed">
             {events.length === 0 ? (
-              <div className="text-slate-600 italic">No events received yet. Start discovery to observe live telemetry.</div>
+              <li className="italic text-ink-500">Nothing yet. Start discovery to watch the browser&apos;s events live.</li>
             ) : (
               events.map((evt) => (
-                <div key={evt.seq} className="flex items-start gap-2.5 text-slate-300 border-b border-slate-900/60 pb-1">
-                  <span className="text-indigo-400 font-semibold shrink-0">#{evt.seq}</span>
-                  <span className="text-slate-500 shrink-0 text-[11px]">
-                    [{new Date(evt.timestamp).toLocaleTimeString()}]
-                  </span>
+                <li key={evt.seq} className="flex items-start gap-3">
+                  <span className="w-10 shrink-0 text-right tabular-nums text-ink-600">#{evt.seq}</span>
+                  <span className="shrink-0 tabular-nums text-ink-500">{timecode(evt.timestamp)}</span>
                   <span
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-semibold shrink-0 ${
+                    className={`shrink-0 ${
                       evt.event_type.startsWith("discovery.")
-                        ? "bg-violet-500/20 text-violet-300 border border-violet-500/30"
+                        ? "text-agent-300"
                         : evt.event_type.startsWith("execution.")
-                        ? "bg-blue-500/20 text-blue-300 border border-blue-500/30"
-                        : "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                        ? "text-info-300"
+                        : "text-go-300"
                     }`}
                   >
                     {evt.event_type}
                   </span>
-                  <span className="flex-1 text-slate-200">{evt.message}</span>
-                </div>
+                  <span className="min-w-0 flex-1 text-ink-200">{evt.message}</span>
+                </li>
               ))
             )}
-          </div>
+          </ul>
         </section>
       </main>
 
@@ -1178,12 +1184,24 @@ function BrowserRuntimeContent() {
   );
 }
 
+function humanizeStatus(s?: string | null) {
+  if (!s) return "";
+  const t = s.replace(/_/g, " ").toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+function timecode(ts: string) {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return "--:--:--";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
 export default function BrowserRuntimePage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center">
-          Loading Browser Runtime...
+        <div className="flex min-h-screen items-center justify-center bg-paper font-mono text-[12px] text-ink-500">
+          Loading browser agent…
         </div>
       }
     >

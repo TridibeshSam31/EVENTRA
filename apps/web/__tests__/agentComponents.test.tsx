@@ -16,7 +16,8 @@ vi.mock("@/lib/api/agentRuns", async (importOriginal) => ({
   getCurrentAgentRun: vi.fn(),
   cancelAgentRun: vi.fn(),
 }));
-vi.mock("@/lib/sse", () => ({
+vi.mock("@/lib/sse", async (importActual) => ({
+  ...(await importActual<typeof import("@/lib/sse")>()),
   openSseStream: (opts: any) => harness.current!.openSseStream(opts),
 }));
 vi.mock("@/lib/api/browserCompanion", () => ({
@@ -62,13 +63,13 @@ describe("Agent button", () => {
     });
 
     renderAgentPanel();
-    const button = screen.getByRole("button", { name: /Dispatch Autonomous Sourcing/i });
+    const button = screen.getByRole("button", { name: /Find more vendors/i });
     fireEvent.click(button);
     fireEvent.click(button);
     await act(async () => resolveStart({ status: "STARTED", run_id: RUN_ID, message: "ok" }));
 
     expect(startOperations).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole("button", { name: /Dispatch Autonomous Sourcing/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Find more vendors/i })).toBeNull();
 
     act(() => {
       harness.current!.connections[0].send(
@@ -82,10 +83,10 @@ describe("Agent button", () => {
     vi.mocked(startOperations).mockRejectedValue(new Error("Event is not allowed to go LIVE"));
     renderAgentPanel();
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: /Dispatch Autonomous Sourcing/i }));
+      fireEvent.click(screen.getByRole("button", { name: /Find more vendors/i }));
     });
     expect(screen.getByText("Event is not allowed to go LIVE")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Dispatch Autonomous Sourcing/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Find more vendors/i })).toBeTruthy();
   });
 });
 
@@ -138,7 +139,7 @@ describe("Global agent status panel", () => {
 
     expect(nav.push).not.toHaveBeenCalled();
     const pill = screen.getByRole("button", { name: /Agent status/ });
-    expect(pill.textContent).toContain("Awaiting your selection");
+    expect(pill.textContent).toContain("Agent paused for your picks");
     expect(pill.textContent).not.toMatch(/completed/i);
   });
 });

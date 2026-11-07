@@ -12,7 +12,9 @@ export interface OperatorIdentity {
 
 export const OPERATOR_PROFILES: OperatorIdentity[] = [
   {
-    id: "anonymous_operator",
+    // The real owner identity of the workspace's events, so organizer-only
+    // actions (e.g. contacting real vendors) are attributed and authorized.
+    id: "default-operator",
     name: "Elena Vance (Ops Director)",
     role: "MAIN_ORGANIZER",
     description: "Full command authority: approve actions, resolve incidents, declare go-live",
@@ -40,7 +42,7 @@ export const OPERATOR_PROFILES: OperatorIdentity[] = [
 export const OPERATOR_PERSONAS = OPERATOR_PROFILES;
 
 export function useOperator() {
-  const [operatorId, setOpId] = useState<string>("anonymous_operator");
+  const [operatorId, setOpId] = useState<string>("default-operator");
 
   useEffect(() => {
     setOpId(getOperatorId());

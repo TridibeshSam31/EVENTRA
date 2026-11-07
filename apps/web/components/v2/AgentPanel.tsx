@@ -23,6 +23,8 @@ import { useAgentRunStore } from "@/stores/agentRunStore";
 import { deriveRunView, isExecuting } from "@/lib/agentRun/view";
 import { CompanionPairingModal } from "@/components/browser/CompanionPairingModal";
 import { browserCompanionApi, CompanionStatusResponse } from "@/lib/api/browserCompanion";
+import { useAdvancedMode } from "@/hooks/useAdvancedMode";
+import { stripIds } from "@/lib/humanize";
 
 interface AgentPanelProps {
   eventId: string;
@@ -39,6 +41,16 @@ interface AgentPanelProps {
   latestEngine?: string | null;
   pendingApprovalsCount?: number;
   latestResult?: string | null;
+}
+
+// Backend status codes like "FAILED" or "IN_PROGRESS" read as shouting; show them as words.
+function humanizeStatus(text?: string | null): string {
+  if (!text) return "";
+  if (/^[A-Z][A-Z0-9_]*$/.test(text)) {
+    const words = text.toLowerCase().replace(/_/g, " ");
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  }
+  return text;
 }
 
 export function AgentPanel({
@@ -71,6 +83,7 @@ export function AgentPanel({
   }, []);
 
   // Authoritative run state from the backend (persisted run + progress events).
+  const [advanced] = useAdvancedMode();
   const startRun = useAgentRunStore((s) => s.startRun);
   const storeStarting = useAgentRunStore((s) => s.starting);
   const storeEventId = useAgentRunStore((s) => s.eventId);
@@ -105,10 +118,11 @@ export function AgentPanel({
   };
 
   const isLive = lifecycleState === "LIVE" || lifecycleState === "IN_PROGRESS";
-  const hasPendingApprovals = pendingApprovalsCount > 0;
+  // Pending approvals are surfaced once, in the Overview "Needs you" block.
+  void pendingApprovalsCount;
 
   return (
-    <div className={`rounded-xl border border-slate-200 bg-white p-5 shadow-sm space-y-4 ${className}`}>
+    <div className={`rounded-xl border border-slate-200 bg-[#FDFCFA] p-5 shadow-sm space-y-4 ${className}`}>
       {/* Top Header: Identity + Status */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-3">
@@ -117,14 +131,14 @@ export function AgentPanel({
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-bold tracking-wide uppercase text-slate-900">
-                Event Operations Agent
+              <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-slate-900">
+                Your AI assistant
               </h2>
               <ProvenanceBadge provenance="AGENT" size="sm" />
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
-              Autonomous orchestration layer managing lifecycle operations for{" "}
-              <span className="font-semibold text-slate-800">{eventName}</span>
+              Finds, compares and contacts vendors for{" "}
+              <span className="font-semibold text-slate-800">{eventName}</span>. Nothing is booked without your OK.
             </p>
           </div>
         </div>
@@ -132,30 +146,25 @@ export function AgentPanel({
         {/* Backend Status Badge */}
         {/* Backend Status Badge */}
         <div className="flex items-center gap-2 self-start sm:self-auto">
-          {hasPendingApprovals ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
-              <span>Waiting For Approval</span>
-            </span>
-          ) : showWaiting ? (
-            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
-              <span>Waiting For Selection</span>
+          {showWaiting ? (
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-ink-100 text-ink-700 border border-ink-200">
+              <span className="w-2 h-2 rounded-full bg-ink-400" />
+              <span>Paused</span>
             </span>
           ) : showFailed ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
               <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-              <span>Failed</span>
+              <span>Something went wrong</span>
             </span>
           ) : showRunning ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
               <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-              <span>Sourcing & Qualifying</span>
+              <span>Finding vendors…</span>
             </span>
           ) : isLive ? (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>Autonomous Live</span>
+              <span>Event is live</span>
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
@@ -167,24 +176,24 @@ export function AgentPanel({
       </div>
 
       {/* Structured Operational Facts Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs ${advanced ? "lg:grid-cols-4" : ""}`}>
         {/* 1. Current Operation */}
         <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-label font-mono text-slate-400">
             <Layers className="w-3 h-3 text-slate-500" />
-            <span>Current Operation</span>
+            <span>What&apos;s happening</span>
           </div>
           <div className="font-semibold text-slate-900 truncate" title={agentMessage || latestOperation || ""}>
             {isWaitingForSelection
-              ? "EVENTRA is waiting for your selection."
-              : agentMessage || latestOperation || (isLive ? "Monitoring execution state" : "Awaiting dispatch")}
+              ? "Paused until you pick vendors."
+              : humanizeStatus(agentMessage || latestOperation) || (isLive ? "Keeping an eye on your event" : "Ready when you are")}
           </div>
-          <span className="text-[10px] text-slate-500">Autonomous workflow step</span>
         </div>
 
         {/* 2. Tool Invocation */}
+        {advanced && (<>
         <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-label font-mono text-slate-400">
             <Wrench className="w-3 h-3 text-slate-500" />
             <span>Latest Tool</span>
           </div>
@@ -196,7 +205,7 @@ export function AgentPanel({
 
         {/* 3. Deterministic Engine */}
         <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-label font-mono text-slate-400">
             <Cpu className="w-3 h-3 text-slate-500" />
             <span>Engine Layer</span>
           </div>
@@ -205,38 +214,25 @@ export function AgentPanel({
           </div>
           <span className="text-[10px] text-slate-500">Invariants verification</span>
         </div>
+        </>)}
 
-        {/* 4. Governance & Approvals */}
+        {/* 4. Latest result */}
         <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
-          <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            <ShieldAlert className="w-3 h-3 text-slate-500" />
-            <span>Governance</span>
+          <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-label font-mono text-slate-400">
+            <CheckCircle2 className="w-3 h-3 text-slate-500" />
+            <span>Latest result</span>
           </div>
-          {hasPendingApprovals ? (
-            <div className="flex items-center justify-between">
-              <span className="text-amber-700 font-bold">
-                {pendingApprovalsCount} Action Pending
-              </span>
-              <Link
-                href={`/events/${eventId}/approvals`}
-                className="text-[11px] font-semibold text-[#D6003C] hover:underline"
-              >
-                Review
-              </Link>
-            </div>
-          ) : (
-            <div className="text-emerald-700 font-medium flex items-center gap-1">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              <span>Compliant</span>
-            </div>
-          )}
-          <span className="text-[10px] text-slate-500">Human-in-the-loop gate</span>
+          <div className="font-semibold text-slate-900 truncate" title={latestResult || ""}>
+            {humanizeStatus(stripIds(latestResult)) || "Nothing yet"}
+          </div>
+          <span className="text-[10px] text-slate-500">Nothing is booked without your OK</span>
         </div>
       </div>
 
       {/* Bottom Action Controls & Links */}
       <div className="pt-2 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3 text-xs font-semibold">
+          {advanced && (<>
           <Link
             href={`/events/${eventId}/activity`}
             className="inline-flex items-center gap-1.5 text-slate-700 hover:text-slate-950 transition"
@@ -252,10 +248,11 @@ export function AgentPanel({
             <ShieldAlert className="w-3.5 h-3.5 text-slate-600" />
             <span>Open Audit Trail</span>
           </Link>
+          </>)}
         </div>
 
         <div className="flex items-center gap-2">
-          {companionStatus?.is_connected ? (
+          {advanced && (companionStatus?.is_connected ? (
             <button
               onClick={() => setIsPairingOpen(true)}
               className="inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm hover:bg-emerald-100 transition"
@@ -275,8 +272,9 @@ export function AgentPanel({
               <Laptop className="w-3.5 h-3.5 text-amber-700" />
               <span>Pair Desktop Browser</span>
             </button>
-          )}
+          ))}
 
+          {advanced && (
           <Link
             href={`/browser-runtime?eventId=${eventId}`}
             className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-white border border-slate-700 shadow-sm transition-all"
@@ -285,6 +283,7 @@ export function AgentPanel({
             <Globe className="w-3.5 h-3.5 text-indigo-400" />
             <span>Browser Autonomous Agent</span>
           </Link>
+          )}
 
           {showRunning ? (
             <div
@@ -292,18 +291,13 @@ export function AgentPanel({
               className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-sm"
             >
               <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" />
-              <span>{runningLabel || (starting || storeStarting ? "Starting agent run…" : "Agent run in progress")}</span>
+              <span>{runningLabel || (starting || storeStarting ? "Starting…" : "Finding vendors for you…")}</span>
             </div>
-          ) : showWaiting ? (
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 shadow-sm">
-              <CheckCircle2 className="w-3.5 h-3.5 text-amber-600" />
-              <span>{agentMessage || "Recommendations Ready • Select Preferred Options"}</span>
-            </div>
-          ) : showFailed ? (
+          ) : showWaiting ? null : showFailed ? (
             <div className="inline-flex items-center gap-2">
               <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-200 shadow-sm">
                 <AlertCircle className="w-3.5 h-3.5 text-rose-600" />
-                <span>{runView?.error || agentMessage || "EVENTRA encountered an issue."}</span>
+                <span>{runView?.error || agentMessage || "Something went wrong. Please try again."}</span>
               </div>
               <button
                 onClick={handleStartOperations}
@@ -320,7 +314,7 @@ export function AgentPanel({
               className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold bg-[#D6003C] hover:bg-[#b50033] text-white shadow-sm transition-all disabled:opacity-50"
             >
               <Zap className="w-3.5 h-3.5 fill-white" />
-              <span>{isLive ? "Dispatch Autonomous Sourcing" : "Start Autonomous Operations"}</span>
+              <span>{isLive ? "Find more vendors" : "Find vendors for me"}</span>
             </button>
           )}
         </div>

@@ -21,6 +21,7 @@ import { listNegotiations, NegotiationSummary } from "@/lib/api/negotiations";
 import { getEvent } from "@/lib/api/events";
 import type { EventResponse } from "@/types/api";
 import { EventShell } from "@/components/v2/EventShell";
+import { PageHeader, EmptyState, CueChip } from "@/components/ds";
 
 export default function NegotiationsListPage() {
   const params = useParams();
@@ -57,154 +58,122 @@ export default function NegotiationsListPage() {
 
   return (
     <EventShell event={eventData} eventId={eventId} currentStage="READY">
-      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-white/10 pb-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse mr-1.5" />
-                Autonomous Engine
-              </span>
-            </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight mt-1">
-              Live Negotiations
-            </h1>
-            <p className="text-sm text-zinc-400">
-              Real-time autonomous vendor price negotiations with budget cap guards & manual takeover.
-            </p>
-          </div>
-          <button
-            onClick={() => loadData()}
-            className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/10 transition-colors"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-        </div>
+      <div className="mx-auto max-w-5xl space-y-5">
+        <PageHeader
+          eyebrow={
+            <span className="flex items-center gap-2">
+              Engage <span className="text-ink-300">/</span> Negotiations
+            </span>
+          }
+          title="Live negotiations"
+          description="The agent bargains with vendors on WhatsApp and by phone, never above your cap. Open one to watch it live or take over."
+          actions={
+            <button onClick={() => loadData()} className="btn-secondary">
+              <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          }
+        />
 
-        {/* Error message */}
         {error && (
-          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
-            {error}
-          </div>
+          <div className="rounded-xl border border-cue-200 bg-cue-50 px-4 py-3 text-[13px] text-cue-800">{error}</div>
         )}
 
-        {/* Negotiations List */}
         {loading && negotiations.length === 0 ? (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {[1, 2, 3].map((n) => (
-              <div
-                key={n}
-                className="h-28 rounded-2xl bg-white/5 animate-pulse border border-white/5"
-              />
+              <div key={n} className="workspace-shimmer h-24 rounded-xl" />
             ))}
           </div>
         ) : negotiations.length === 0 ? (
-          <div className="text-center py-16 px-4 rounded-2xl bg-white/[0.02] border border-white/5">
-            <MessageSquare className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
-            <h3 className="text-base font-semibold text-white">No Active Negotiations</h3>
-            <p className="text-sm text-zinc-400 mt-1 max-w-sm mx-auto">
-              When vendors are shortlisted or engaged from the procurement pipeline, active negotiations will appear here in real time.
-            </p>
-            <Link
-              href={`/events/${eventId}/procurement`}
-              className="inline-flex items-center gap-2 mt-4 px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl transition-colors shadow-lg shadow-indigo-500/20"
-            >
-              Go to Procurement Pipeline
-            </Link>
-          </div>
+          <EmptyState
+            icon={<MessageSquare className="h-5 w-5" />}
+            title="No negotiations running"
+            description="When the agent engages a shortlisted vendor, the negotiation appears here in real time."
+            action={
+              <Link href={`/events/${eventId}/procurement`} className="btn-primary">
+                Go to procurement
+              </Link>
+            }
+          />
         ) : (
-          <div className="grid gap-3 sm:grid-cols-1">
+          <ul className="space-y-2.5">
             {negotiations.map((neg) => {
               const isHuman = neg.control === "HUMAN";
-              const isAwaitingApproval =
-                neg.status === "AWAITING_APPROVAL" || Boolean(neg.approval_id);
+              const isAwaitingApproval = neg.status === "AWAITING_APPROVAL" || Boolean(neg.approval_id);
+              const capUse =
+                neg.quoted_amount != null && neg.max_approved_amount
+                  ? Math.min(130, (neg.quoted_amount / neg.max_approved_amount) * 100)
+                  : null;
+              const over = capUse != null && capUse > 100;
 
               return (
-                <Link
-                  key={neg.assignment_id}
-                  href={`/events/${eventId}/negotiations/${neg.assignment_id}`}
-                  className="group relative block p-5 rounded-2xl bg-gradient-to-b from-white/[0.06] to-white/[0.02] border border-white/10 hover:border-indigo-500/40 transition-all shadow-lg hover:shadow-indigo-500/5"
-                >
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-base font-semibold text-white group-hover:text-indigo-300 transition-colors">
-                          {neg.vendor_name}
-                        </h3>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-zinc-300 font-medium">
-                          {neg.category}
-                        </span>
-                        {/* Control Badge */}
-                        <span
-                          className={`text-xs px-2.5 py-0.5 rounded-full font-semibold flex items-center gap-1.5 ${
-                            isHuman
-                              ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
-                              : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
-                          }`}
-                        >
-                          {isHuman ? (
-                            <>
-                              <User className="w-3 h-3" />
-                              MANUAL (YOU)
-                            </>
-                          ) : (
-                            <>
-                              <Bot className="w-3 h-3" />
-                              AUTONOMOUS AGENT
-                            </>
-                          )}
-                        </span>
-                        {/* Status Badge */}
-                        <span className="text-xs px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-white/5">
-                          {neg.status}
-                        </span>
+                <li key={neg.assignment_id}>
+                  <Link
+                    href={`/events/${eventId}/negotiations/${neg.assignment_id}`}
+                    className="group surface relative flex flex-col gap-4 px-5 py-4 transition hover:border-ink-300 hover:shadow-md sm:flex-row sm:items-center"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-[15px] font-semibold text-ink-900">{neg.vendor_name}</h3>
+                        <span className="font-mono text-[10.5px] uppercase text-ink-500">{neg.category}</span>
                       </div>
-
-                      {/* Financials & Round */}
-                      <div className="flex items-center gap-4 text-xs text-zinc-400 pt-1">
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        {isHuman ? (
+                          <CueChip tone="standby">
+                            <User className="h-3 w-3" /> You&apos;re in control
+                          </CueChip>
+                        ) : (
+                          <CueChip tone="agent" pulse>
+                            <Bot className="h-3 w-3" /> Agent negotiating
+                          </CueChip>
+                        )}
+                        <CueChip tone="idle">{String(neg.status).replace(/_/g, " ").toLowerCase()}</CueChip>
                         {neg.round_number > 0 && (
-                          <span className="flex items-center gap-1 text-zinc-300 font-medium">
-                            <Clock className="w-3.5 h-3.5 text-zinc-500" />
-                            Round {neg.round_number}
-                          </span>
-                        )}
-                        {neg.quoted_amount != null && (
-                          <span>
-                            Latest Quote:{" "}
-                            <span className="font-semibold text-white">
-                              {neg.currency} {neg.quoted_amount.toLocaleString()}
-                            </span>
-                          </span>
-                        )}
-                        {neg.max_approved_amount != null && (
-                          <span>
-                            Budget Cap:{" "}
-                            <span className="font-semibold text-emerald-400">
-                              {neg.currency} {neg.max_approved_amount.toLocaleString()}
-                            </span>
-                          </span>
+                          <span className="font-mono text-[11px] text-ink-500">round {neg.round_number}</span>
                         )}
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-3 self-end sm:self-center">
-                      {isAwaitingApproval && (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/20">
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          Ready for Approval
-                        </span>
-                      )}
-                      <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center text-zinc-400 group-hover:bg-indigo-600 group-hover:text-white transition-all">
-                        <ArrowRight className="w-4 h-4" />
+                    <div className="flex w-full items-center gap-5 sm:w-auto">
+                      <div className="min-w-[180px] flex-1 sm:flex-none">
+                        <div className="flex items-baseline justify-between gap-3">
+                          <span className="font-mono text-[9.5px] uppercase tracking-label text-ink-400">Quote vs cap</span>
+                          <span className={`font-display text-[17px] font-bold tabular-nums ${over ? "text-cue-700" : "text-ink-900"}`} style={{ fontStretch: "90%" }}>
+                            {neg.quoted_amount != null ? `${neg.currency} ${neg.quoted_amount.toLocaleString()}` : "—"}
+                          </span>
+                        </div>
+                        <div className="relative mt-1.5 h-1.5 rounded-full bg-ink-200/70">
+                          {capUse != null && (
+                            <div
+                              className={`h-full rounded-full ${over ? "bg-cue-600" : "bg-go-500"}`}
+                              style={{ width: `${Math.min(100, (capUse / 130) * 100)}%` }}
+                            />
+                          )}
+                          {neg.max_approved_amount != null && (
+                            <span className="absolute -top-1 h-3.5 w-[2px] bg-ink-900" style={{ left: `${(100 / 130) * 100}%` }} />
+                          )}
+                        </div>
+                        <div className="mt-1 text-right font-mono text-[10.5px] text-ink-400">
+                          {neg.max_approved_amount != null
+                            ? `cap ${neg.currency} ${neg.max_approved_amount.toLocaleString()}`
+                            : "no cap set"}
+                        </div>
                       </div>
+                      {isAwaitingApproval && (
+                        <CueChip tone="go" className="hidden md:inline-flex">
+                          <CheckCircle2 className="h-3 w-3" /> Ready to approve
+                        </CueChip>
+                      )}
+                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-ink-200 text-ink-400 transition group-hover:border-ink-900 group-hover:bg-ink-900 group-hover:text-ink-50">
+                        <ArrowRight className="h-4 w-4" />
+                      </span>
                     </div>
-                  </div>
-                </Link>
+                  </Link>
+                </li>
               );
             })}
-          </div>
+          </ul>
         )}
       </div>
     </EventShell>

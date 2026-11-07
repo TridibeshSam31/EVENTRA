@@ -265,6 +265,15 @@ class TwilioVoiceGateway:
             if "session_id" in session.custom_parameters:
                 session.session_id = session.custom_parameters["session_id"]
 
+            # Vendor outreach streams carry a token minted when the call was placed; a stream
+            # claiming an outreach attempt without a valid token is not from our call.
+            if session.custom_parameters.get("attempt_id"):
+                from app.integrations.communication.twilio import verify_stream_token
+                if not verify_stream_token(session.custom_parameters.get("session_id"), session.custom_parameters.get("stream_token")):
+                    logger.warning("TwilioVoiceGateway: Rejected media stream with an invalid stream token.")
+                    session.state = TwilioSessionState.FAILED
+                    return
+
             media_fmt = start_data.get("mediaFormat", {})
             session.media_format = TwilioMediaFormat(
                 encoding=media_fmt.get("encoding", "audio/x-mulaw"),

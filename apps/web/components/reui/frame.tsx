@@ -107,7 +107,7 @@ function FramePanel({
   return (
     <div
       className={cn(
-        "relative overflow-hidden rounded-(--frame-panel-radius) border border-(--frame-panel-border-color) bg-(--frame-panel-bg) bg-clip-padding shadow-xs",
+        "relative overflow-hidden rounded-(--frame-panel-radius) border border-(--frame-panel-border-color) bg-(--frame-panel-bg) bg-clip-padding shadow-sm",
         // `fit` sizes the panel to its content; otherwise it grows to fill the frame.
         !fit && "grow",
         "before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--frame-panel-radius)-1px)] before:shadow-black/5",

@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { describeFacts, humanizeCode, stripIds } from "@/lib/humanize";
 import {
   Sparkles,
   CheckCircle2,
@@ -42,9 +43,9 @@ export function ResponseFactsCard({
 }: ResponseFactsCardProps) {
   if (!facts || Object.keys(facts).length === 0) {
     return (
-      <div className={`p-4 rounded-xl border border-slate-200 bg-white text-center text-xs text-slate-400 ${className}`}>
+      <div className={`p-4 rounded-xl border border-slate-200 bg-[#FDFCFA] text-center text-xs text-slate-400 ${className}`}>
         <HelpCircle className="w-5 h-5 mx-auto mb-1 text-slate-300" />
-        <p className="font-semibold text-slate-600">No Structured Response Facts</p>
+        <p className="font-semibold text-slate-600">No terms extracted yet</p>
         <p className="text-[11px] text-slate-400 mt-0.5">
           Provider has not sent an inbound reply with interpretable terms yet.
         </p>
@@ -57,6 +58,12 @@ export function ResponseFactsCard({
 
   const isLowConfidence = confidencePct != null && confidencePct < 70;
 
+  // One plain sentence of what the agent understood (only from the extracted facts).
+  const summary = describeFacts(
+    { available: facts.available, quoted_price: facts.quoted_amount, currency: facts.currency },
+    facts.currency || "INR"
+  );
+
   // Verification status normalized
   const normVerification = verificationStatus
     ? verificationStatus.toUpperCase().trim()
@@ -64,21 +71,21 @@ export function ResponseFactsCard({
 
   return (
     <div
-      className={`p-4 rounded-xl border border-slate-200 bg-white shadow-xs space-y-3 ${className}`}
+      className={`relative overflow-hidden p-4 rounded-xl border border-agent-200 bg-[#FDFCFA] shadow-sm space-y-3 before:absolute before:inset-x-0 before:top-0 before:h-[3px] before:bg-agent-500 ${className}`}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-2.5">
         <div>
           <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-              <Sparkles className="w-3 h-3 text-[#D6003C]" />
-              Agent Extracted Facts
+            <span className="text-[10px] font-semibold uppercase tracking-label font-mono text-agent-700 flex items-center gap-1">
+              ✦ Agent extracted facts
             </span>
             {provenance && <ProvenanceBadge source={provenance} size="sm" />}
           </div>
-          <h4 className="text-xs font-bold text-slate-900 mt-0.5">
-            {vendorName || "Provider"} Response Terms
+          <h4 className="text-[13.5px] font-semibold text-ink-900 mt-0.5">
+            What {vendorName ? stripIds(vendorName) : "the provider"} said
           </h4>
+          {summary && <p className="mt-0.5 text-[12px] text-agent-900">{summary}</p>}
         </div>
 
         {/* Verification and Confidence Badges */}
@@ -96,7 +103,7 @@ export function ResponseFactsCard({
             </span>
           ) : (
             <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-50 text-slate-500 border border-slate-200">
-              Confidence UNKNOWN
+              Confidence not given
             </span>
           )}
 
@@ -110,7 +117,7 @@ export function ResponseFactsCard({
                   : "bg-slate-50 text-slate-600 border-slate-200"
               }`}
             >
-              {normVerification}
+              {humanizeCode(normVerification)}
             </span>
           ) : (
             <span className="text-[9px] font-medium text-slate-400">
@@ -140,7 +147,7 @@ export function ResponseFactsCard({
                 <span className="font-bold text-rose-700 text-xs">Unavailable</span>
               </>
             ) : (
-              <span className="font-bold text-slate-500 text-xs">UNKNOWN</span>
+              <span className="text-xs italic text-slate-400">Not mentioned</span>
             )}
           </div>
         </div>
@@ -149,7 +156,7 @@ export function ResponseFactsCard({
         <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/80">
           <span className="text-[10px] text-slate-400 uppercase font-semibold flex items-center gap-1">
             <DollarSign className="w-3 h-3" />
-            Quoted Quote
+            Quote
           </span>
           <div className="mt-1">
             {facts.quoted_amount != null ? (
@@ -158,7 +165,7 @@ export function ResponseFactsCard({
                 {Number(facts.quoted_amount).toLocaleString()}
               </span>
             ) : (
-              <span className="font-bold text-slate-500 text-xs">UNKNOWN</span>
+              <span className="text-xs italic text-slate-400">Not mentioned</span>
             )}
           </div>
         </div>
@@ -172,9 +179,9 @@ export function ResponseFactsCard({
             {advanceRequired === true ? (
               <span className="font-semibold text-amber-700 text-xs">Required</span>
             ) : advanceRequired === false ? (
-              <span className="font-semibold text-emerald-700 text-xs">No Advance</span>
+              <span className="font-semibold text-emerald-700 text-xs">Not required</span>
             ) : (
-              <span className="font-semibold text-slate-500 text-xs">UNKNOWN</span>
+              <span className="text-xs italic text-slate-400">Not mentioned</span>
             )}
           </div>
         </div>
@@ -188,7 +195,7 @@ export function ResponseFactsCard({
           <div className="mt-1 font-mono text-xs font-semibold text-slate-700">
             {coverageStart || coverageEnd
               ? `${coverageStart || "TBD"} – ${coverageEnd || "TBD"}`
-              : "UNKNOWN"}
+              : <span className="font-sans italic font-normal text-slate-400">Not mentioned</span>}
           </div>
         </div>
       </div>
@@ -198,7 +205,7 @@ export function ResponseFactsCard({
         <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200/80 text-xs space-y-1">
           <span className="text-[10px] text-slate-400 uppercase font-semibold flex items-center gap-1">
             <FileText className="w-3 h-3" />
-            Extracted Conditions
+            Conditions they mentioned
           </span>
           <p className="text-[11px] text-slate-700 font-medium leading-relaxed">
             "{facts.notes}"
@@ -206,20 +213,21 @@ export function ResponseFactsCard({
         </div>
       ) : (
         <div className="text-[10px] text-slate-400 px-1">
-          Conditions / Notes: UNKNOWN
+          No special conditions mentioned.
         </div>
       )}
 
       {/* Field Sources / Provenance */}
       {facts.field_sources && Object.keys(facts.field_sources).length > 0 && (
         <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
-          <span className="font-medium text-slate-400">Sources:</span>
+          <span className="font-medium text-slate-400">How each fact was read:</span>
           {Object.entries(facts.field_sources).map(([field, src]) => (
             <span
               key={field}
-              className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600 font-mono text-[9px]"
+              className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 text-slate-600 text-[10px]"
+              title={`${field}: ${String(src)}`}
             >
-              {field}: {src}
+              {humanizeCode(field.replace(/_amount$/, ""))} · {sourceMethod(String(src))}
             </span>
           ))}
         </div>
@@ -232,4 +240,13 @@ export function ResponseFactsCard({
       )}
     </div>
   );
+}
+
+/** Extraction method codes ("REGEX_PARSED", "LLM_EXTRACTED") in words. */
+function sourceMethod(code: string): string {
+  const c = code.toUpperCase();
+  if (c.includes("REGEX") || c.includes("RULE")) return "matched in text";
+  if (c.includes("LLM") || c.includes("AGENT") || c.includes("MODEL")) return "read by agent";
+  if (c.includes("HUMAN") || c.includes("MANUAL")) return "entered by you";
+  return humanizeCode(code).toLowerCase();
 }

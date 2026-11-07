@@ -106,20 +106,17 @@ export function OperationalTrace({
   const steps = getTraceSteps(activeTrace);
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
+    <div className={`surface space-y-4 p-5 ${className}`}>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 gap-3">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200">
-            <Layers className="w-4 h-4 text-[#D6003C]" />
+        <div className="flex items-start gap-3">
+          <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-ink-900 text-ink-50">
+            <Layers className="h-4 w-4" />
           </div>
           <div>
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-800">
-              Operational Decision Trace
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              Authoritative backend step-by-step verification history
-            </p>
+            <div className="eyebrow">Decision trace</div>
+            <h3 className="mt-0.5 text-[14px] font-semibold text-ink-900">From problem to verified fix, step by step</h3>
+            <p className="text-[12px] text-ink-500">Every step below is recorded by the backend. Steps that never happened stay empty.</p>
           </div>
         </div>
 
@@ -127,7 +124,7 @@ export function OperationalTrace({
           <select
             value={selectedTraceId || ""}
             onChange={(e) => setSelectedTraceId(e.target.value)}
-            className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 bg-slate-50 font-mono text-slate-700"
+            className="rounded-lg border border-ink-200 bg-ink-50 px-2.5 py-1.5 font-mono text-[11.5px] text-ink-700 focus:border-ink-400 focus:outline-none"
           >
             {traces.map((t) => (
               <option key={t.trace_id} value={t.trace_id}>
@@ -139,19 +136,19 @@ export function OperationalTrace({
       </div>
 
       {loading ? (
-        <div className="py-8 text-center text-xs text-slate-400">
-          Loading operational traces from backend...
+        <div className="py-8 text-center font-mono text-[11.5px] uppercase tracking-label text-ink-400">
+          Loading traces…
         </div>
       ) : traces.length === 0 ? (
         <div className="py-8 text-center text-xs text-slate-400 space-y-1">
-          <p className="font-semibold text-slate-600">No Decision Traces Recorded</p>
-          <p className="text-[11px]">
-            No verified operational decision traces have been recorded by the backend for this event yet.
+          <p className="text-[13.5px] font-semibold text-ink-700">No decisions recorded yet</p>
+          <p className="text-[12px] text-ink-500">
+            When a problem is handled, each step from detection to verification will show up here.
           </p>
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="flex items-center justify-between text-xs text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-200 font-mono">
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-ink-200 bg-ink-50 px-3 py-2 font-mono text-[11px] text-ink-500">
             <span>Trace ID: {activeTrace?.trace_id}</span>
             <span>Verification: {activeTrace?.verification_id || "NOT RECORDED"}</span>
             <span>{activeTrace?.timestamp ? new Date(activeTrace.timestamp).toLocaleString() : ""}</span>
@@ -164,15 +161,21 @@ export function OperationalTrace({
               const isExpanded = expandedStep === step.key;
 
               return (
-                <div
+                <button
+                  type="button"
                   key={step.key}
+                  disabled={!isRecorded}
+                  aria-expanded={isRecorded ? isExpanded : undefined}
                   onClick={() => isRecorded && setExpandedStep(isExpanded ? null : step.key)}
-                  className={`flex flex-col justify-between p-3 rounded-xl border transition-all ${
+                  className={`relative flex flex-col justify-between overflow-hidden rounded-lg border p-3 text-left transition-all ${
                     isRecorded
-                      ? "border-emerald-200 bg-emerald-50/30 hover:border-emerald-300 cursor-pointer"
-                      : "border-slate-200 bg-slate-50/50 opacity-70"
+                      ? isExpanded
+                        ? "border-ink-900 bg-[#FDFCFA] shadow-md"
+                        : "border-ink-200 bg-[#FDFCFA] hover:border-ink-300"
+                      : "cursor-default border-dashed border-ink-300 bg-transparent"
                   }`}
                 >
+                  <span className={`absolute inset-x-0 bottom-0 h-[3px] ${isRecorded ? "bg-go-500" : "bg-transparent"}`} aria-hidden />
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-mono font-bold text-slate-400">
@@ -184,18 +187,18 @@ export function OperationalTrace({
                         <Clock className="w-3.5 h-3.5 text-slate-400" />
                       )}
                     </div>
-                    <div className="text-[11px] font-semibold text-slate-800 uppercase tracking-tight leading-tight">
+                    <div className={`font-display text-[13px] font-bold uppercase leading-tight tracking-[0.01em] ${isRecorded ? "text-ink-900" : "text-ink-400"}`} style={{ fontStretch: "88%" }}>
                       {step.name}
                     </div>
                   </div>
 
-                  <div className="mt-3 pt-2 border-t border-slate-200/60 flex items-center justify-between">
+                  <div className="mt-3 flex items-center justify-between border-t border-dashed border-ink-200 pt-2">
                     <span
-                      className={`text-[10px] font-bold uppercase tracking-wider ${
-                        isRecorded ? "text-emerald-700" : "text-slate-400"
+                      className={`font-mono text-[9.5px] font-semibold uppercase tracking-label ${
+                        isRecorded ? "text-go-700" : "text-ink-400"
                       }`}
                     >
-                      {isRecorded ? "CONFIRMED" : "NOT RECORDED"}
+                      {isRecorded ? "Recorded" : "Not recorded"}
                     </span>
                     {isRecorded && (
                       <span className="text-[10px] text-slate-400">
@@ -203,16 +206,16 @@ export function OperationalTrace({
                       </span>
                     )}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
 
           {/* Expanded Step Evidence View */}
           {expandedStep && (
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+            <div className="space-y-2 rounded-xl border border-ink-200 bg-ink-50 p-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                <span className="eyebrow text-ink-700">
                   Step Evidence: {expandedStep.toUpperCase()}
                 </span>
                 <button
@@ -222,7 +225,7 @@ export function OperationalTrace({
                   Close Details
                 </button>
               </div>
-              <pre className="text-[11px] font-mono text-slate-700 bg-white p-3 rounded-lg border border-slate-200 overflow-x-auto max-h-48">
+              <pre className="max-h-48 overflow-x-auto rounded-lg bg-ink-950 p-3 font-mono text-[11px] leading-relaxed text-ink-200">
                 {JSON.stringify(activeTrace?.[expandedStep as keyof DecisionTraceResponse], null, 2)}
               </pre>
             </div>

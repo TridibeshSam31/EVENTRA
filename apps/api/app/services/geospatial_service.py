@@ -170,6 +170,9 @@ class GeospatialDiscoveryService:
                     "status": "ACTIVE",
                     "source": "LIVE_OPENSTREETMAP_NETWORK",
                     "raw_osm_tag": f"{osm_key}={osm_val}",
+                    # capacity / rate / amenities / type are inferred from the place name & OSM tag,
+                    # not reported by the venue — the UI must label them "estimated".
+                    "estimated_fields": ["capacity", "hourly_rate", "amenities", "venue_type"],
                 }
 
                 seen_names.add(clean_name.lower())
@@ -288,16 +291,19 @@ class GeospatialDiscoveryService:
                     "longitude": round(coords[0], 6),
                     "phone": props.get("phone"),
                     "email": None,
-                    "website": props.get("website") or f"https://www.google.com/search?q={urllib.parse.quote(clean_name + ' ' + city)}",
+                    # Only a real website counts; a search URL is not evidence of a website.
+                    "website": props.get("website") or None,
+                    "search_url": f"https://www.google.com/search?q={urllib.parse.quote(clean_name + ' ' + city)}",
                     "rating": None,
                     "review_count": None,
                     "maps_url": f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(clean_name + ' ' + city)}",
-                    "description": props.get("description") or f"Verified physical business in {city}.",
+                    "description": props.get("description") or None,
                     "base_cost": None,
                     "capabilities": [],
                     "classification_confidence": 0.0,
                     "classification_reason": "Live OpenStreetMap physical entity; pending classifier evaluation.",
                     "raw_data": props,
+                    "estimated_fields": [],
                 }
 
                 seen.add(clean_name.lower())
@@ -363,6 +369,7 @@ class GeospatialDiscoveryService:
                         "amenities": amenities,
                         "status": "ACTIVE",
                         "source": "LIVE_OPENSTREETMAP_NETWORK",
+                        "estimated_fields": ["capacity", "hourly_rate", "amenities", "venue_type"],
                     })
         except Exception as exc:
             logger.warning(f"Nominatim fallback error: {exc}")

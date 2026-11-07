@@ -14,6 +14,24 @@ from app.integrations.base import ProviderCommunicationProvider, IntegrationResu
 from app.integrations.communication.mock import MockCommunicationProvider
 
 
+class OpenWAError(Exception):
+    """A sanitized OpenWA failure with a stable code for the UI and tests."""
+
+    def __init__(self, code: str, reason: str):
+        super().__init__(reason)
+        self.code = code
+        self.reason = reason
+
+
+def _strict_failure(code: str, reason: str) -> IntegrationResult[Dict[str, Any]]:
+    return IntegrationResult(
+        data={"error_code": code, "channel": "WHATSAPP"},
+        source=IntegrationSource.REAL,
+        success=False,
+        error=reason,
+    )
+
+
 class OpenWACommunicationAdapter(ProviderCommunicationProvider):
     """OpenWA integration adapter supporting outbound messages, inbound webhooks, and session health."""
 
@@ -341,6 +359,129 @@ class OpenWACommunicationAdapter(ProviderCommunicationProvider):
                 return {"session_id": self.session_id, "status": f"HTTP_{resp.status_code}", "connected": False}
         except Exception as err:
             return {"session_id": self.session_id, "status": "UNREACHABLE", "connected": False, "error": str(err)}
+
+    # -----------------------------------------------------------------------
+    # Strict operations for approved vendor outreach. Unlike send_message these
+    # never fall back to the mock provider: a failure is reported as a failure.
+    # -----------------------------------------------------------------------
+
+    def _easy_api_call(self, method: str, args: Dict[str, Any], timeout: Optional[float] = None) -> Any:
+        """Calls an open-wa EASY API method (POST /<method> with {args}) and returns its `response`.
+
+        Raises OpenWAError with a sanitized reason on transport errors, HTTP errors or
+        an explicit `success: false`.
+        """
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["api_key"] = self.api_key
+        try:
+            with httpx.Client(timeout=httpx.Timeout(timeout or self.timeout_seconds, connect=3.0)) as client:
+                resp = client.post(f"{self.base_url}/{method}", headers=headers, json={"args": args})
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            raise OpenWAError("OPENWA_UNREACHABLE", "The OpenWA gateway is not reachable. Is the openwa container running?")
+        except httpx.TimeoutException:
+            raise OpenWAError("OPENWA_TIMEOUT", f"OpenWA did not respond to {method} within the timeout.")
+        if resp.status_code in (401, 403):
+            raise OpenWAError("OPENWA_AUTH", "OpenWA rejected the API key (check OPENWA_API_KEY).")
+        if resp.status_code >= 400:
+            raise OpenWAError("OPENWA_HTTP_ERROR", f"OpenWA {method} returned HTTP {resp.status_code}.")
+        try:
+            body = resp.json()
+        except Exception:
+            raise OpenWAError("OPENWA_BAD_RESPONSE", f"OpenWA {method} returned a non-JSON response.")
+        if isinstance(body, dict) and "success" in body:
+            if not body.get("success"):
+                raise OpenWAError("OPENWA_REJECTED", f"OpenWA {method} failed: {str(body.get('response') or body.get('error'))[:200]}")
+            return body.get("response")
+        return body
+
+    def get_connection_state(self) -> str:
+        """Returns the WhatsApp session state reported by OpenWA (e.g. CONNECTED, OPENING, UNPAIRED)."""
+        return str(self._easy_api_call("getConnectionState", {}, timeout=5) or "UNKNOWN").upper()
+
+    def check_number(self, chat_id: str) -> Dict[str, Any]:
+        """Asks WhatsApp whether the number has an account that can receive messages."""
+        result = self._easy_api_call("checkNumberStatus", {"contactId": chat_id}, timeout=15)
+        return result if isinstance(result, dict) else {}
+
+    def send_text_strict(self, to_e164: str, message: str) -> IntegrationResult[Dict[str, Any]]:
+        """Sends a WhatsApp text after verifying the session and recipient.
+
+        Returns success only when OpenWA hands back a message id, which is the only
+        evidence it gives that WhatsApp accepted the message (ack=SENT comes later).
+        """
+        start_time = time.time()
+        if not self.is_configured:
+            return _strict_failure(
+                "OPENWA_NOT_CONFIGURED",
+                "WhatsApp is not enabled. Set OPENWA_ENABLED=true and OPENWA_SESSION_ID in .env and restart the API.",
+            )
+        chat_id = self._normalize_chat_id(to_e164)
+        try:
+            state = self.get_connection_state()
+            if state != "CONNECTED":
+                return _strict_failure(
+                    "OPENWA_SESSION_DISCONNECTED",
+                    f"The WhatsApp session is not connected (state: {state}). Re-link the device by scanning the OpenWA QR code.",
+                )
+            number = self.check_number(chat_id)
+            if number and (number.get("numberExists") is False or number.get("canReceiveMessage") is False):
+                return _strict_failure("WHATSAPP_INVALID_NUMBER", "This number is not registered on WhatsApp.")
+            response = self._easy_api_call("sendText", {"to": chat_id, "content": message})
+        except OpenWAError as err:
+            return _strict_failure(err.code, err.reason)
+
+        message_id = response if isinstance(response, str) and response not in ("", "false") else None
+        if isinstance(response, dict):
+            message_id = response.get("id") or response.get("_serialized")
+        if not message_id:
+            return _strict_failure("OPENWA_NOT_ACCEPTED", "OpenWA did not return a message id; the message was not sent.")
+        return IntegrationResult(
+            data={"message_id": str(message_id), "chat_id": chat_id, "channel": "WHATSAPP"},
+            source=IntegrationSource.REAL,
+            success=True,
+            latency_ms=round((time.time() - start_time) * 1000, 2),
+        )
+
+    def get_message_ack(self, message_id: str) -> Optional[int]:
+        """Returns the WhatsApp ack level of a sent message (-1 error, 0 pending, 1 sent, 2 delivered, 3 read, 4 played)."""
+        message = self._easy_api_call("getMessageById", {"messageId": message_id}, timeout=8)
+        if isinstance(message, dict) and message.get("ack") is not None:
+            try:
+                return int(message["ack"])
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    def get_replies_after(self, message_id: str) -> List[Dict[str, Any]]:
+        """Returns the contact's text messages in the chat of `message_id`, sent at or after it.
+
+        The chat is looked up from the sent message itself, because WhatsApp may file it
+        under a @lid id instead of the phone-number id.
+        """
+        sent = self._easy_api_call("getMessageById", {"messageId": message_id}, timeout=10)
+        if not isinstance(sent, dict):
+            return []
+        chat_id = sent.get("chatId")
+        if isinstance(chat_id, dict):
+            chat_id = chat_id.get("_serialized")
+        if not chat_id:
+            return []
+        sent_at = sent.get("t") or 0
+        messages = self._easy_api_call(
+            "getAllMessagesInChat", {"chatId": chat_id, "includeMe": True, "includeNotifications": False}, timeout=20
+        )
+        replies = []
+        for m in messages if isinstance(messages, list) else []:
+            if not isinstance(m, dict) or m.get("fromMe") or not m.get("body"):
+                continue
+            if m.get("type") not in ("chat", None) or (m.get("t") or 0) < sent_at:
+                continue
+            mid = m.get("id")
+            if isinstance(mid, dict):
+                mid = mid.get("_serialized")
+            replies.append({"id": str(mid), "text": str(m["body"])[:2000], "t": m.get("t")})
+        return replies
 
     def verify_webhook_token(self, mode: str, token: str) -> bool:
         """Validates webhook challenge token for legacy Meta or custom integrations."""

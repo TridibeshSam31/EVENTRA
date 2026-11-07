@@ -146,16 +146,16 @@ export function AgentStatusCard({
   };
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
+    <div className={`bg-[#FDFCFA] border border-ink-200 rounded-xl p-5 shadow-sm space-y-4 ${className}`}>
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 rounded-lg bg-slate-50 text-[#D6003C] border border-slate-200">
-            <Bot className="w-5 h-5 text-[#D6003C]" />
+          <div className="p-2 rounded-lg bg-slate-50 text-cue-600 border border-slate-200">
+            <Bot className="w-5 h-5 text-cue-600" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+              <h3 className="text-[13.5px] font-semibold text-ink-900">
                 Event Operations Agent
               </h3>
               <ProvenanceBadge provenance="AGENT" size="sm" />
@@ -193,7 +193,7 @@ export function AgentStatusCard({
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
         {/* Box 1: Latest Operation */}
         <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400 block">
             Latest Operation
           </span>
           <div className="font-semibold text-slate-900 truncate">
@@ -206,7 +206,7 @@ export function AgentStatusCard({
 
         {/* Box 2: Governance / Approval Gating */}
         <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400 block">
             Governance Gate
           </span>
           {pendingApprovalsCount > 0 ? (
@@ -217,7 +217,7 @@ export function AgentStatusCard({
               </span>
               <Link
                 href={`/events/${eventId}/approvals`}
-                className="text-[11px] font-semibold text-[#D6003C] hover:underline flex items-center gap-0.5"
+                className="text-[11px] font-semibold text-cue-600 hover:underline flex items-center gap-0.5"
               >
                 <span>Review</span>
                 <ExternalLink className="w-3 h-3" />
@@ -236,7 +236,7 @@ export function AgentStatusCard({
 
         {/* Box 3: Tool Execution */}
         <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/50 space-y-1">
-          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block">
+          <span className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400 block">
             Tool Telemetry
           </span>
           <div className="font-semibold text-slate-900 flex items-center gap-1.5">
@@ -255,7 +255,7 @@ export function AgentStatusCard({
 
       {/* Operator Directive Form */}
       <form onSubmit={handleSendDirective} className="pt-2">
-        <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1.5">
+        <label className="font-mono text-[10px] font-medium uppercase tracking-label text-ink-400 block mb-1.5">
           Dispatch Operator Directive
         </label>
         <div className="flex items-center gap-2">
@@ -270,7 +270,7 @@ export function AgentStatusCard({
           <button
             type="submit"
             disabled={!directive.trim() || submitting}
-            className="px-4 py-2 bg-[#D6003C] hover:bg-[#b50033] text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
+            className="px-4 py-2 bg-cue-600 hover:bg-cue-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50"
           >
             {submitting ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />

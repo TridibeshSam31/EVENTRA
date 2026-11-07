@@ -48,7 +48,7 @@ export function NegotiationRoundStepper({
 }: NegotiationRoundStepperProps) {
   if (!rounds || rounds.length === 0) {
     return (
-      <div className={`p-6 rounded-xl border border-slate-200 bg-white text-center text-xs text-slate-400 ${className}`}>
+      <div className={`p-6 rounded-xl border border-slate-200 bg-[#FDFCFA] text-center text-xs text-slate-400 ${className}`}>
         <Clock className="w-6 h-6 mx-auto mb-2 text-slate-300" />
         <p className="font-semibold text-slate-600">Negotiation has not started</p>
         <p className="text-[11px] text-slate-400 mt-1 max-w-sm mx-auto">
@@ -91,7 +91,7 @@ export function NegotiationRoundStepper({
             <div key={idx} className="relative">
               {/* Timeline Node Dot */}
               <div
-                className={`absolute -left-6 top-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center bg-white ${
+                className={`absolute -left-6 top-1.5 w-5 h-5 rounded-full border-2 flex items-center justify-center bg-[#FDFCFA] ${
                   isLast
                     ? "border-[#D6003C] text-[#D6003C]"
                     : "border-slate-300 text-slate-400"
@@ -101,11 +101,11 @@ export function NegotiationRoundStepper({
               </div>
 
               {/* Card Surface */}
-              <div className="p-4 rounded-xl border border-slate-200 bg-white shadow-xs space-y-2">
+              <div className="p-4 rounded-xl border border-slate-200 bg-[#FDFCFA] shadow-sm space-y-2">
                 {/* Round Header */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                    <span className="text-[10px] font-medium uppercase tracking-label font-mono text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
                       Round {round.round_number}
                     </span>
 

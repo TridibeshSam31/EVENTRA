@@ -103,13 +103,13 @@ export function LiveTaskMatrix({
   };
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden ${className}`}>
+    <div className={`surface overflow-hidden ${className}`}>
       {/* Header */}
       <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-50/50">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
-              <Zap className="w-3 h-3 text-[#D6003C]" />
+            <span className="eyebrow bg-[#FDFCFA] px-2 py-0.5 rounded border border-slate-200 flex items-center gap-1.5">
+              <Zap className="w-3 h-3 text-cue-600" />
               Live Task Matrix
             </span>
             <ProvenanceBadge source="ENGINE" size="sm" />
@@ -133,7 +133,7 @@ export function LiveTaskMatrix({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search tasks..."
-            className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-[#D6003C]"
+            className="w-full pl-8 pr-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-cue-600"
           />
         </div>
       </div>
@@ -153,8 +153,8 @@ export function LiveTaskMatrix({
             onClick={() => setFilter(tab.id as LiveFilter)}
             className={`px-2.5 py-1 rounded-md text-xs font-semibold transition ${
               filter === tab.id
-                ? "bg-slate-900 text-white shadow-xs"
-                : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                ? "bg-slate-900 text-white shadow-sm"
+                : "bg-[#FDFCFA] text-slate-600 border border-slate-200 hover:bg-slate-50"
             }`}
           >
             {tab.label}

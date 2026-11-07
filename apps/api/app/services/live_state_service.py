@@ -338,11 +338,10 @@ class LiveStateService:
             if a.negotiation_status
             in ("CONTACTED", "QUOTATION_RECEIVED", "NEGOTIATING", "COUNTER_OFFER_SENT")
         )
-        total_committed_cost = sum(
-            float(a.agreed_cost or a.quoted_amount or 0)
-            for a in assignments
-            if a.negotiation_status == "CONFIRMED" or a.status == "CONFIRMED"
-        )
+        # Single committed definition (services/budget_commitments.py):
+        # agreed cost of confirmed assignments; an unconfirmed quote is never "committed".
+        from app.services.budget_commitments import committed_from_assignments
+        total_committed_cost = float(committed_from_assignments(assignments))
 
         assignment_items = []
         for a in assignments:

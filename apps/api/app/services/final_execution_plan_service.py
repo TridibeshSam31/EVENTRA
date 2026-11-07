@@ -345,22 +345,15 @@ class FinalExecutionPlanService:
         total_budget = Decimal(str(event.total_budget or 0)).quantize(Decimal("0.01"))
         budget_totals = BudgetCalculator().calculate_totals(budget_items)
         total_estimated = budget_totals.total_estimated
-        total_committed = Decimal("0.00")
-        category_commitments: Dict[str, Decimal] = {}
-
-        for item in budget_items:
-            act = Decimal(str(item.actual_amount or 0))
-            if item.status == BudgetItemStatus.COMMITTED.value or act > 0:
-                total_committed += act
-                category_commitments[item.category] = category_commitments.get(item.category, Decimal("0.00")) + act
-
-        # Also ensure any confirmed assignments without dedicated budget items are reflected
-        for a in assignments:
-            if a.status == "CONFIRMED" and a.agreed_cost is not None:
-                cost = Decimal(str(a.agreed_cost)).quantize(Decimal("0.01"))
-                if a.category not in category_commitments:
-                    total_committed += cost
-                    category_commitments[a.category] = cost
+        # Single committed definition (services/budget_commitments.py): agreed cost of
+        # CONFIRMED assignments. Budget-item actuals / COMMITTED flags are no longer a second
+        # source of truth, so the execution plan agrees with Overview, Budget and live state.
+        from app.services.budget_commitments import (
+            committed_by_category_from_assignments,
+            committed_from_assignments,
+        )
+        total_committed = committed_from_assignments(assignments)
+        category_commitments: Dict[str, Decimal] = committed_by_category_from_assignments(assignments)
 
         total_committed = total_committed.quantize(Decimal("0.01"))
         remaining_budget = (total_budget - total_committed).quantize(Decimal("0.01"))
@@ -368,7 +361,7 @@ class FinalExecutionPlanService:
         # Compute uncommitted allocation
         uncommitted_allocation = Decimal("0.00")
         for item in budget_items:
-            if item.status != BudgetItemStatus.COMMITTED.value and item.category not in category_commitments:
+            if (item.category or "").upper() not in category_commitments:
                 uncommitted_allocation += Decimal(str(item.estimated_amount or 0))
         uncommitted_allocation = uncommitted_allocation.quantize(Decimal("0.01"))
 

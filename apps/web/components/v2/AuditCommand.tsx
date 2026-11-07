@@ -142,47 +142,50 @@ export function AuditCommand({ eventId }: AuditCommandProps) {
   return (
     <div className="space-y-6">
       {/* Governance Banner: Truthful Immutability UX */}
-      <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
-        <div className="flex items-start sm:items-center gap-3">
-          <div className="p-2 rounded-lg bg-white text-slate-800 border border-slate-200 shrink-0">
-            <Lock className="w-4 h-4 text-slate-700" />
+      <div className="surface-ink relative flex flex-col justify-between gap-4 overflow-hidden p-5 sm:flex-row sm:items-center">
+        <div className="pointer-events-none absolute inset-0 bg-dots-dark opacity-60" aria-hidden />
+        <div className="relative flex items-start gap-3.5">
+          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/[0.05]">
+            <Lock className="h-4 w-4 text-ink-200" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-slate-900">
-                Immutable Operational Audit Log
-              </h2>
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-slate-200 text-slate-700">
-                Read-Only
-              </span>
+              <span className="font-mono text-[10.5px] uppercase tracking-label text-ink-400">History log</span>
+              <span className="chip border-white/10 bg-white/5 text-ink-300">Read-only</span>
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Audit records are read-only in this interface. All entries are authoritatively recorded by EVENTRA backend services.
+            <h2
+              className="mt-1 font-display text-[24px] font-extrabold leading-tight tracking-[-0.02em] text-ink-50"
+              style={{ fontStretch: "88%" }}
+            >
+              Every recorded action, in order
+            </h2>
+            <p className="mt-1 max-w-xl text-[12.5px] text-ink-400">
+              Entries are written by EVENTRA’s backend services and can’t be edited here.
             </p>
           </div>
         </div>
 
         {/* View Mode Switcher */}
-        <div className="flex items-center gap-1 bg-white p-1 rounded-lg border border-slate-200 shrink-0 text-xs">
+        <div className="relative inline-flex shrink-0 rounded-lg border border-white/10 bg-white/[0.04] p-0.5 text-[12.5px]" role="tablist">
           <button
+            role="tab"
+            aria-selected={viewMode === "TABLE"}
             onClick={() => setViewMode("TABLE")}
-            className={`px-3 py-1 rounded font-medium transition ${
-              viewMode === "TABLE"
-                ? "bg-slate-900 text-white shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
+            className={`rounded-md px-3 py-1.5 font-semibold transition ${
+              viewMode === "TABLE" ? "bg-ink-50 text-ink-900 shadow-sm" : "text-ink-400 hover:text-ink-100"
             }`}
           >
-            Audit Ledger
+            Ledger
           </button>
           <button
+            role="tab"
+            aria-selected={viewMode === "TIMELINE"}
             onClick={() => setViewMode("TIMELINE")}
-            className={`px-3 py-1 rounded font-medium transition ${
-              viewMode === "TIMELINE"
-                ? "bg-slate-900 text-white shadow-sm"
-                : "text-slate-600 hover:text-slate-900"
+            className={`rounded-md px-3 py-1.5 font-semibold transition ${
+              viewMode === "TIMELINE" ? "bg-ink-50 text-ink-900 shadow-sm" : "text-ink-400 hover:text-ink-100"
             }`}
           >
-            Unified Timeline
+            Timeline
           </button>
         </div>
       </div>
@@ -207,11 +210,11 @@ export function AuditCommand({ eventId }: AuditCommandProps) {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* Left Column: Governance Filters (3 cols) */}
           <div className="lg:col-span-3 space-y-4">
-            <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-4">
+            <div className="surface p-4 space-y-4">
               <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                 <div className="flex items-center gap-2">
                   <Filter className="w-4 h-4 text-slate-500" />
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-800">
+                  <h3 className="eyebrow text-ink-700">
                     Governance Filters
                   </h3>
                 </div>
@@ -222,7 +225,7 @@ export function AuditCommand({ eventId }: AuditCommandProps) {
 
               {/* Action Type Filter */}
               <div className="space-y-1.5">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <label className="eyebrow">
                   Action Type
                 </label>
                 <div className="space-y-1 max-h-48 overflow-y-auto">
@@ -259,7 +262,7 @@ export function AuditCommand({ eventId }: AuditCommandProps) {
 
               {/* Actor Type Filter */}
               <div className="space-y-1.5 pt-3 border-t border-slate-100">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                <label className="eyebrow">
                   Actor Type
                 </label>
                 <div className="space-y-1">
@@ -293,7 +296,7 @@ export function AuditCommand({ eventId }: AuditCommandProps) {
           {/* Right Column: Ledger Table (9 cols) */}
           <div className="lg:col-span-9 space-y-4">
             {/* Search and Refresh bar */}
-            <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="surface p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="relative flex-1">
                 <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
@@ -318,7 +321,7 @@ export function AuditCommand({ eventId }: AuditCommandProps) {
             </div>
 
             {/* Audit Table Container */}
-            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="surface overflow-hidden">
               {loading ? (
                 <div className="py-16 text-center text-xs text-slate-400">
                   Loading authoritative audit trail...

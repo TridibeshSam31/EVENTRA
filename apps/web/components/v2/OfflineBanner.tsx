@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { WifiOff, AlertTriangle, RefreshCw } from "lucide-react";
+import { WifiOff, RefreshCw } from "lucide-react";
 import { useOnlineStatus } from "@/lib/offline/useOnlineStatus";
 
 interface OfflineBannerProps {
@@ -26,45 +26,40 @@ export function OfflineBanner({ lastDataTimestamp, className = "" }: OfflineBann
     <div
       role="alert"
       aria-live="assertive"
-      className={`bg-amber-50 border-y sm:border sm:rounded-xl border-amber-300 p-3 sm:p-4 text-amber-900 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${className}`}
+      className={`flex flex-col justify-between gap-3 rounded-xl border border-standby-300 bg-standby-50 p-3.5 text-ink-900 shadow-sm sm:flex-row sm:items-center sm:p-4 ${className}`}
     >
-      <div className="flex items-start sm:items-center gap-3">
-        <div className="p-2 rounded-lg bg-amber-200/80 text-amber-900 shrink-0 mt-0.5 sm:mt-0">
-          <WifiOff className="w-5 h-5" />
-        </div>
+      <div className="flex items-start gap-3 sm:items-center">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-standby-100 text-standby-700">
+          <WifiOff className="h-[18px] w-[18px]" />
+        </span>
         <div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-bold uppercase tracking-wider bg-amber-200 text-amber-900 px-2 py-0.5 rounded">
-              OFFLINE
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="chip border-standby-300 bg-standby-100 text-standby-800">
+              <span className="cue-light bg-standby-500 animate-cue-blink" />
+              Offline
             </span>
-            <h4 className="text-xs sm:text-sm font-bold text-amber-950">
-              Live Connection Disconnected
-            </h4>
+            <h4 className="text-[13.5px] font-semibold">You&apos;re offline — showing the last saved state</h4>
           </div>
-          <p className="text-xs text-amber-800 mt-0.5">
-            Operational mutations, approvals, and dispatches are paused to prevent state desynchronization.
+          <p className="mt-1 text-[12.5px] text-ink-600">
+            Approvals, messages and other changes are paused until you reconnect, so nothing gets out of sync.
             {formattedTime && (
-              <span className="ml-1 font-mono text-[11px] text-amber-900 font-semibold">
-                (Last authoritative data received: {formattedTime})
-              </span>
+              <span className="ml-1 font-mono text-[11px] font-semibold text-ink-800">Last update {formattedTime}</span>
             )}
           </p>
         </div>
       </div>
 
-      <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-        <span className="text-[11px] text-amber-700 italic hidden md:inline">
-          Read-only mode active
-        </span>
+      <div className="flex shrink-0 items-center gap-3 self-end sm:self-auto">
+        <span className="hidden font-mono text-[10.5px] uppercase tracking-label text-standby-700 md:inline">Read-only</span>
         <button
           onClick={() => {
             if (typeof window !== "undefined") {
               window.location.reload();
             }
           }}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-200 hover:bg-amber-300 text-amber-900 text-xs font-semibold transition"
+          className="btn-secondary h-8 px-3 text-[12px]"
         >
-          <RefreshCw className="w-3.5 h-3.5" />
+          <RefreshCw className="h-3.5 w-3.5" />
           Reconnect
         </button>
       </div>

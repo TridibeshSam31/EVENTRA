@@ -60,6 +60,67 @@ def utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+
+# ── UX v3 §6 candidate explainability helpers ───────────────────────────────
+_ESTIMATED_MARKERS = ("inferred", "estimated", "derived", "guessed", "default")
+
+
+def _estimated_fields_for(candidate: Any) -> List[str]:
+    """Fields whose values were inferred rather than reported by a source.
+
+    Uses the provider's own field_sources tags and any explicit estimated_fields list,
+    plus OSM venue attributes (capacity/rate/amenities/type are derived from the place name).
+    """
+    out: List[str] = []
+    explicit = getattr(candidate, "estimated_fields", None)
+    if isinstance(candidate, dict):
+        explicit = candidate.get("estimated_fields", explicit)
+    for f in explicit or []:
+        if f not in out:
+            out.append(f)
+    sources = getattr(candidate, "field_sources", None) or {}
+    for field_name, tag in sources.items():
+        if isinstance(tag, str) and tag.lower() in _ESTIMATED_MARKERS and field_name not in out:
+            out.append(field_name)
+    src = str(getattr(candidate, "source", "") or "").upper()
+    if "OPENSTREETMAP" in src or src.startswith("OSM"):
+        for f in ("capacity", "hourly_rate"):
+            if getattr(candidate, f, None) is not None and f not in out:
+                out.append(f)
+    return out
+
+
+def _venue_score_breakdown(service: Any, venue: Any, pax: int, city: str) -> Dict[str, float]:
+    """Components of _score_venue_candidate that are backed by data (unknowns omitted)."""
+    breakdown: Dict[str, float] = {}
+    cap = getattr(venue, "capacity", None)
+    if cap:
+        breakdown["capacity_fit"] = 0.3 if cap < pax else (1.0 if cap <= pax * 2.5 else 0.7)
+    vcity = getattr(venue, "city", None)
+    if vcity:
+        breakdown["location"] = 1.0 if city and city.lower() in vcity.lower() else 0.5
+    rate = getattr(venue, "hourly_rate", None)
+    if rate and rate > 0:
+        breakdown["price"] = 0.9
+    return breakdown
+
+
+def _venue_reasons(venue: Any, pax: int, city: str) -> List[str]:
+    reasons: List[str] = []
+    cap = getattr(venue, "capacity", None)
+    if cap:
+        reasons.append(
+            f"Listed capacity {cap} for {pax} guests" if cap >= pax else f"Listed capacity {cap} is below {pax} guests"
+        )
+    vcity = getattr(venue, "city", None)
+    if vcity and city and city.lower() in vcity.lower():
+        reasons.append(f"Located in {vcity}")
+    rate = getattr(venue, "hourly_rate", None)
+    if rate:
+        reasons.append(f"Listed rate {rate:g} per hour")
+    return reasons
+
+
 class AutonomousOperationsService:
     """Coordinates autonomous execution of operational plans and adaptive recovery."""
 
@@ -606,7 +667,8 @@ class AutonomousOperationsService:
         loc_score = 1.0 if vendor.city and city.lower() in vendor.city.lower() else 0.6
 
         # 3. Rating
-        rating_score = (vendor.rating or 4.5) / 5.0
+        # Unknown rating → neutral sub-score (same as the discovery ranking engine), not an invented 4.5★.
+        rating_score = (vendor.rating / 5.0) if vendor.rating else 0.70
 
         return round((cat_score * 0.4) + (loc_score * 0.35) + (rating_score * 0.25), 2)
 
@@ -776,6 +838,10 @@ class AutonomousOperationsService:
                         "selection_source": "AGENT_RECOMMENDATION",
                         "source": getattr(cand_venue, "source", "DATABASE") or "DATABASE",
                         "agent_run_id": agent_run_id,
+                        # UX v3 §6: the venue scorer's own components (capacity 45%, location 35%, rate 20%)
+                        "score_breakdown": _venue_score_breakdown(self, cand_venue, pax, city),
+                        "reasons": _venue_reasons(cand_venue, pax, city),
+                        "estimated_fields": _estimated_fields_for(cand_venue),
                     },
                 )
                 self.db.add(sl_entry)
@@ -1061,11 +1127,15 @@ class AutonomousOperationsService:
         # Requirement 4 & 5: Persist multiple candidates as RECOMMENDED (never auto-select top_matches[0])
         result_items: List[Dict[str, Any]] = []
         for rank, item in enumerate(candidates_pool[:5], start=1):
+            score_breakdown: Dict[str, float] = {}
+            evidence_reasons: List[str] = []
             if hasattr(item, "candidate"):
                 cand = item.candidate
                 score = getattr(item, "score", None)
                 qualification = getattr(item, "qualification", None)
                 qualification_reason = (getattr(item, "reasons", None) or [None])[0]
+                score_breakdown = dict(getattr(item, "score_breakdown", None) or {})
+                evidence_reasons = list(getattr(item, "reasons", None) or [])
             else:
                 # Cached vendor from an earlier discovery: not re-qualified for this event.
                 cand = item
@@ -1100,7 +1170,8 @@ class AutonomousOperationsService:
                     contact_phone=cand_phone,
                     contact_email=getattr(cand, "email", None),
                     website=getattr(cand, "website", None),
-                    base_cost=float(pax * 450) if "cater" in cat_lower else (getattr(cand, "base_cost", None) or 45000.0),
+                    # Never persist an invented price: unknown cost stays unknown until a quote arrives.
+                    base_cost=getattr(cand, "base_cost", None),
                     rating=getattr(cand, "rating", None),
                     review_count=getattr(cand, "review_count", None),
                     status="ACTIVE",
@@ -1139,6 +1210,10 @@ class AutonomousOperationsService:
                         "qualification": qualification,
                         "qualification_reason": qualification_reason,
                         "agent_run_id": agent_run_id,
+                        # UX v3 §6: explainability + honesty about inferred values
+                        "score_breakdown": score_breakdown,
+                        "reasons": evidence_reasons,
+                        "estimated_fields": _estimated_fields_for(cand),
                     },
                 )
                 self.db.add(sl_entry)
@@ -1611,7 +1686,11 @@ class AutonomousOperationsService:
         # Budget
         budget_items = self.db.query(BudgetItem).filter(BudgetItem.event_id == event.id).all()
         total_budget = float(event.total_budget or 0)
-        committed_budget = sum(float(b.estimated_amount or 0) for b in budget_items)
+        # One definition everywhere (services/budget_commitments.py): confirmed agreed cost.
+        # Estimates are plans, not commitments — they are reported separately.
+        from app.services.budget_commitments import committed_total
+        committed_budget = float(committed_total(self.db, event.id))
+        estimated_budget = sum(float(b.estimated_amount or 0) for b in budget_items)
 
         # Activity Feed from AuditRecords
         audit_records = (
@@ -1751,6 +1830,7 @@ class AutonomousOperationsService:
             "state": event.state,
             "total_budget": total_budget,
             "committed_budget": committed_budget,
+            "estimated_budget": estimated_budget,
             "currency": event.currency,
             "live_state": live_state.model_dump(mode="json"),
             "agent": agent_data,
